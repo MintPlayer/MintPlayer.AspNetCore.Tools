@@ -18,7 +18,7 @@ jobs:
     name: cherry-pick
     runs-on: ubuntu-latest
     # Only cherry-pick to release if there's a specified label
-    if: ${{ contains(github.event.pull_request.labels.*.name, 'dotnet-' + matrix.version.major) && github.event.pull_request.merged == true }}
+    if: ${{ contains(github.event.pull_request.labels.*.name, format('dotnet-{0}', matrix.version.major)) && github.event.pull_request.merged == true }}
 
     steps:
     - name: Checkout
