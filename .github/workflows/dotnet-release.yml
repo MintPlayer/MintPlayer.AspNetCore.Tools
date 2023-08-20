@@ -18,7 +18,7 @@ jobs:
     name: cherry-pick
     runs-on: ubuntu-latest
     # Only cherry-pick to release if there's a specified label
-    if: ${{ contains(github.event.pull_request.labels.*.name, format('dotnet-{0}', matrix.version.major)) && github.event.pull_request.merged == true }}
+    #if: ${{ contains(github.event.pull_request.labels.*.name, format('dotnet-{0}', matrix.version.major)) && github.event.pull_request.merged == true }}
 
     steps:
     - name: Checkout
@@ -28,6 +28,7 @@ jobs:
         
     - name: Create release/dotnet-${{ matrix.version.major }} branch
       uses: peterjgrainger/action-create-branch@v2.2.0
+      if: ${{ contains(github.event.pull_request.labels.*.name, format('dotnet-{0}', matrix.version.major)) && github.event.pull_request.merged == true }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -35,6 +36,7 @@ jobs:
         
     - name: Cherry pick into release/dotnet-${{ matrix.version.major }}
       uses: carloscastrojumo/github-cherry-pick-action@v1.0.1
+      if: ${{ contains(github.event.pull_request.labels.*.name, format('dotnet-{0}', matrix.version.major)) && github.event.pull_request.merged == true }}
       with:
         branch: release/dotnet-${{ matrix.version.major }}
         labels: |
