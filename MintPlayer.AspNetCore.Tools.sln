@@ -1,0 +1,84 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.7.34003.232
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Hsts", "Hsts", "{CA24D049-8EBA-4DC7-8DE5-DF3BC8F4596A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.Hsts", "Hsts\MintPlayer.AspNetCore.Hsts\MintPlayer.AspNetCore.Hsts.csproj", "{6E98C52F-13DF-486D-8E98-66ADC3882586}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SitemapXml", "SitemapXml", "{40F15A65-0ACF-4AB2-87B6-ABF4FCF3BBCC}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.SitemapXml", "SitemapXml\MintPlayer.AspNetCore.SitemapXml\MintPlayer.AspNetCore.SitemapXml.csproj", "{8A4F737A-0EED-4C28-BED2-2731C7E5CABC}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "OpenSearch", "OpenSearch", "{538E2458-E3B6-4E52-A132-C5FEA3D91B38}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.OpenSearch", "OpenSearch\MintPlayer.AspNetCore.OpenSearch\MintPlayer.AspNetCore.OpenSearch.csproj", "{3BE5EDEC-5801-4C88-9D65-8CAA6F27B8BD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "MustChangePassword", "MustChangePassword", "{B63140AC-F6FE-49E8-970F-C858414CEA19}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.MustChangePassword", "MustChangePassword\MintPlayer.AspNetCore.MustChangePassword\MintPlayer.AspNetCore.MustChangePassword.csproj", "{E0D326CE-D65C-4FAA-8A01-8AC946CF5B9D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SubDirectoryViews", "SubDirectoryViews", "{1AE9B0CE-133D-4DEA-A08F-71D987B8D426}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.SubDirectoryViews", "SubDirectoryViews\MintPlayer.AspNetCore.SubDirectoryViews\MintPlayer.AspNetCore.SubDirectoryViews.csproj", "{29A47F35-4BCF-4567-B3FC-C5C8734754A8}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "NoSniff", "NoSniff", "{85074C78-53FB-4F2F-B462-E0C148116699}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.NoSniff", "NoSniff\MintPlayer.AspNetCore.NoSniff\MintPlayer.AspNetCore.NoSniff.csproj", "{C4099A51-61FD-4F25-90C4-3E3ECDCC314B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ChangePassword", "ChangePassword", "{01E761AB-25E8-4937-94CE-ECDAC617A4A7}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.ChangePassword", "ChangePassword\MintPlayer.AspNetCore.ChangePassword\MintPlayer.AspNetCore.ChangePassword.csproj", "{94F201E9-8575-4B52-8B3B-E4FA8F67EFC1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6E98C52F-13DF-486D-8E98-66ADC3882586}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6E98C52F-13DF-486D-8E98-66ADC3882586}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6E98C52F-13DF-486D-8E98-66ADC3882586}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6E98C52F-13DF-486D-8E98-66ADC3882586}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8A4F737A-0EED-4C28-BED2-2731C7E5CABC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8A4F737A-0EED-4C28-BED2-2731C7E5CABC}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8A4F737A-0EED-4C28-BED2-2731C7E5CABC}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8A4F737A-0EED-4C28-BED2-2731C7E5CABC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3BE5EDEC-5801-4C88-9D65-8CAA6F27B8BD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3BE5EDEC-5801-4C88-9D65-8CAA6F27B8BD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3BE5EDEC-5801-4C88-9D65-8CAA6F27B8BD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3BE5EDEC-5801-4C88-9D65-8CAA6F27B8BD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E0D326CE-D65C-4FAA-8A01-8AC946CF5B9D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E0D326CE-D65C-4FAA-8A01-8AC946CF5B9D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E0D326CE-D65C-4FAA-8A01-8AC946CF5B9D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E0D326CE-D65C-4FAA-8A01-8AC946CF5B9D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{29A47F35-4BCF-4567-B3FC-C5C8734754A8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{29A47F35-4BCF-4567-B3FC-C5C8734754A8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{29A47F35-4BCF-4567-B3FC-C5C8734754A8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{29A47F35-4BCF-4567-B3FC-C5C8734754A8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C4099A51-61FD-4F25-90C4-3E3ECDCC314B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C4099A51-61FD-4F25-90C4-3E3ECDCC314B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C4099A51-61FD-4F25-90C4-3E3ECDCC314B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C4099A51-61FD-4F25-90C4-3E3ECDCC314B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{94F201E9-8575-4B52-8B3B-E4FA8F67EFC1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{94F201E9-8575-4B52-8B3B-E4FA8F67EFC1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{94F201E9-8575-4B52-8B3B-E4FA8F67EFC1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{94F201E9-8575-4B52-8B3B-E4FA8F67EFC1}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{6E98C52F-13DF-486D-8E98-66ADC3882586} = {CA24D049-8EBA-4DC7-8DE5-DF3BC8F4596A}
+		{8A4F737A-0EED-4C28-BED2-2731C7E5CABC} = {40F15A65-0ACF-4AB2-87B6-ABF4FCF3BBCC}
+		{3BE5EDEC-5801-4C88-9D65-8CAA6F27B8BD} = {538E2458-E3B6-4E52-A132-C5FEA3D91B38}
+		{E0D326CE-D65C-4FAA-8A01-8AC946CF5B9D} = {B63140AC-F6FE-49E8-970F-C858414CEA19}
+		{29A47F35-4BCF-4567-B3FC-C5C8734754A8} = {1AE9B0CE-133D-4DEA-A08F-71D987B8D426}
+		{C4099A51-61FD-4F25-90C4-3E3ECDCC314B} = {85074C78-53FB-4F2F-B462-E0C148116699}
+		{94F201E9-8575-4B52-8B3B-E4FA8F67EFC1} = {01E761AB-25E8-4937-94CE-ECDAC617A4A7}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {465C5C27-738F-41AB-807F-FA69F9B20B7F}
+	EndGlobalSection
+EndGlobal
