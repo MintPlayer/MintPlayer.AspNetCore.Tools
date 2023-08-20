@@ -41,8 +41,6 @@ jobs:
         branch: release/dotnet-${{ matrix.version.major }}
         labels: |
           cherry-pick
-        title: '[cherry-pick] #{old_title}'
-        body: 'Cherry picking #{old_pull_request_id} onto release/dotnet-#{matrix.version.major}'
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
