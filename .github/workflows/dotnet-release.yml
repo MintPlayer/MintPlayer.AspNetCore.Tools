@@ -12,7 +12,8 @@ jobs:
     strategy:
       matrix:
         version: [
-          { major: 6, sdk: "6.0.301" }
+          { major: 6, sdk: "6.0.301" },
+          { major: 7, sdk: "7.0.400" }
         ]
 
     name: cherry-pick
