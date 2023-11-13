@@ -1,13 +1,13 @@
-# name: dotnet-release
+name: dotnet-release
 
-# on:
-#   pull_request:
-#     branches:
-#       - master
-#     types: ["closed"]
+on:
+  pull_request:
+    branches:
+      - master
+    types: ["closed"]
 
-# jobs:
-#   cherry_pick:
+jobs:
+  cherry_pick:
 
 #     strategy:
 #       matrix:
@@ -17,16 +17,16 @@
 #           { major: 8, sdk: "8.0.100-rc.2.23502.2" }
 #         ]
 
-#     name: cherry-pick
-#     runs-on: ubuntu-latest
-#     # Only cherry-pick to release if there's a specified label
-#     #if: ${{ contains(github.event.pull_request.labels.*.name, format('dotnet-{0}', matrix.version.major)) && github.event.pull_request.merged == true }}
+    name: cherry-pick
+    runs-on: ubuntu-latest
+    # Only cherry-pick to release if there's a specified label
+    #if: ${{ contains(github.event.pull_request.labels.*.name, format('dotnet-{0}', matrix.version.major)) && github.event.pull_request.merged == true }}
 
-#     steps:
-#     - name: Checkout
-#       uses: actions/checkout@v2
-#       with:
-#         fetch-depth: 0
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
         
 #     - name: Create release/dotnet-${{ matrix.version.major }} branch
 #       uses: peterjgrainger/action-create-branch@v2.2.0
