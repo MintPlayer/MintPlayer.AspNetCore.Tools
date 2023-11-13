@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "MintPlayer.AspNetCore.OpenSearch.Abstractions": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:51039;http://localhost:51040"
+    }
+  }
+}

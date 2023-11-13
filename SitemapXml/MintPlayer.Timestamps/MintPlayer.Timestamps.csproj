@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFramework>net7.0</TargetFramework>
@@ -7,19 +7,19 @@
 		<OutputType>Library</OutputType>
 
 		<IsPackable>true</IsPackable>
-		<PackageId>MintPlayer.AspNetCore.OpenSearch</PackageId>
+		<PackageId>MintPlayer.Timestamps</PackageId>
 		<Version>7.0.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
-		<Description>This package allows you to easily add an OpenSearch engine to your website</Description>
+		<Description>Interfaces for timestamps on DTO's</Description>
 		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-		<PackageTags>ASP.NET Core, OpenSearch</PackageTags>
-		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/OpenSearch/MintPlayer.AspNetCore.OpenSearch</PackageProjectUrl>
+		<PackageTags>ASP.NET Core, XML-sitemap</PackageTags>
+		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/SitemapXml/MintPlayer.Timestamps</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools</RepositoryUrl>
 		<RepositoryType>Git</RepositoryType>
 		<Authors>Pieterjan De Clippel</Authors>
 		<Company>MintPlayer</Company>
-		<Product>MintPlayer.AspNetCore.OpenSearch</Product>
+		<Product>MintPlayer.Timestamps</Product>
 		<AllowedOutputExtensionsInPackageBuildOutputFolder>$(AllowedOutputExtensionsInPackageBuildOutputFolder);.pdb</AllowedOutputExtensionsInPackageBuildOutputFolder>
 	</PropertyGroup>
 
@@ -34,9 +34,5 @@
 	<PropertyGroup Condition="'$(Configuration)'=='Release'">
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 	</PropertyGroup>
-
-	<ItemGroup>
-	  <ProjectReference Include="..\MintPlayer.AspNetCore.OpenSearch.Abstractions\MintPlayer.AspNetCore.OpenSearch.Abstractions.csproj" />
-	</ItemGroup>
 
 </Project>

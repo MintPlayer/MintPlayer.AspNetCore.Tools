@@ -7,14 +7,14 @@
 		<OutputType>Library</OutputType>
 
 		<IsPackable>true</IsPackable>
-		<PackageId>MintPlayer.AspNetCore.OpenSearch</PackageId>
+		<PackageId>MintPlayer.AspNetCore.OpenSearch.Abstractions</PackageId>
 		<Version>7.0.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
-		<Description>This package allows you to easily add an OpenSearch engine to your website</Description>
+		<Description>This package contains the interfaces for OpenSearch</Description>
 		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
 		<PackageTags>ASP.NET Core, OpenSearch</PackageTags>
-		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/OpenSearch/MintPlayer.AspNetCore.OpenSearch</PackageProjectUrl>
+		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/OpenSearch/MintPlayer.AspNetCore.OpenSearch.Abstractions</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools</RepositoryUrl>
 		<RepositoryType>Git</RepositoryType>
 		<Authors>Pieterjan De Clippel</Authors>
@@ -34,9 +34,5 @@
 	<PropertyGroup Condition="'$(Configuration)'=='Release'">
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 	</PropertyGroup>
-
-	<ItemGroup>
-	  <ProjectReference Include="..\MintPlayer.AspNetCore.OpenSearch.Abstractions\MintPlayer.AspNetCore.OpenSearch.Abstractions.csproj" />
-	</ItemGroup>
 
 </Project>

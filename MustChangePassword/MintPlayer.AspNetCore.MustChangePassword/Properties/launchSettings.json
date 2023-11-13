@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "MintPlayer.AspNetCore.MustChangePassword": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:60597;http://localhost:60598"
+    }
+  }
+}
