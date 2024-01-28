@@ -33,11 +33,15 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MintPlayer.AspNetCore.Chang
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MintPlayer.AspNetCore.MustChangePassword.Abstractions", "MustChangePassword\MintPlayer.AspNetCore.MustChangePassword.Abstractions\MintPlayer.AspNetCore.MustChangePassword.Abstractions.csproj", "{D3202404-A752-478B-A29A-871D3239CBED}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.OpenSearch.Abstractions", "OpenSearch\MintPlayer.AspNetCore.OpenSearch.Abstractions\MintPlayer.AspNetCore.OpenSearch.Abstractions.csproj", "{B9E4A760-C4DC-45FA-A8D3-E4171A40CC7A}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MintPlayer.AspNetCore.OpenSearch.Abstractions", "OpenSearch\MintPlayer.AspNetCore.OpenSearch.Abstractions\MintPlayer.AspNetCore.OpenSearch.Abstractions.csproj", "{B9E4A760-C4DC-45FA-A8D3-E4171A40CC7A}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.Timestamps", "SitemapXml\MintPlayer.Timestamps\MintPlayer.Timestamps.csproj", "{B4BCDEAC-6339-4CBF-8859-1B8CB54668CF}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MintPlayer.Timestamps", "SitemapXml\MintPlayer.Timestamps\MintPlayer.Timestamps.csproj", "{B4BCDEAC-6339-4CBF-8859-1B8CB54668CF}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.SitemapXml.Abstractions", "SitemapXml\MintPlayer.AspNetCore.SitemapXml.Abstractions\MintPlayer.AspNetCore.SitemapXml.Abstractions.csproj", "{623C80E4-8B55-4B84-A525-D5BB55B8CBB7}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MintPlayer.AspNetCore.SitemapXml.Abstractions", "SitemapXml\MintPlayer.AspNetCore.SitemapXml.Abstractions\MintPlayer.AspNetCore.SitemapXml.Abstractions.csproj", "{623C80E4-8B55-4B84-A525-D5BB55B8CBB7}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Logging", "Logging", "{06C6BE38-4510-461B-9519-0C472D627F96}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.LoggerProviders", "Logging\MintPlayer.AspNetCore.LoggerProviders\MintPlayer.AspNetCore.LoggerProviders.csproj", "{4645C463-F54E-46D5-B408-96EA1D553292}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -89,6 +93,10 @@ Global
 		{623C80E4-8B55-4B84-A525-D5BB55B8CBB7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{623C80E4-8B55-4B84-A525-D5BB55B8CBB7}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{623C80E4-8B55-4B84-A525-D5BB55B8CBB7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4645C463-F54E-46D5-B408-96EA1D553292}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4645C463-F54E-46D5-B408-96EA1D553292}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4645C463-F54E-46D5-B408-96EA1D553292}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4645C463-F54E-46D5-B408-96EA1D553292}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -105,6 +113,7 @@ Global
 		{B9E4A760-C4DC-45FA-A8D3-E4171A40CC7A} = {538E2458-E3B6-4E52-A132-C5FEA3D91B38}
 		{B4BCDEAC-6339-4CBF-8859-1B8CB54668CF} = {40F15A65-0ACF-4AB2-87B6-ABF4FCF3BBCC}
 		{623C80E4-8B55-4B84-A525-D5BB55B8CBB7} = {40F15A65-0ACF-4AB2-87B6-ABF4FCF3BBCC}
+		{4645C463-F54E-46D5-B408-96EA1D553292} = {06C6BE38-4510-461B-9519-0C472D627F96}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {465C5C27-738F-41AB-807F-FA69F9B20B7F}
