@@ -4,7 +4,7 @@
     <title></title>
     <script type="text/javascript">
         function pay() {
-            const request = new PaymentRequest(
+            const createRequest = () => new PaymentRequest(
                 [
                     {
                         supportedMethods: "https://localhost:7208/pay",
@@ -26,7 +26,10 @@
                     ],
                 },
             );
-            request.show().then(function (data) { console.log("Data", data); });
+
+            createRequest().canMakePayment().then(can => {
+                createRequest().show().then(function (data) { console.log("Data", data); });
+            });
         }
     </script>
 </head>
