@@ -1,0 +1,36 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title></title>
+    <script type="text/javascript">
+        function pay() {
+            const request = new PaymentRequest(
+                [
+                    {
+                        supportedMethods: "https://localhost:7208/pay",
+                        // supportedMethods: "https://play.google.com/billing",
+                        data: {}
+                    },
+                ],
+                {
+                    total: { label: 'Donation', amount: { currency: 'USD', value: '55.00' } },
+                    displayItems: [
+                        {
+                            label: 'Original donation amount',
+                            amount: { currency: 'USD', value: '65.00' },
+                        },
+                        {
+                            label: 'Friends and family discount',
+                            amount: { currency: 'USD', value: '-10.00' },
+                        },
+                    ],
+                },
+            );
+            request.show().then(function (data) { console.log("Data", data); });
+        }
+    </script>
+</head>
+<body>
+    <button onclick="pay()">Start payment</button>
+</body>
+</html>

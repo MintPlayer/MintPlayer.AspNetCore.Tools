@@ -41,7 +41,11 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MintPlayer.AspNetCore.Sitem
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Logging", "Logging", "{06C6BE38-4510-461B-9519-0C472D627F96}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.LoggerProviders", "Logging\MintPlayer.AspNetCore.LoggerProviders\MintPlayer.AspNetCore.LoggerProviders.csproj", "{4645C463-F54E-46D5-B408-96EA1D553292}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MintPlayer.AspNetCore.LoggerProviders", "Logging\MintPlayer.AspNetCore.LoggerProviders\MintPlayer.AspNetCore.LoggerProviders.csproj", "{4645C463-F54E-46D5-B408-96EA1D553292}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "PaymentRequest", "PaymentRequest", "{01FF37AC-35A8-4891-8A8B-3449751EFAC0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.PaymentRequest", "PaymentRequest\MintPlayer.AspNetCore.PaymentRequest\MintPlayer.AspNetCore.PaymentRequest.csproj", "{F8AEEBDC-ACAD-4B72-877E-6F5266F75F17}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -97,6 +101,10 @@ Global
 		{4645C463-F54E-46D5-B408-96EA1D553292}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4645C463-F54E-46D5-B408-96EA1D553292}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4645C463-F54E-46D5-B408-96EA1D553292}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F8AEEBDC-ACAD-4B72-877E-6F5266F75F17}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F8AEEBDC-ACAD-4B72-877E-6F5266F75F17}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F8AEEBDC-ACAD-4B72-877E-6F5266F75F17}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F8AEEBDC-ACAD-4B72-877E-6F5266F75F17}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -114,6 +122,7 @@ Global
 		{B4BCDEAC-6339-4CBF-8859-1B8CB54668CF} = {40F15A65-0ACF-4AB2-87B6-ABF4FCF3BBCC}
 		{623C80E4-8B55-4B84-A525-D5BB55B8CBB7} = {40F15A65-0ACF-4AB2-87B6-ABF4FCF3BBCC}
 		{4645C463-F54E-46D5-B408-96EA1D553292} = {06C6BE38-4510-461B-9519-0C472D627F96}
+		{F8AEEBDC-ACAD-4B72-877E-6F5266F75F17} = {01FF37AC-35A8-4891-8A8B-3449751EFAC0}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {465C5C27-738F-41AB-807F-FA69F9B20B7F}

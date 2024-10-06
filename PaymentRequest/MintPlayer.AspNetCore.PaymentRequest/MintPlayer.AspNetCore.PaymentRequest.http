@@ -1,0 +1,6 @@
+@MintPlayer.AspNetCore.PaymentRequest_HostAddress = http://localhost:5027
+
+GET {{MintPlayer.AspNetCore.PaymentRequest_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
