@@ -19,7 +19,7 @@ app.MapMethods("/pay", [HttpMethods.Head], async (context) =>
 {
     context.Response.Headers["Link"] = "</pay/payment-manifest.json>; rel=\"payment-method-manifest\"";
 });
-app.MapGet("/pay/payment-manifest.json", async (context) =>
+app.MapMethods("/pay/payment-manifest.json", [HttpMethods.Head, HttpMethods.Get, HttpMethods.Post, HttpMethods.Put, HttpMethods.Patch, HttpMethods.Connect, HttpMethods.Options, HttpMethods.Trace, HttpMethods.Delete], async (context) =>
 {
     await context.Response.WriteAsJsonAsync(new
     {
@@ -33,7 +33,7 @@ app.MapGet("/pay/payment-manifest.json", async (context) =>
         }
     });
 });
-app.MapGet("/manifest.json", async (context) =>
+app.MapMethods("/manifest.json", [HttpMethods.Head, HttpMethods.Get, HttpMethods.Post, HttpMethods.Put, HttpMethods.Patch, HttpMethods.Connect, HttpMethods.Options, HttpMethods.Trace, HttpMethods.Delete], async (context) =>
 {
     await context.Response.WriteAsJsonAsync(new
     {
@@ -52,7 +52,7 @@ app.MapGet("/manifest.json", async (context) =>
             },
         },
         serviceworker = new {
-            src = "worker.js",
+            src = "/worker.js",
             scope = "/",
             use_cache = false,
         }
