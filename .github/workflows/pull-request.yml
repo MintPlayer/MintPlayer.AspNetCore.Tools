@@ -1,20 +1,21 @@
-name: publish-release
+name: pull-request
 
 on:
-  push:
-    branches:
-      - 'master'
-      # - 'release/**'
+  pull_request:
+    branches: [ master ]
 
 jobs:
   build:
-    name: publish-release
+
+    name: pull-request
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout
       uses: actions/checkout@v4
       
+    # In a pull request we must make sure both the angular/dotnet library build.
+
     - name: Setup .NET Core
       uses: actions/setup-dotnet@v4
       with:
@@ -34,14 +35,4 @@ jobs:
       
     - name: Test
       run: dotnet test --no-restore --verbosity normal
-
-    - name: Pack
-      run: dotnet pack --no-build --configuration Release /p:ContinuousIntegrationBuild=true
-
-    - name: PushNuget
-      run: dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.PUBLISH_TO_NUGET_ORG }} --skip-duplicate
-
-    - name: PushGithub
-      run: dotnet nuget push **/*.nupkg --no-symbols --skip-duplicate
-      env:
-        NUGET_AUTH_TOKEN: ${{ github.token }}
+      
