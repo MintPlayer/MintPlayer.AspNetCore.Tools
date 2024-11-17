@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc.Formatters;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using MintPlayer.AspNetCore.SitemapXml.Abstractions.Data;
 using MintPlayer.AspNetCore.SitemapXml.Options;
 using System.Xml;
@@ -41,9 +42,9 @@ internal class XmlSerializerOutputFormatter : Microsoft.AspNetCore.Mvc.Formatter
         xmlWriterSettings.CloseOutput = false;
 
         var xmlWriter = XmlWriter.Create(writer, xmlWriterSettings);
-        if (context.HttpContext.RequestServices.GetService<SitemapXmlOptions>() is SitemapXmlOptions options
-            && !string.IsNullOrEmpty(options?.StylesheetUrl))
-               xmlWriter.WriteProcessingInstruction("xml-stylesheet", $@"type=""text/xsl"" href=""{options.StylesheetUrl}""");
+        if (context.HttpContext.RequestServices.GetService<IOptions<SitemapXmlOptions>>() is IOptions<SitemapXmlOptions> options
+            && !string.IsNullOrEmpty(options?.Value?.StylesheetUrl))
+               xmlWriter.WriteProcessingInstruction("xml-stylesheet", $@"type=""text/xsl"" href=""{options.Value.StylesheetUrl}""");
         
         return xmlWriter;
     }
