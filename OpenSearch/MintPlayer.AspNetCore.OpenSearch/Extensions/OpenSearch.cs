@@ -2,96 +2,104 @@
 using MintPlayer.AspNetCore.OpenSearch.Abstractions;
 using MintPlayer.AspNetCore.OpenSearch.Extensions;
 using System.Diagnostics;
+using System.Reflection;
 
 namespace MintPlayer.AspNetCore.OpenSearch
 {
     public static class OpenSearchExtensions
     {
+        private static Lazy<Type> formatterType = new(() => typeof(Formatters.XmlSerializerOutputFormatter));
+
         public static IServiceCollection AddOpenSearch<TService>(this IServiceCollection services) where TService : class, IOpenSearchService
         {
             services.AddControllersWithViews()
                 .AddMvcOptions(mvc_options =>
                 {
                     mvc_options.RespectBrowserAcceptHeader = true;
-                    mvc_options.OutputFormatters.Insert(0, new Formatters.XmlSerializerOutputFormatter());
+                    if (!mvc_options.OutputFormatters.Any(f => formatterType.Value.IsInstanceOfType(f)))
+                        mvc_options.OutputFormatters.Insert(0, new Formatters.XmlSerializerOutputFormatter());
                 });
             return services.AddScoped<IOpenSearchService, TService>();
         }
 
-        public static IApplicationBuilder UseOpenSearch(this IApplicationBuilder app) 
+        public static IServiceCollection AddOpenSearch<TService>(this IServiceCollection services, Action<OpenSearchOptions> options) where TService : class, IOpenSearchService
+        {
+            services.AddOpenSearch<TService>();
+            services.Configure<OpenSearchOptions>(options);
+            return services;
+        }
+
+        public static IEndpointRouteBuilder MapOpenSearch(this IEndpointRouteBuilder routes)
         {
             #region Compile opensearch options
-            var opts = app.ApplicationServices.GetService<IOptions<OpenSearchOptions>>();
-            var options = opts.Value;
-
-            Debug.WriteLine(options.Description);
+            var opts = routes.ServiceProvider.GetService<IOptions<OpenSearchOptions>>();
+            var options = opts?.Value;
+            if (options == null) throw new InvalidOperationException("OpenSearchOptions not initialized. Did you forget to call AddOpenSearch?");
             #endregion
 
-            if (options == null) throw new Exception("tarara");
+            var osdxEndpoint = options.OsdxEndpoint.NullIfEmpty() ?? "/opensearch.xml";
+            var suggestUrl = options.SuggestUrl.NullIfEmpty() ?? "/suggest";
+            var searchUrl = options.SearchUrl.NullIfEmpty() ?? "/search";
+            var shortName = options.ShortName.NullIfEmpty() ?? Assembly.GetExecutingAssembly()?.FullName ?? "Website";
+            var description = options.Description.NullIfEmpty() ?? $"Search {shortName}";
 
             #region Check OSDX endpoint format
-            if (!options.OsdxEndpoint.StartsWith('/'))
+            if (!osdxEndpoint.StartsWith('/'))
                 throw new Exception(@"OpenSearch endpoint must start with ""/""");
             #endregion
 
-            //#region Get Service instance
-            //var service = app.ApplicationServices.GetService<IOpenSearchService>();
-            //#endregion
-
             #region Handle routes specific to this package
-            var builder = new RouteBuilder(app);
-            builder
-                .MapVerb("GET", options.OsdxEndpoint, async (context) =>
+            routes.MapGet(osdxEndpoint, async (context) =>
+            {
+                #region Return OSDX
+                context.Response.ContentType = "application/opensearchdescription+xml";
+                context.Response.Headers["Content-Disposition"] = $"attachment; filename={shortName}.osdx";
+                await context.WriteModelAsync(new Data.OpenSearchDescription
                 {
-                    #region Return OSDX
-                    //context.Response.ContentType = "application/opensearchdescription+xml; charset=utf-8";
-                    context.Response.ContentType = "application/opensearchdescription+xml";
-                    context.Response.Headers["Content-Disposition"] = $"attachment; filename={options.ShortName}.osdx";
-                    await context.WriteModelAsync(new Data.OpenSearchDescription
+                    ShortName = shortName,
+                    Description = description,
+                    InputEncoding = "UTF-8",
+                    Image = new Data.Image
                     {
-                        ShortName = options.ShortName,
-                        Description = options.Description,
-                        InputEncoding = "UTF-8",
-                        Image = new Data.Image
-                        {
-                            Width = 16,
-                            Height = 16,
-                            Url = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase}{options.ImageUrl}",
-                            Type = "image/png"
-                        },
-                        Urls = new[] {
-                            new Data.Url { Type = "text/html", Method = "GET", Template = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase}{options.SearchUrl}" },
-                            new Data.Url { Type = "application/x-suggestions+json", Method = "GET", Template = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase}{options.SuggestUrl}" },
-                            new Data.Url { Type = "application/opensearchdescription+xml", Relation = "self", Template = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase}{options.OsdxEndpoint}" }
-                        }.ToList(),
-                        Contact = options.Contact,
-                        SearchForm = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase}/"
-                    });
-                    #endregion
-                })
-                .MapVerb("GET", options.SuggestUrl, async (context) =>
-                {
-                    var service = context.RequestServices.GetRequiredService<IOpenSearchService>();
-                    var searchTerms = (string?)context.GetRouteValue("searchTerms");
-                    var suggestions = await service.ProvideSuggestions(searchTerms);
-                    context.Response.Headers["Content-Type"] = "application/json";
-                    await context.WriteModelAsync(new object[]
-                    {
-                        searchTerms,
-                        suggestions.ToArray()
-                    });
-                })
-                .MapVerb("GET", options.SearchUrl, async (context) =>
-                {
-                    var service = context.RequestServices.GetRequiredService<IOpenSearchService>();
-                    var searchTerms = (string?)context.GetRouteValue("searchTerms");
-                    var result = await service.PerformSearch(searchTerms);
-                    context.Response.Redirect(result.Url);
+                        Width = 16,
+                        Height = 16,
+                        Url = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase}{options.ImageUrl}",
+                        Type = "image/png"
+                    },
+                    Urls = new[] {
+                        new Data.Url { Type = "text/html", Method = "GET", Template = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase}{searchUrl}" },
+                        new Data.Url { Type = "application/x-suggestions+json", Method = "GET", Template = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase}{suggestUrl}" },
+                        new Data.Url { Type = "application/opensearchdescription+xml", Relation = "self", Template = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase}{osdxEndpoint}" }
+                    }.ToList(),
+                    Contact = options.Contact,
+                    SearchForm = $"{context.Request.Scheme}://{context.Request.Host.Value}{context.Request.PathBase}/"
                 });
-            var router = builder.Build();
+                #endregion
+            });
+
+            routes.MapGet(suggestUrl, async (context) =>
+            {
+                var service = context.RequestServices.GetRequiredService<IOpenSearchService>();
+                var searchTerms = (string?)context.GetRouteValue("searchTerms");
+                var suggestions = await service.ProvideSuggestions(searchTerms);
+                context.Response.Headers["Content-Type"] = "application/json";
+                await context.WriteModelAsync(new object[]
+                {
+                    searchTerms,
+                    suggestions.ToArray()
+                });
+            });
+
+            routes.MapGet(searchUrl, async (context) =>
+            {
+                var service = context.RequestServices.GetRequiredService<IOpenSearchService>();
+                var searchTerms = (string?)context.GetRouteValue("searchTerms");
+                var result = await service.PerformSearch(searchTerms);
+                context.Response.Redirect(result.Url);
+            });
             #endregion
 
-            return app.UseRouter(router);
+            return routes;
         }
     }
 }
