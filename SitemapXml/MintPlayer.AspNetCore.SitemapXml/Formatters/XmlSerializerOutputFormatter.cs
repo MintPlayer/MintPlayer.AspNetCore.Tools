@@ -1,4 +1,7 @@
-﻿using MintPlayer.AspNetCore.SitemapXml.Abstractions.Data;
+﻿using Microsoft.AspNetCore.Mvc.Formatters;
+using Microsoft.Extensions.DependencyInjection;
+using MintPlayer.AspNetCore.SitemapXml.Abstractions.Data;
+using MintPlayer.AspNetCore.SitemapXml.Options;
 using System.Xml;
 using System.Xml.Serialization;
 
@@ -7,10 +10,8 @@ namespace MintPlayer.AspNetCore.SitemapXml.Formatters;
 /// <summary>This formatter adds an XML stylesheet reference to each application/xml response</summary>
 internal class XmlSerializerOutputFormatter : Microsoft.AspNetCore.Mvc.Formatters.XmlSerializerOutputFormatter
 {
-    private string stylesheetUrl;
-    public XmlSerializerOutputFormatter(string stylesheetUrl)
+    public XmlSerializerOutputFormatter()
     {
-        this.stylesheetUrl = stylesheetUrl;
         this.WriterSettings.OmitXmlDeclaration = false;
         this.SupportedMediaTypes.Clear();
         this.SupportedMediaTypes.Add("text/xml");
@@ -25,24 +26,25 @@ internal class XmlSerializerOutputFormatter : Microsoft.AspNetCore.Mvc.Formatter
         xmlSerializer.Serialize(xmlWriter, value, ns);
     }
 
-    public override XmlWriter CreateXmlWriter(TextWriter writer, XmlWriterSettings xmlWriterSettings)
+    public override XmlWriter CreateXmlWriter(OutputFormatterWriteContext context, TextWriter writer, XmlWriterSettings xmlWriterSettings)
     {
         if (writer == null)
-        {
             throw new ArgumentNullException(nameof(writer));
-        }
 
         if (xmlWriterSettings == null)
-        {
             throw new ArgumentNullException(nameof(xmlWriterSettings));
-        }
+
+        if (context.HttpContext == null)
+            throw new InvalidOperationException($"The {nameof(XmlSerializerOutputFormatter)} can only be used in an HTTP context");
 
         // We always close the TextWriter, so the XmlWriter shouldn't.
         xmlWriterSettings.CloseOutput = false;
 
         var xmlWriter = XmlWriter.Create(writer, xmlWriterSettings);
-        if (stylesheetUrl != string.Empty)
-            xmlWriter.WriteProcessingInstruction("xml-stylesheet", $@"type=""text/xsl"" href=""{stylesheetUrl}""");
+        if (context.HttpContext.RequestServices.GetService<SitemapXmlOptions>() is SitemapXmlOptions options
+            && !string.IsNullOrEmpty(options?.StylesheetUrl))
+               xmlWriter.WriteProcessingInstruction("xml-stylesheet", $@"type=""text/xsl"" href=""{options.StylesheetUrl}""");
+        
         return xmlWriter;
     }
 
