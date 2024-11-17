@@ -33,7 +33,7 @@ public static class SitemapXmlExtensions
         {
             context.Response.ContentType = "text/xsl; charset=UTF-8";
 
-            using (var stream = typeof(Abstractions.Data.Sitemap).Assembly.GetManifestResourceStream("MintPlayer.AspNetCore.SitemapXml.Assets.sitemap.xsl"))
+            using (var stream = typeof(SitemapXmlExtensions).Assembly.GetManifestResourceStream("MintPlayer.AspNetCore.SitemapXml.Assets.sitemap.xsl"))
             using (var streamreader = new System.IO.StreamReader(stream))
             {
                 var content = await streamreader.ReadToEndAsync();
