@@ -81,6 +81,11 @@ An example of your SitemapController. Notice the use of the `Produces` attribute
             }));
         }
     }
+
+### robots.txt
+To let search engines know about your sitemap, add the following to the `robots.txt` file
+
+    Sitemap: /Sitemap
     
 ### Styling your sitemap
 You can use an XSL stylesheet for your sitemaps. Modify Startup@ConfigureServices
