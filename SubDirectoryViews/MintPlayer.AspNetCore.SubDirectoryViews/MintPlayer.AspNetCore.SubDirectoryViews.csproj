@@ -1,14 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
-		<TargetFramework>net9.0</TargetFramework>
+		<TargetFramework>net10.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<OutputType>Library</OutputType>
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.SubDirectoryViews</PackageId>
-		<Version>9.0.0</Version>
+		<Version>10.0.0-rc.1</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>This package contains Options which let the Razor Views reside in a subfolder.</Description>
