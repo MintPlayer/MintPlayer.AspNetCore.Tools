@@ -1,11 +1,13 @@
 ﻿using MintPlayer.AspNetCore.SitemapXml.Abstractions;
+using MintPlayer.SourceGenerators.Attributes;
 using MintPlayer.Timestamps;
 
 namespace MintPlayer.AspNetCore.SitemapXml.DependencyInjection;
 
+[Register(typeof(ISitemapXml), ServiceLifetime.Scoped, "SitemapXmlServices", EGeneratedAccessibility.Internal)]
 internal class SitemapXml : ISitemapXml
 {
-    private int PageCount(int total, int perPage)
+    public int PageCount(int total, int perPage)
     {
         return (total - 1) / perPage + 1;
     }

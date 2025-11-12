@@ -8,7 +8,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.SubDirectoryViews</PackageId>
-		<Version>10.0.0-rc.1</Version>
+		<Version>10.0.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>This package contains Options which let the Razor Views reside in a subfolder.</Description>

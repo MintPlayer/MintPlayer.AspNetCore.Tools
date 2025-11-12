@@ -8,7 +8,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.OpenSearch</PackageId>
-		<Version>10.0.0-rc.1</Version>
+		<Version>10.0.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>This package allows you to easily add an OpenSearch engine to your website</Description>

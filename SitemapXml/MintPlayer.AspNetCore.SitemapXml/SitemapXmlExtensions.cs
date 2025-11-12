@@ -13,7 +13,7 @@ public static class SitemapXmlExtensions
     }
     public static IServiceCollection AddSitemapXml(this IServiceCollection services)
     {
-        services.AddScoped<Abstractions.ISitemapXml, DependencyInjection.SitemapXml>();
+        services.AddSitemapXmlServices();
         services.AddControllersWithViews()
             .AddMvcOptions(mvc_options =>
             {
