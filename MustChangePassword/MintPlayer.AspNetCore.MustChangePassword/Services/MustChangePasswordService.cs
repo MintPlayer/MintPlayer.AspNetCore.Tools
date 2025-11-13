@@ -6,7 +6,7 @@ using System.Security.Claims;
 namespace MintPlayer.AspNetCore.MustChangePassword.Services;
 
 internal class MustChangePasswordService<TUser, TKey> : IMustChangePasswordService<TUser, TKey>
-    where TUser : Microsoft.AspNetCore.Identity.IdentityUser<TKey>
+    where TUser : IdentityUser<TKey>
     where TKey : IEquatable<TKey>
 {
     #region Constructor
