@@ -1,5 +1,4 @@
 ﻿using Microsoft.AspNetCore.Mvc.Formatters;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MintPlayer.AspNetCore.SitemapXml.Abstractions.Data;
 using MintPlayer.AspNetCore.SitemapXml.Options;

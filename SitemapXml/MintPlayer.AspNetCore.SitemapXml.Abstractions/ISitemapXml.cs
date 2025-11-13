@@ -5,6 +5,8 @@ namespace MintPlayer.AspNetCore.SitemapXml.Abstractions;
 
 public interface ISitemapXml
 {
+    int PageCount(int total, int perPage);
+
     /// <summary>Computes a <code>list</code> of sitemap urls (paging)</summary>
     /// <typeparam name="T">Type of data you want to display in a sitemap</typeparam>
     /// <param name="items">List of all items to display in the sitemap-index</param>

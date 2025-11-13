@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.Options;
 using MintPlayer.AspNetCore.OpenSearch.Abstractions;
 using MintPlayer.AspNetCore.OpenSearch.Extensions;
-using System.Diagnostics;
 using System.Reflection;
 
 namespace MintPlayer.AspNetCore.OpenSearch
