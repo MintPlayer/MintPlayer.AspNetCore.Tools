@@ -1,23 +1,17 @@
 ﻿using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using MintPlayer.AspNetCore.MustChangePassword.Abstractions;
+using MintPlayer.SourceGenerators.Attributes;
 using System.Security.Claims;
 
 namespace MintPlayer.AspNetCore.MustChangePassword.Services;
 
-internal class MustChangePasswordService<TUser, TKey> : IMustChangePasswordService<TUser, TKey>
+internal partial class MustChangePasswordService<TUser, TKey> : IMustChangePasswordService<TUser, TKey>
     where TUser : IdentityUser<TKey>
     where TKey : IEquatable<TKey>
 {
-    #region Constructor
-    private readonly UserManager<TUser> userManager;
-    private readonly IHttpContextAccessor httpContextAccessor;
-    public MustChangePasswordService(UserManager<TUser> userManager, IHttpContextAccessor httpContextAccessor)
-    {
-        this.userManager = userManager;
-        this.httpContextAccessor = httpContextAccessor;
-    }
-    #endregion
+    [Inject] private readonly UserManager<TUser> userManager;
+    [Inject] private readonly IHttpContextAccessor httpContextAccessor;
 
     public async Task ChangePasswordSignInAsync(TUser user, string oldPassword)
     {
