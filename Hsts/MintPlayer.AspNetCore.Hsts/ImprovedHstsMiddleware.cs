@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using System.Globalization;
-using System.Net.Http;
 
 namespace MintPlayer.AspNetCore.Hsts;
 
@@ -25,10 +24,7 @@ internal class ImprovedHstsMiddleware
     /// <param name="loggerFactory"></param>
     public ImprovedHstsMiddleware(RequestDelegate next, IOptions<HstsOptions> options, ILoggerFactory loggerFactory)
     {
-        if (options == null)
-        {
-            throw new ArgumentNullException(nameof(options));
-        }
+        ArgumentNullException.ThrowIfNull(options);
 
         this.next = next ?? throw new ArgumentNullException(nameof(next));
 

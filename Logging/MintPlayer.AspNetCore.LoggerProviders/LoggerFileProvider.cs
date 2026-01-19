@@ -1,12 +1,10 @@
-﻿namespace MintPlayer.AspNetCore.LoggerProviders;
+﻿using MintPlayer.SourceGenerators.Attributes;
 
-internal class LoggerFileProvider : ILoggerProvider
+namespace MintPlayer.AspNetCore.LoggerProviders;
+
+internal partial class LoggerFileProvider : ILoggerProvider
 {
-    private readonly IServiceProvider serviceProvider;
-    public LoggerFileProvider(IServiceProvider serviceProvider)
-    {
-        this.serviceProvider = serviceProvider;
-    }
+    [Inject] private readonly IServiceProvider serviceProvider;
 
     public ILogger CreateLogger(string categoryName)
     {

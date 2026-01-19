@@ -1,14 +1,11 @@
 ﻿using Microsoft.Extensions.Options;
+using MintPlayer.SourceGenerators.Attributes;
 
 namespace MintPlayer.AspNetCore.LoggerProviders;
 
-internal class FileLogger : ILogger
+internal partial class FileLogger : ILogger
 {
-    private readonly IOptions<FileLoggerOptions> fileLoggerOptions;
-    public FileLogger(IOptions<FileLoggerOptions> fileLoggerOptions)
-    {
-        this.fileLoggerOptions = fileLoggerOptions;
-    }
+    [Inject] private readonly IOptions<FileLoggerOptions> fileLoggerOptions;
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull
     {
