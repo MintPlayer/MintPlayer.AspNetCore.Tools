@@ -1,14 +1,11 @@
-﻿namespace MintPlayer.AspNetCore.NoSniff;
+﻿using MintPlayer.SourceGenerators.Attributes;
+
+namespace MintPlayer.AspNetCore.NoSniff;
 
 // You may need to install the Microsoft.AspNetCore.Http.Abstractions package into your project
-public class NoSniffMiddleware
+public partial class NoSniffMiddleware
 {
-    private readonly RequestDelegate next;
-
-    public NoSniffMiddleware(RequestDelegate next)
-    {
-        this.next = next;
-    }
+    [Inject] private readonly RequestDelegate next;
 
     public async Task Invoke(HttpContext httpContext)
     {
