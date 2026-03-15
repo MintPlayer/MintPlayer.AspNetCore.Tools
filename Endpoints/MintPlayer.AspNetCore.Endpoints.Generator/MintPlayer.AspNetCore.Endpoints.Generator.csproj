@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+		<NoWarn>RS2008</NoWarn>
+
+		<IsPackable>true</IsPackable>
+		<PackageId>MintPlayer.AspNetCore.Endpoints.Generator</PackageId>
+		<Version>10.0.0</Version>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<DevelopmentDependency>true</DevelopmentDependency>
+		<Description>Source generator for MintPlayer.AspNetCore.Endpoints - generates endpoint mapping extension methods and partial class base declarations.</Description>
+		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+		<PackageTags>ASP.NET Core, Endpoints, Source Generator</PackageTags>
+		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/Endpoints/MintPlayer.AspNetCore.Endpoints.Generator</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools</RepositoryUrl>
+		<RepositoryType>Git</RepositoryType>
+		<Authors>Pieterjan De Clippel</Authors>
+		<Company>MintPlayer</Company>
+		<Product>MintPlayer.AspNetCore.Endpoints</Product>
+		<GetTargetPathDependsOn>$(GetTargetPathDependsOn);GetDependencyTargetPaths</GetTargetPathDependsOn>
+	</PropertyGroup>
+
+	<!-- Include XML markups in the nupkg -->
+	<PropertyGroup Condition="'$(Configuration)'=='Release'">
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="10.16.0" PrivateAssets="all" GeneratePathProperty="true" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(Configuration)' == 'Release' ">
+		<None Include="$(PkgMintPlayer_SourceGenerators_Tools)\lib\netstandard2.0\*.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+	</ItemGroup>
+
+	<Target Name="GetDependencyTargetPaths">
+		<ItemGroup>
+			<TargetPathWithTargetPlatformMoniker Include="$(PkgMintPlayer_SourceGenerators_Tools)\lib\netstandard2.0\MintPlayer.SourceGenerators.Tools.dll" IncludeRuntimeDependency="false" />
+		</ItemGroup>
+	</Target>
+
+</Project>
