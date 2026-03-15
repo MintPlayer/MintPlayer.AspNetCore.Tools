@@ -1,42 +1,16 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
 
-internal enum EndpointLevel
-{
-    Raw,
-    Typed,
-    TypedWithResponse
-}
-
-internal enum HttpMethodKind
-{
-    Custom,
-    Get,
-    Post,
-    Put,
-    Delete,
-    Patch
-}
+internal enum EndpointLevel { Raw, Typed, TypedWithResponse }
+internal enum HttpMethodKind { Custom, Get, Post, Put, Delete, Patch }
 
 internal sealed class EndpointInfo : IEquatable<EndpointInfo>
 {
-    public EndpointInfo(
-        string fullyQualifiedName,
-        string ns,
-        string className,
-        bool isPartial,
-        bool hasExistingBaseClass,
-        EndpointLevel level,
-        HttpMethodKind httpMethod,
-        string? requestTypeFqn,
-        string? responseTypeFqn,
-        string? groupTypeFqn,
-        bool hasMultipleGroups)
+    public EndpointInfo(string fqn, string ns, string className, bool isPartial, bool hasExistingBaseClass,
+        EndpointLevel level, HttpMethodKind httpMethod,
+        string? requestTypeFqn, string? responseTypeFqn,
+        string? groupTypeFqn, bool hasMultipleGroups)
     {
-        FullyQualifiedName = fullyQualifiedName;
+        FullyQualifiedName = fqn;
         Namespace = ns;
         ClassName = className;
         IsPartial = isPartial;
@@ -61,13 +35,10 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public string? GroupTypeFqn { get; }
     public bool HasMultipleGroups { get; }
 
-    public bool NeedsPartialClass => Level != EndpointLevel.Raw;
-
     public string? GetBaseClassName()
     {
         if (Level == EndpointLevel.Raw) return null;
-
-        var baseClass = HttpMethod switch
+        var name = HttpMethod switch
         {
             HttpMethodKind.Post => "PostEndpoint",
             HttpMethodKind.Put => "PutEndpoint",
@@ -76,47 +47,25 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
             HttpMethodKind.Delete => "DeleteEndpoint",
             _ => "EndpointBase"
         };
-
-        return $"global::MintPlayer.AspNetCore.Endpoints.{baseClass}<{RequestTypeFqn}>";
+        return $"global::MintPlayer.AspNetCore.Endpoints.{name}<{RequestTypeFqn}>";
     }
 
-    public bool Equals(EndpointInfo? other)
-    {
-        if (other is null) return false;
-        return FullyQualifiedName == other.FullyQualifiedName &&
-               Namespace == other.Namespace &&
-               ClassName == other.ClassName &&
-               IsPartial == other.IsPartial &&
-               HasExistingBaseClass == other.HasExistingBaseClass &&
-               Level == other.Level &&
-               HttpMethod == other.HttpMethod &&
-               RequestTypeFqn == other.RequestTypeFqn &&
-               ResponseTypeFqn == other.ResponseTypeFqn &&
-               GroupTypeFqn == other.GroupTypeFqn &&
-               HasMultipleGroups == other.HasMultipleGroups;
-    }
+    public bool Equals(EndpointInfo? other) =>
+        other is not null &&
+        FullyQualifiedName == other.FullyQualifiedName &&
+        Namespace == other.Namespace &&
+        ClassName == other.ClassName &&
+        IsPartial == other.IsPartial &&
+        HasExistingBaseClass == other.HasExistingBaseClass &&
+        Level == other.Level &&
+        HttpMethod == other.HttpMethod &&
+        RequestTypeFqn == other.RequestTypeFqn &&
+        ResponseTypeFqn == other.ResponseTypeFqn &&
+        GroupTypeFqn == other.GroupTypeFqn &&
+        HasMultipleGroups == other.HasMultipleGroups;
 
     public override bool Equals(object? obj) => Equals(obj as EndpointInfo);
-
-    public override int GetHashCode()
-    {
-        unchecked
-        {
-            var hash = 17;
-            hash = hash * 31 + (FullyQualifiedName?.GetHashCode() ?? 0);
-            hash = hash * 31 + (Namespace?.GetHashCode() ?? 0);
-            hash = hash * 31 + (ClassName?.GetHashCode() ?? 0);
-            hash = hash * 31 + IsPartial.GetHashCode();
-            hash = hash * 31 + HasExistingBaseClass.GetHashCode();
-            hash = hash * 31 + Level.GetHashCode();
-            hash = hash * 31 + HttpMethod.GetHashCode();
-            hash = hash * 31 + (RequestTypeFqn?.GetHashCode() ?? 0);
-            hash = hash * 31 + (ResponseTypeFqn?.GetHashCode() ?? 0);
-            hash = hash * 31 + (GroupTypeFqn?.GetHashCode() ?? 0);
-            hash = hash * 31 + HasMultipleGroups.GetHashCode();
-            return hash;
-        }
-    }
+    public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
 }
 
 internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
@@ -132,56 +81,20 @@ internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
 
     public string GetMethodName()
     {
-        if (MethodNameOverride is not null)
-            return MethodNameOverride;
-
-        // Derive from assembly name: "MyApp.Api" → "MapMyAppApiEndpoints"
+        if (MethodNameOverride is not null) return MethodNameOverride;
         var parts = AssemblyName.Split('.');
-        var pascal = string.Concat(parts.Select(ToPascalCase));
-        return $"Map{pascal}Endpoints";
+        return "Map" + string.Concat(parts.Select(s => char.ToUpperInvariant(s[0]) + s.Substring(1))) + "Endpoints";
     }
 
     public string GetSafeClassName()
     {
-        if (MethodNameOverride is not null)
-            return MethodNameOverride.Replace("Map", "") + "Extensions";
-
-        var parts = AssemblyName.Split('.');
-        var pascal = string.Concat(parts.Select(ToPascalCase));
-        return $"{pascal}EndpointExtensions";
+        var method = GetMethodName();
+        return method.StartsWith("Map") ? method.Substring(3) + "Extensions" : method + "Extensions";
     }
 
-    public string GetMetadataClassName()
-    {
-        if (MethodNameOverride is not null)
-            return MethodNameOverride.Replace("Map", "") + "Metadata";
-
-        var parts = AssemblyName.Split('.');
-        var pascal = string.Concat(parts.Select(ToPascalCase));
-        return $"{pascal}EndpointMetadata";
-    }
-
-    private static string ToPascalCase(string s)
-    {
-        if (string.IsNullOrEmpty(s)) return s;
-        return char.ToUpperInvariant(s[0]) + s.Substring(1);
-    }
-
-    public bool Equals(AssemblyInfo? other)
-    {
-        if (other is null) return false;
-        return AssemblyName == other.AssemblyName &&
-               MethodNameOverride == other.MethodNameOverride;
-    }
+    public bool Equals(AssemblyInfo? other) =>
+        other is not null && AssemblyName == other.AssemblyName && MethodNameOverride == other.MethodNameOverride;
 
     public override bool Equals(object? obj) => Equals(obj as AssemblyInfo);
-
-    public override int GetHashCode()
-    {
-        unchecked
-        {
-            return (AssemblyName?.GetHashCode() ?? 0) * 31 +
-                   (MethodNameOverride?.GetHashCode() ?? 0);
-        }
-    }
+    public override int GetHashCode() => AssemblyName?.GetHashCode() ?? 0;
 }
