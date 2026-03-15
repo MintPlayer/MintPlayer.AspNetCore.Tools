@@ -202,6 +202,70 @@ public partial class GetUser : IGetEndpoint<GetUserRequest, UserResponse>, IMemb
 }
 ```
 
+### Nested groups
+
+Groups can be nested at any depth by implementing `IMemberOf<TParentGroup>` on a group class:
+
+```csharp
+// Root group: /api
+public class ApiGroup : IEndpointGroup
+{
+    public static string Prefix => "/api";
+}
+
+// Nested under ApiGroup: /api/users
+public class UsersApi : IEndpointGroup, IMemberOf<ApiGroup>
+{
+    public static string Prefix => "/users";
+
+    static void IEndpointGroup.Configure(RouteGroupBuilder group)
+    {
+        group.WithTags("Users");
+    }
+}
+
+// Nested under ApiGroup: /api/products
+public class ProductsApi : IEndpointGroup, IMemberOf<ApiGroup>
+{
+    public static string Prefix => "/products";
+
+    static void IEndpointGroup.Configure(RouteGroupBuilder group)
+    {
+        group.WithTags("Products");
+    }
+}
+
+// Resolves to GET /api/users/
+public class ListUsers : IGetEndpoint, IMemberOf<UsersApi>
+{
+    public static string Path => "/";
+    // ...
+}
+
+// Resolves to GET /api/products/
+public class ListProducts : IGetEndpoint, IMemberOf<ProductsApi>
+{
+    public static string Path => "/";
+    // ...
+}
+```
+
+The generator emits nested `MapGroup` calls:
+
+```csharp
+var grp0 = MapGroup<ApiGroup>(app);          // /api
+{
+    var grp1 = MapGroup<UsersApi>(grp0);      // /api/users
+    Map<ListUsers>(grp1, _f0);
+}
+{
+    var grp2 = MapGroup<ProductsApi>(grp0);   // /api/products
+    Map<ListProducts>(grp2, _f1);
+}
+```
+
+Nesting works at any depth. Each group's `Prefix` is relative to its parent.
+
 ## Route configuration
 
 Use the static `Configure` method to add authorization, caching, rate limiting, CORS, or other endpoint metadata:
@@ -372,12 +436,17 @@ public record UserResponse(int Id, string Name, string Email);
 public record UpdateUserRequest(int Id, string Name, string Email);
 ```
 
-**Route group:**
+**Route groups (nested):**
 
 ```csharp
-public class UsersApi : IEndpointGroup
+public class ApiGroup : IEndpointGroup
 {
-    public static string Prefix => "/api/users";
+    public static string Prefix => "/api";
+}
+
+public class UsersApi : IEndpointGroup, IMemberOf<ApiGroup>
+{
+    public static string Prefix => "/users";
 
     static void IEndpointGroup.Configure(RouteGroupBuilder group)
     {

@@ -9,12 +9,14 @@ partial class EndpointGenerator
     sealed class EndpointMappingProducer : Producer
     {
         private readonly ImmutableArray<EndpointInfo> endpoints;
+        private readonly ImmutableArray<GroupInfo> groups;
         private readonly AssemblyInfo assemblyInfo;
 
-        public EndpointMappingProducer(ImmutableArray<EndpointInfo> endpoints, AssemblyInfo assemblyInfo)
+        public EndpointMappingProducer(ImmutableArray<EndpointInfo> endpoints, ImmutableArray<GroupInfo> groups, AssemblyInfo assemblyInfo)
             : base("MintPlayer.AspNetCore.Endpoints", "EndpointMapping.g.cs")
         {
             this.endpoints = endpoints;
+            this.groups = groups;
             this.assemblyInfo = assemblyInfo;
         }
 
@@ -54,11 +56,43 @@ partial class EndpointGenerator
             var methodName = assemblyInfo.GetMethodName();
             var className = assemblyInfo.GetSafeClassName();
 
-            var ungrouped = valid.Where(e => e.GroupTypeFqn is null).ToList();
-            var grouped = valid
+            // Build group parent lookup from the groups provider
+            var groupParentMap = groups
+                .Where(g => !g.HasMultipleParents)
+                .GroupBy(g => g.FullyQualifiedName)
+                .ToDictionary(g => g.Key, g => g.First().ParentGroupFqn);
+
+            // Build child groups lookup: parentFqn -> list of child FQNs
+            var childGroups = groups
+                .Where(g => g.ParentGroupFqn is not null && !g.HasMultipleParents)
+                .GroupBy(g => g.ParentGroupFqn!)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.FullyQualifiedName).ToList());
+
+            // Build endpoints-by-group lookup
+            var endpointsByGroup = valid
                 .Where(e => e.GroupTypeFqn is not null)
                 .GroupBy(e => e.GroupTypeFqn!)
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            // Find all referenced group FQNs (from endpoints + from group relationships + parent FQNs)
+            var allGroupFqns = new HashSet<string>();
+            foreach (var ep in valid)
+                if (ep.GroupTypeFqn is not null)
+                    allGroupFqns.Add(ep.GroupTypeFqn);
+            foreach (var g in groups)
+            {
+                if (g.HasMultipleParents) continue;
+                allGroupFqns.Add(g.FullyQualifiedName);
+                if (g.ParentGroupFqn is not null)
+                    allGroupFqns.Add(g.ParentGroupFqn);
+            }
+
+            // Root groups: those with no parent (not in groupParentMap, or parent is null)
+            var rootGroups = allGroupFqns
+                .Where(fqn => !groupParentMap.TryGetValue(fqn, out var parent) || parent is null)
                 .ToList();
+
+            var ungrouped = valid.Where(e => e.GroupTypeFqn is null).ToList();
 
             using (writer.OpenBlock("namespace MintPlayer.AspNetCore.Endpoints"))
             {
@@ -81,18 +115,10 @@ partial class EndpointGenerator
                             EmitEndpointMapping(writer, ep, $"_f{idx}", "app");
                         }
 
-                        foreach (var group in grouped)
+                        int groupCounter = 0;
+                        foreach (var rootGroupFqn in rootGroups)
                         {
-                            writer.WriteLine();
-                            using (writer.OpenBlock(""))
-                            {
-                                writer.WriteLine($"var grp = MapGroup<{group.Key}>(app);");
-                                foreach (var ep in group)
-                                {
-                                    var idx = valid.IndexOf(ep);
-                                    EmitEndpointMapping(writer, ep, $"_f{idx}", "grp");
-                                }
-                            }
+                            EmitGroupTree(writer, rootGroupFqn, "app", ref groupCounter, valid, endpointsByGroup, childGroups);
                         }
 
                         writer.WriteLine("return app;");
@@ -109,6 +135,42 @@ partial class EndpointGenerator
                         writer.WriteLine($"Describe<{ep.FullyQualifiedName}>(\"{ep.ClassName}\"),");
                     writer.Indent--;
                     writer.WriteLine("];");
+                }
+            }
+        }
+
+        private static void EmitGroupTree(
+            IndentedTextWriter writer,
+            string groupFqn,
+            string parentVar,
+            ref int groupCounter,
+            List<EndpointInfo> valid,
+            Dictionary<string, List<EndpointInfo>> endpointsByGroup,
+            Dictionary<string, List<string>> childGroups)
+        {
+            var varName = $"grp{groupCounter++}";
+            writer.WriteLine();
+            using (writer.OpenBlock(""))
+            {
+                writer.WriteLine($"var {varName} = MapGroup<{groupFqn}>({parentVar});");
+
+                // Emit endpoints directly in this group
+                if (endpointsByGroup.TryGetValue(groupFqn, out var eps))
+                {
+                    foreach (var ep in eps)
+                    {
+                        var idx = valid.IndexOf(ep);
+                        EmitEndpointMapping(writer, ep, $"_f{idx}", varName);
+                    }
+                }
+
+                // Recurse into child groups
+                if (childGroups.TryGetValue(groupFqn, out var children))
+                {
+                    foreach (var childFqn in children)
+                    {
+                        EmitGroupTree(writer, childFqn, varName, ref groupCounter, valid, endpointsByGroup, childGroups);
+                    }
                 }
             }
         }

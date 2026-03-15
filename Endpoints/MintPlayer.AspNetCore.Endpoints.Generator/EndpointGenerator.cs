@@ -24,12 +24,19 @@ public partial class EndpointGenerator : IncrementalGenerator
             .Select(static (info, _) => info!)
             .Collect();
 
+        var groupsProvider = context.SyntaxProvider
+            .CreateSyntaxProvider(IsGroupCandidate, GetGroupInfo)
+            .Where(static info => info is not null)
+            .Select(static (info, _) => info!)
+            .Collect();
+
         var assemblyInfoProvider = context.CompilationProvider
             .Select(static (compilation, _) => GetAssemblyInfo(compilation));
 
         var producerProvider = endpointsProvider
+            .Join(groupsProvider)
             .Join(assemblyInfoProvider)
-            .Select(static (tuple, _) => (Producer)new EndpointMappingProducer(tuple.Item1, tuple.Item2));
+            .Select(static (tuple, _) => (Producer)new EndpointMappingProducer(tuple.Item1, tuple.Item2, tuple.Item3));
 
         context.ProduceCode(producerProvider);
     }
@@ -160,6 +167,58 @@ public partial class EndpointGenerator : IncrementalGenerator
             level, httpMethod,
             requestTypeFqn, responseTypeFqn,
             groupTypeFqn, groupCount > 1);
+    }
+
+    private static bool IsGroupCandidate(SyntaxNode node, CancellationToken _)
+    {
+        if (node is not ClassDeclarationSyntax classDecl || classDecl.BaseList is null)
+            return false;
+
+        bool hasGroup = false;
+        bool hasMemberOf = false;
+
+        foreach (var baseType in classDecl.BaseList.Types)
+        {
+            var name = baseType.Type switch
+            {
+                SimpleNameSyntax simple => simple.Identifier.Text,
+                QualifiedNameSyntax qualified => qualified.Right.Identifier.Text,
+                _ => (string?)null
+            };
+
+            if (name == "IEndpointGroup") hasGroup = true;
+            if (name == "IMemberOf") hasMemberOf = true;
+        }
+
+        return hasGroup && hasMemberOf;
+    }
+
+    private static GroupInfo? GetGroupInfo(GeneratorSyntaxContext context, CancellationToken ct)
+    {
+        var classDecl = (ClassDeclarationSyntax)context.Node;
+        var symbol = context.SemanticModel.GetDeclaredSymbol(classDecl, ct);
+        if (symbol is null || symbol.IsAbstract) return null;
+
+        if (!symbol.AllInterfaces.Any(i => i.Name == "IEndpointGroup" && i.ContainingNamespace?.ToDisplayString() == EndpointsNamespace))
+            return null;
+
+        string? parentGroupFqn = null;
+        int parentCount = 0;
+
+        foreach (var iface in symbol.Interfaces)
+        {
+            if (iface.ContainingNamespace?.ToDisplayString() != EndpointsNamespace) continue;
+            if (iface.Name == "IMemberOf" && iface.TypeArguments.Length == 1)
+            {
+                parentCount++;
+                parentGroupFqn = iface.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            }
+        }
+
+        return new GroupInfo(
+            symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            parentGroupFqn,
+            parentCount > 1);
     }
 
     private static bool IsOurBaseClass(string name) => name is

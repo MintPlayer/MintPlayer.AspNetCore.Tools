@@ -68,6 +68,29 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
 }
 
+internal sealed class GroupInfo : IEquatable<GroupInfo>
+{
+    public GroupInfo(string fullyQualifiedName, string? parentGroupFqn, bool hasMultipleParents)
+    {
+        FullyQualifiedName = fullyQualifiedName;
+        ParentGroupFqn = parentGroupFqn;
+        HasMultipleParents = hasMultipleParents;
+    }
+
+    public string FullyQualifiedName { get; }
+    public string? ParentGroupFqn { get; }
+    public bool HasMultipleParents { get; }
+
+    public bool Equals(GroupInfo? other) =>
+        other is not null &&
+        FullyQualifiedName == other.FullyQualifiedName &&
+        ParentGroupFqn == other.ParentGroupFqn &&
+        HasMultipleParents == other.HasMultipleParents;
+
+    public override bool Equals(object? obj) => Equals(obj as GroupInfo);
+    public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
+}
+
 internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
 {
     public AssemblyInfo(string assemblyName, string? methodNameOverride)
