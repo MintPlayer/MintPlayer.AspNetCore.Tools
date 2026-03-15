@@ -20,15 +20,35 @@
 		<Authors>Pieterjan De Clippel</Authors>
 		<Company>MintPlayer</Company>
 		<Product>MintPlayer.AspNetCore.Endpoints</Product>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
 	<ItemGroup>
+		<None Include="README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.Abstractions\MintPlayer.AspNetCore.Endpoints.Abstractions.csproj" />
+		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
+		                  ReferenceOutputAssembly="false"
+		                  PrivateAssets="all" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="10.16.0" PrivateAssets="all" GeneratePathProperty="true" ExcludeAssets="all" />
 	</ItemGroup>
 
 	<!-- Include XML markups in the nupkg -->
 	<PropertyGroup Condition="'$(Configuration)'=='Release'">
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 	</PropertyGroup>
+
+	<!-- Pack the source generator and its dependencies into the analyzers folder -->
+	<ItemGroup>
+		<None Include="..\MintPlayer.AspNetCore.Endpoints.Generator\bin\$(Configuration)\netstandard2.0\MintPlayer.AspNetCore.Endpoints.Generator.dll"
+		      Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+		<None Include="$(PkgMintPlayer_SourceGenerators_Tools)\lib\netstandard2.0\*.dll"
+		      Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+	</ItemGroup>
 
 </Project>

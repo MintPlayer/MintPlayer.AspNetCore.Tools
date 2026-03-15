@@ -22,15 +22,14 @@ public abstract class BodyEndpoint<TRequest> : EndpointBase<TRequest>
     protected override async ValueTask<TRequest?> BindRequestAsync(HttpContext context)
     {
         // Try MVC input formatters (available if AddControllers/AddMvc was called)
-        var mvcOptions = context.RequestServices.GetService<IOptions<MvcOptions>>();
-        if (mvcOptions is not null)
-        {
-            var formatters = mvcOptions.Value.InputFormatters;
-            var modelMetadataProvider = context.RequestServices
-                .GetRequiredService<IModelMetadataProvider>();
-            var modelMetadata = modelMetadataProvider
-                .GetMetadataForType(typeof(TRequest));
+        var modelMetadataProvider = context.RequestServices.GetService<IModelMetadataProvider>();
+        var formatters = modelMetadataProvider is not null
+            ? context.RequestServices.GetService<IOptions<MvcOptions>>()?.Value.InputFormatters
+            : null;
 
+        if (modelMetadataProvider is not null && formatters is { Count: > 0 })
+        {
+            var modelMetadata = modelMetadataProvider.GetMetadataForType(typeof(TRequest));
             var formatterContext = new InputFormatterContext(
                 context,
                 modelName: string.Empty,
