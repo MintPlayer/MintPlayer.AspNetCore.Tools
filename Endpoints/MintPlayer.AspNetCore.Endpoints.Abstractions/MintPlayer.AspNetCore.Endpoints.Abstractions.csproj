@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<OutputType>Library</OutputType>
+
+		<IsPackable>true</IsPackable>
+		<PackageId>MintPlayer.AspNetCore.Endpoints.Abstractions</PackageId>
+		<Version>10.0.0</Version>
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+		<Description>Interfaces and attributes for MintPlayer.AspNetCore.Endpoints - a class-per-endpoint mapping library for ASP.NET Core.</Description>
+		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+		<PackageTags>ASP.NET Core, Endpoints, Minimal API</PackageTags>
+		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/Endpoints/MintPlayer.AspNetCore.Endpoints.Abstractions</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools</RepositoryUrl>
+		<RepositoryType>Git</RepositoryType>
+		<Authors>Pieterjan De Clippel</Authors>
+		<Company>MintPlayer</Company>
+		<Product>MintPlayer.AspNetCore.Endpoints</Product>
+	</PropertyGroup>
+
+	<!-- Include XML markups in the nupkg -->
+	<PropertyGroup Condition="'$(Configuration)'=='Release'">
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+	</PropertyGroup>
+
+</Project>
