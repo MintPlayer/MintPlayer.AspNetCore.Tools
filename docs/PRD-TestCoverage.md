@@ -185,7 +185,7 @@ recorded in comments in the file itself:
   `[Obsolete]` on `readonly ref struct`), `CompilerGeneratedAttribute` deleted 194 (every
   async state-machine body), `GeneratedCodeAttribute` 0.
 
-**R1.4 — generated-code exclusion must be measured here, not inherited.** The sibling's
+**R1.4 — generated-code exclusion, measured here rather than inherited.** The sibling's
 `ExcludeByFile=**/*.g.cs` removed 6 real files / 738 coverable lines. **That does not
 transfer.** In this repo the external `MintPlayer.SourceGenerators` (10.13.0, consumed by
 LoggerProviders, MustChangePassword, NoSniff, SitemapXml) writes **nothing to disk** —
@@ -194,10 +194,11 @@ and the `obj/Release/net10.0/MintPlayer.SourceGenerators/…/ClassNames.g.cs` pa
 appear in build warnings **do not exist as files**. `EmitCompilerGeneratedFiles` is set
 nowhere.
 
-Those synthetic paths still appear in the PDB and will show up in the report. Whether a
-coverlet file-glob matches a path with no file behind it is **behaviour to be tested
-once a real report exists** — not assumed. M10 decides between `ExcludeByFile`,
-`ExcludeByAttribute`, and accepting them.
+Those synthetic paths still appear in the PDB and do show up in the report. Whether a
+coverlet file-glob matches a path with no file behind it was flagged as behaviour to be
+tested rather than assumed — **it was tested, in M1, and it does match.** Settled:
+`ExcludeByFile=**/obj/**`, with the measurement in Appendix C. `ExcludeByAttribute` is
+not needed.
 
 **R1.5 — the upload step must never block a release.** In `publish-release.yml` the
 upload sits before `Pack`/`PushNuget`. A coverage-service outage or a missing token must
@@ -419,6 +420,7 @@ call.
 | D-S15 | `OpenSearchDescription.SearchForm` has the same empty-namespace defect. |
 | D-G17 | **Cyclic groups stack-overflow `csc`.** `EmitGroupTree` recurses through `childGroups` with no visited set. `A : IMemberOf<B>` + `B : IMemberOf<A>` ⇒ unbounded recursion ⇒ uncatchable `StackOverflowException` that kills the process. Must be fixed *before* it can be tested. |
 | D-M23 | **The user's plaintext current password is stored as an `"OldPassword"` claim in a client-side cookie.** Data-protection-encrypted, but the live credential round-trips to the browser and sits in the cookie jar for 5 minutes. Prefer holding the state server-side, or requiring re-entry. |
+| D-G25 | **The generated code only compiles in a `Microsoft.NET.Sdk.Web` project with implicit usings on.** It fully qualifies every *type* with `global::` — correctly immune to the consumer's imports — and then calls the *extension methods* `MapMethods`, `MapGroup` and `Produces`, which cannot be resolved from a `global::` type name; the declaring namespace has to be in scope. The emitted file contains no using directives at all. A consumer on plain `Microsoft.NET.Sdk` + `FrameworkReference Microsoft.AspNetCore.App`, or with `<ImplicitUsings>disable</ImplicitUsings>`, gets three `CS1061` errors pointing at generated source they cannot edit. Invisible until now because the sample TestApp is a Web SDK project. Fix: emit the usings, or call the extensions as static invocations. **Found by the "does the emitted code compile" test on its first run** — see R3.5 reason 2. |
 
 ### Correctness
 
@@ -497,9 +499,9 @@ Not implemented. Each changes a published package's public surface.
 2. `coverage/**/coverage.cobertura.xml` is produced, one per test project.
 3. Every report path is repo-root-relative and resolves against `git ls-files` — **zero
    unmatched files**, verified by simulating the server's suffix match.
-4. All 13 shippable packages appear in the report, except
-   `MintPlayer.AspNetCore.MustChangePassword.Abstractions`, exempt per R2.2/D-M and
-   documented.
+4. All 14 shippable assemblies appear in the report. **No exemption is needed** — see the
+   correction in Appendix C: `MintPlayer.AspNetCore.MustChangePassword.Abstractions` was
+   predicted to be absent for having zero instrumentable IL, and it is in fact present.
 5. The generator assembly appears in the report with non-zero covered lines (proving
    R3.7's DLL+PDB placement actually worked — its failure mode is silent).
 6. The upload step succeeds on a PR and the service publishes its check runs.
@@ -566,6 +568,69 @@ That repo is the reference. Every difference is deliberate.
 | Snapshot testing | `Verify.Xunit` adopted | deferred | The generator's output order is nondeterministic (D-G18). Snapshots come after that fix, if at all. |
 | Auth | `COVERAGE_TOKEN` | same | OIDC is available (public repo) and was considered; one auth story across both repos won. |
 | `xunit.runner.visualstudio` | 4.0.0 | 4.0.0 | Sibling's verified-together set adopted wholesale. |
+
+## Appendix C — M1 gate results, and two corrections
+
+The M1 gate ran the real CI command and simulated the coverage server's suffix matcher
+against `git ls-files`. Results with 29 smoke/harness tests in place:
+
+| Report | Assemblies | Files | `<sources>` |
+|---|---:|---:|---|
+| `MintPlayer.AspNetCore.Tools.Tests` | 14 | 47 | `C:/Repos/MintPlayer.AspNetCore.Tools/` |
+| `MintPlayer.AspNetCore.Endpoints.Generator.Tests` | 3 | 18 | `…/MintPlayer.AspNetCore.Tools/Endpoints/` |
+
+**Path matching: 65 matched, 0 ambiguous, 0 unmatched.** R2.1 confirmed: because the
+first report's documents span nine top-level folders, `<sources>` is the repository root
+and all five duplicated basenames resolve uniquely. The generator report's `<sources>` is
+`Endpoints/`, and its second-level paths are unique, confirming R2.2.
+
+`MintPlayer.AspNetCore.Endpoints.Generator` appears with **248 of 445 lines covered from
+5 harness tests**, confirming R3.7 — a plain `ProjectReference` does put the generator DLL
+*and* its PDB in the output root, and in-process driver tests do attribute to it. This was
+the requirement whose failure mode is silent, so it is worth restating that it is now
+positively verified rather than assumed.
+
+`MintPlayer.AspNetCore.Endpoints.TestApp` is absent, confirming R2.3's `Exclude`.
+
+### `ExcludeByFile` measurement (settles R1.4)
+
+| Setting | Files | Coverable lines | Covered lines |
+|---|---:|---:|---:|
+| none | 73 | 903 | 260 |
+| `**/obj/**` | 65 | 884 | 257 |
+
+So the glob removes 8 files / 19 coverable lines / 3 covered lines. **A coverlet file glob
+does match a virtual path with no file on disk** — the open question in R1.4, now answered
+empirically rather than assumed.
+
+The 8 files are the `MintPlayer.SourceGenerators` output (`Inject.g.cs`,
+`ClassNameList.g.cs`, `ServiceMethods.g.cs`) in LoggerProviders, MustChangePassword,
+NoSniff and SitemapXml. Verified absent from disk and untracked by git, so the server drops
+them regardless; excluding them makes the local report and the server agree, which is the
+whole point. The 3 covered lines are generated `[Inject]` constructors that really do run —
+a small honest loss, taken deliberately in exchange for local/server agreement.
+
+Note `**/*.g.cs` was **not** used: it would also match the 16 SDK `*.GlobalUsings.g.cs`
+files, and `**/obj/**` expresses the actual rule (nothing under `obj/` is git-tracked
+source) rather than a filename coincidence.
+
+### Correction 1 — `MustChangePassword.Abstractions` is *not* absent
+
+Predicted during investigation to be missing from every report for having zero
+instrumentable IL (one interface, two abstract members), with a documented exemption and a
+suggestion to move `MustChangePasswordConstants` into it to give it a `.cctor`.
+
+**It appears in the report.** No exemption is needed and no code needs to move for coverage
+reasons. Moving the constant may still be a good idea on design grounds — consumers need
+the scheme name to write `[Authorize(AuthenticationSchemes = …)]` — but that is now purely a
+design argument, listed under the `[decision]` items on its own merits.
+
+### Correction 2 — the Debug-rebuild claim, scoped correctly
+
+The sibling repo measured `--no-build` as an 88s → 32s fix. Restated for this repo in R1.1:
+the current Test step compiles **nothing** here, because there are no test projects, so
+`--no-build` is preventive rather than a saving. The Debug rebuild is what this repo would
+acquire on adding the first test project, not a cost being removed.
 
 ## Version
 

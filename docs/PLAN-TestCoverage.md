@@ -40,18 +40,18 @@ Recorded here because their outcomes are load-bearing. Full detail in PRD Append
 Everything here is independent of the tests existing, and lands first so the rest is built
 on a verified premise.
 
-- [ ] `coverlet.runsettings` at the repo root: `Format=cobertura`,
+- [x] `coverlet.runsettings` at the repo root: `Format=cobertura`,
       `UseSourceLink=false`, `DeterministicReport=false`, `IncludeTestAssembly=false`,
       `Exclude` = the TestApp assembly (R2.3). Each setting carries a comment with its
-      reason and, where relevant, the coupling that would invalidate it (R1.3). No
-      `ExcludeByFile` yet — that is M10, by measurement (R1.4).
-- [ ] `.gitignore`: add `/coverage/` (R5.3).
-- [ ] Both workflows: replace the Test step with the R1.1 command; add the `Upload
+      reason and, where relevant, the coupling that would invalidate it (R1.3). Plus
+      `ExcludeByFile=**/obj/**`, decided by measurement during the gate below (R1.4).
+- [x] `.gitignore`: add `/coverage/` (R5.3).
+- [x] Both workflows: replace the Test step with the R1.1 command; add the `Upload
       coverage` step (before `Pack` in `publish-release.yml`, R1.5); add `concurrency`;
       add `permissions`; bump `checkout@v5` / `setup-dotnet@v5` (R5.4).
-- [ ] CI guard: fail if no `coverage/**/coverage.cobertura.xml` was produced (R5.1).
-- [ ] `README.md` coverage badge (R5.5).
-- [ ] Two test projects, each with `IsPackable=false`, `IsTestProject=true`, the R1.2
+- [x] CI guard: fail if no `coverage/**/coverage.cobertura.xml` was produced (R5.1).
+- [x] `README.md` coverage badge (R5.5).
+- [x] Two test projects, each with `IsPackable=false`, `IsTestProject=true`, the R1.2
       package set, `FrameworkReference Microsoft.AspNetCore.App`, and a note pointing at
       the R5.2 path invariant:
       - `Tests/MintPlayer.AspNetCore.Tools.Tests` — `ProjectReference` to **every**
@@ -61,21 +61,27 @@ on a verified premise.
         (R3.7), `Microsoft.CodeAnalysis.CSharp` 4.14.0, `MintPlayer.SourceGenerators.Tools`
         referenced directly (the generator's `PrivateAssets="all"` blocks the transitive
         flow).
-- [ ] Both added to `MintPlayer.AspNetCore.Tools.sln` under a `Tests` solution folder.
-- [ ] `[assembly: InternalsVisibleTo]` on Hsts, LoggerProviders, MustChangePassword and
-      the Generator (R3.3).
-- [ ] One smoke test per project, plus the `RecordingResponseFeature` (R3.1) and the
+- [x] Both added to `MintPlayer.AspNetCore.Tools.sln` under a `Tests` solution folder.
+- [x] `[assembly: InternalsVisibleTo]` on Hsts, LoggerProviders, MustChangePassword,
+      SitemapXml, OpenSearch and the Generator (R3.3).
+- [x] One smoke test per project, plus the `RecordingResponseFeature` (R3.1) and the
       shared `Infrastructure/` helpers the inventories call for.
 
 **Gate — run the coverage collection once and verify the premise:**
 
-- [ ] a `coverage.cobertura.xml` is produced per test project;
-- [ ] paths in the runtime-library report are repo-root-relative
+- [x] a `coverage.cobertura.xml` is produced per test project;
+- [x] paths in the runtime-library report are repo-root-relative
       (`Hsts/MintPlayer.AspNetCore.Hsts/ImprovedHstsMiddleware.cs`, not
       `ImprovedHstsMiddleware.cs`);
-- [ ] simulate the server's suffix match against `git ls-files` — **zero ambiguous, zero
+- [x] simulate the server's suffix match against `git ls-files` — **zero ambiguous, zero
       unmatched**;
-- [ ] the generator assembly appears in its report at all (proving R3.7).
+- [x] the generator assembly appears in its report at all (proving R3.7) — it does, with
+      248/445 lines covered from 5 harness tests.
+
+**Gate result: PASS.** 65 matched, 0 ambiguous, 0 unmatched; all 14 shippable assemblies
+present; TestApp correctly excluded. Two predictions were wrong and are corrected in PRD
+Appendix C. The `Generate_OutputCompiles` harness test also found a new defect on its
+first run (D-G25).
 
 If any of these fail, fix the design here rather than proceeding.
 
@@ -262,11 +268,11 @@ Runs *after* the tests exist, so every fix shows up as a test flipping from
 
 - [ ] Full suite: `dotnet restore` → `dotnet build -c Release --no-restore` → the R1.1
       command. Zero failures.
-- [ ] **Decide `ExcludeByFile` by measurement** (R1.4): inspect the real reports for the
-      synthetic `…/MintPlayer.SourceGenerators/…/*.g.cs` paths, test whether a glob
-      matches a path with no file behind it, then choose `ExcludeByFile`,
-      `ExcludeByAttribute`, or accept them — and record the measured line deltas in PRD
-      Appendix C, as the sibling did.
+- [x] **`ExcludeByFile` decided by measurement** — pulled forward into M1, because the
+      gate demanded zero unmatched paths. A coverlet glob **does** match virtual paths with
+      no file on disk; `**/obj/**` removes 8 files / 19 coverable lines. Measurements in
+      PRD Appendix C.
+- [ ] Re-measure it once the full suite exists, in case the shape changed.
 - [ ] Re-verify acceptance criteria 2–5 against the final reports.
 - [ ] R4 audit grep across every new test: `UriKind`, `[A-Z]:\\`, `Environment.NewLine`,
       `ToLower()`/`ToUpper()` without a culture, hard-coded `+01:00`/`+00:00`. The sibling

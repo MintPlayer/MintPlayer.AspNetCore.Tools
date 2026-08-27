@@ -1,0 +1,79 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<IsPackable>false</IsPackable>
+		<IsTestProject>true</IsTestProject>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- The libraries under test are Microsoft.NET.Sdk.Web; this brings the same types
+		     without dragging in the web publish pipeline. -->
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+		<PackageReference Include="xunit" Version="2.9.3" />
+		<PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="coverlet.collector" Version="10.0.1">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<!-- TestServer for the middleware/endpoint integration groups, and
+		     WebApplicationFactory<Program> for the TestApp end-to-end group. -->
+		<PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
+	</ItemGroup>
+
+	<!--
+	IMPORTANT — do not split this project per library, and do not remove references to
+	libraries whose tests live elsewhere.
+
+	Coverlet sets the Cobertura <source> element to the longest common directory prefix of
+	all instrumented documents. The coverage server then suffix-matches each report path
+	against `git ls-files` and requires a UNIQUE match; ambiguous paths are dropped
+	SILENTLY and excluded from the totals.
+
+	Because the references below span ChangePassword/, Endpoints/, Hsts/, Logging/,
+	MustChangePassword/, NoSniff/, OpenSearch/, SitemapXml/ and SubDirectoryViews/, that
+	prefix is the repository root, so every path keeps its <TopFolder>/<Project>/.../<File>.cs
+	shape and stays unambiguous.
+
+	Narrow this set and paths collapse to bare filenames. This repo has five duplicated
+	basenames — Image.cs, ServiceCollectionExtensions.cs, StringExtensions.cs, Url.cs and
+	XmlSerializerOutputFormatter.cs — so files would start disappearing from the report with
+	no build error and no warning. The worst case is SubDirectoryViews, whose ONLY source
+	file is ServiceCollectionExtensions.cs: on its own, the entire library vanishes.
+
+	The invariant: the instrumented libraries in one test project must have a longest common
+	directory prefix short enough that every remaining relative path is a unique suffix
+	within `git ls-files`.
+	-->
+	<ItemGroup>
+		<ProjectReference Include="..\..\ChangePassword\MintPlayer.AspNetCore.ChangePassword\MintPlayer.AspNetCore.ChangePassword.csproj" />
+		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints\MintPlayer.AspNetCore.Endpoints.csproj" />
+		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints.Abstractions\MintPlayer.AspNetCore.Endpoints.Abstractions.csproj" />
+		<ProjectReference Include="..\..\Hsts\MintPlayer.AspNetCore.Hsts\MintPlayer.AspNetCore.Hsts.csproj" />
+		<ProjectReference Include="..\..\Logging\MintPlayer.AspNetCore.LoggerProviders\MintPlayer.AspNetCore.LoggerProviders.csproj" />
+		<ProjectReference Include="..\..\MustChangePassword\MintPlayer.AspNetCore.MustChangePassword\MintPlayer.AspNetCore.MustChangePassword.csproj" />
+		<ProjectReference Include="..\..\MustChangePassword\MintPlayer.AspNetCore.MustChangePassword.Abstractions\MintPlayer.AspNetCore.MustChangePassword.Abstractions.csproj" />
+		<ProjectReference Include="..\..\NoSniff\MintPlayer.AspNetCore.NoSniff\MintPlayer.AspNetCore.NoSniff.csproj" />
+		<ProjectReference Include="..\..\OpenSearch\MintPlayer.AspNetCore.OpenSearch\MintPlayer.AspNetCore.OpenSearch.csproj" />
+		<ProjectReference Include="..\..\OpenSearch\MintPlayer.AspNetCore.OpenSearch.Abstractions\MintPlayer.AspNetCore.OpenSearch.Abstractions.csproj" />
+		<ProjectReference Include="..\..\SitemapXml\MintPlayer.AspNetCore.SitemapXml\MintPlayer.AspNetCore.SitemapXml.csproj" />
+		<ProjectReference Include="..\..\SitemapXml\MintPlayer.AspNetCore.SitemapXml.Abstractions\MintPlayer.AspNetCore.SitemapXml.Abstractions.csproj" />
+		<ProjectReference Include="..\..\SitemapXml\MintPlayer.Timestamps\MintPlayer.Timestamps.csproj" />
+		<ProjectReference Include="..\..\SubDirectoryViews\MintPlayer.AspNetCore.SubDirectoryViews\MintPlayer.AspNetCore.SubDirectoryViews.csproj" />
+
+		<!-- Sample app, needed for WebApplicationFactory<Program>. It is excluded from
+		     coverage by assembly name in coverlet.runsettings — it is IsPackable=false and
+		     must not enter the denominator. -->
+		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints.TestApp\MintPlayer.AspNetCore.Endpoints.TestApp.csproj" />
+	</ItemGroup>
+
+</Project>

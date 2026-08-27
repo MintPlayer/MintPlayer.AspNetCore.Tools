@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<IsPackable>false</IsPackable>
+		<IsTestProject>true</IsTestProject>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- The generator fixtures compiled by the driver need HttpContext, IResult,
+		     RouteHandlerBuilder and IEndpointRouteBuilder. Basic.Reference.Assemblies ships
+		     no ASP.NET Core reference assemblies, so the driver's reference set is built from
+		     this test host's own TRUSTED_PLATFORM_ASSEMBLIES instead. -->
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+		<PackageReference Include="xunit" Version="2.9.3" />
+		<PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="coverlet.collector" Version="10.0.1">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+
+		<!-- Must match the version the generator itself resolves (verified 4.14.0 in the
+		     generator's project.assets.json, transitively via SourceGenerators.Tools 10.16.0).
+		     A mismatch produces a split-assembly load at driver runtime. -->
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+
+		<!-- The generator references this with PrivateAssets="all", so it does NOT flow
+		     transitively. Without an explicit reference the driver throws FileNotFoundException
+		     the moment it touches the IncrementalGenerator base class. -->
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="10.16.0" GeneratePathProperty="true" />
+	</ItemGroup>
+
+	<!--
+	A PLAIN ProjectReference, deliberately — not OutputItemType="Analyzer".
+
+	Two reasons:
+
+	1. Coverage attribution. Coverlet's collector scans the test host's output directory
+	   ROOT and does NOT recurse, so the generator DLL *and its PDB* must land there. A
+	   default ProjectReference (ReferenceOutputAssembly=true) copies both, in every
+	   configuration, with no custom target. An Analyzer reference is passed to csc as
+	   /analyzer: and is never copied to $(OutDir), so coverlet would see nothing.
+	   IncludeBuildOutput=false / DevelopmentDependency=true in the generator csproj are
+	   pack-time only and do not suppress this copy.
+
+	   If a copy target is ever needed here instead, it MUST be unconditional. Never
+	   Condition="'$(Configuration)'=='Debug'" — CI tests Release, so a Debug-only condition
+	   silently zeroes generator coverage, and the failure mode gives no error.
+
+	2. The generator is exercised in-process by a CSharpGeneratorDriver, not by csc. An
+	   analyzer execution during build is not observed by the test host's profiler, so
+	   coverage can ONLY come from tests that call `new EndpointGenerator()` directly.
+	-->
+	<ItemGroup>
+		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj" />
+		<!-- Fixture sources reference these types; the driver also needs them as metadata
+		     references. -->
+		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints\MintPlayer.AspNetCore.Endpoints.csproj" />
+		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints.Abstractions\MintPlayer.AspNetCore.Endpoints.Abstractions.csproj" />
+	</ItemGroup>
+
+</Project>
