@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using MintPlayer.AspNetCore.SitemapXml;
 using MintPlayer.AspNetCore.SitemapXml.Abstractions.Data;
 using MintPlayer.AspNetCore.SitemapXml.Abstractions.Enums;
@@ -29,30 +30,26 @@ namespace MintPlayer.AspNetCore.Tools.Tests.SitemapXml;
 /// </remarks>
 public class SitemapEndToEndTests
 {
-    private static IWebHost CreateHost(object model, Action<SitemapXmlOptions>? configure = null)
-    {
-        var host = new WebHostBuilder()
-            .UseTestServer()
-            .ConfigureServices(services =>
-            {
-                if (configure is null)
-                    services.AddSitemapXml();
-                else
-                    services.AddSitemapXml(configure);
-            })
-            .Configure(app => app.Run(async context =>
-            {
-                var executor = context.RequestServices.GetRequiredService<IActionResultExecutor<ObjectResult>>();
-                var actionContext = new ActionContext(context, new RouteData(), new ActionDescriptor());
-                await executor.ExecuteAsync(actionContext, new ObjectResult(model));
-            }))
-            .Build();
+    private static Task<IHost> CreateHostAsync(object model, Action<SitemapXmlOptions>? configure = null) =>
+        new HostBuilder()
+            .ConfigureWebHost(webHost => webHost
+                .UseTestServer()
+                .ConfigureServices(services =>
+                {
+                    if (configure is null)
+                        services.AddSitemapXml();
+                    else
+                        services.AddSitemapXml(configure);
+                })
+                .Configure(app => app.Run(async context =>
+                {
+                    var executor = context.RequestServices.GetRequiredService<IActionResultExecutor<ObjectResult>>();
+                    var actionContext = new ActionContext(context, new RouteData(), new ActionDescriptor());
+                    await executor.ExecuteAsync(actionContext, new ObjectResult(model));
+                })))
+            .StartAsync();
 
-        host.Start();
-        return host;
-    }
-
-    private static async Task<HttpResponseMessage> GetAsync(IWebHost host, string accept)
+    private static async Task<HttpResponseMessage> GetAsync(IHost host, string accept)
     {
         var client = host.GetTestClient();
         client.DefaultRequestHeaders.Accept.Add(MediaTypeWithQualityHeaderValue.Parse(accept));
@@ -72,7 +69,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithApplicationXmlAccept_IsServedAsXml()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var response = await GetAsync(host, "application/xml");
 
@@ -83,7 +80,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithTextXmlAccept_IsServedAsTextXml()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var response = await GetAsync(host, "text/xml");
 
@@ -94,7 +91,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_OnTheWire_ParsesAsASitemapNamespacedUrlset()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var body = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
         var document = XDocument.Parse(body);
@@ -113,7 +110,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_OnTheWire_StartsWithAUtf8XmlDeclaration()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var body = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
 
@@ -124,7 +121,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_OnTheWire_CarriesNoXsiOrXsdDeclarations()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var body = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
 
@@ -135,7 +132,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task SitemapIndex_OnTheWire_ParsesAsASitemapNamespacedSitemapindex()
     {
-        using var host = CreateHost(new SitemapIndex(
+        using var host = await CreateHostAsync(new SitemapIndex(
         [
             new Sitemap { Loc = "https://example.org/sitemap-1.xml", LastMod = new DateTime(2024, 3, 4) },
         ]));
@@ -152,7 +149,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithAStylesheetConfigured_CarriesTheProcessingInstruction()
     {
-        using var host = CreateHost(SampleUrlSet(), options => options.StylesheetUrl = "/sitemap.xsl");
+        using var host = await CreateHostAsync(SampleUrlSet(), options => options.StylesheetUrl = "/sitemap.xsl");
 
         var body = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
 
@@ -166,7 +163,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithAStylesheetConfigured_IsStillWellFormedXml()
     {
-        using var host = CreateHost(SampleUrlSet(), options => options.StylesheetUrl = "/sitemap.xsl");
+        using var host = await CreateHostAsync(SampleUrlSet(), options => options.StylesheetUrl = "/sitemap.xsl");
 
         var body = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
         var document = XDocument.Parse(body);
@@ -179,7 +176,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithNoStylesheetConfigured_CarriesNoProcessingInstruction()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var body = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
 
@@ -195,7 +192,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_TwoSequentialRequests_ProduceIdenticalBytes()
     {
-        using var host = CreateHost(SampleUrlSet(), options => options.StylesheetUrl = "/sitemap.xsl");
+        using var host = await CreateHostAsync(SampleUrlSet(), options => options.StylesheetUrl = "/sitemap.xsl");
 
         var first = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
         var second = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
@@ -212,7 +209,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithJsonAccept_FallsThroughToTheJsonFormatter()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var response = await GetAsync(host, "application/json");
 
@@ -233,7 +230,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithTextHtmlAcceptOnly_StillFallsBackToXml()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var response = await GetAsync(host, "text/html");
 
@@ -245,7 +242,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithWildcardAccept_IsServedAsXmlByTheSitemapFormatter()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var response = await GetAsync(host, "*/*");
 
@@ -260,7 +257,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithNoAcceptHeader_IsServedAsXml()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var response = await host.GetTestClient().GetAsync("/sitemap.xml");
 
@@ -277,7 +274,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task AnUnrelatedModel_AskedForAsXml_IsAnsweredAsJson()
     {
-        using var host = CreateHost(new { Name = "not a sitemap" });
+        using var host = await CreateHostAsync(new { Name = "not a sitemap" });
 
         var response = await GetAsync(host, "application/xml");
 
@@ -293,7 +290,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithUnsetLastModAndChangeFreq_OmitsBothOnTheWire()
     {
-        using var host = CreateHost(new UrlSet([new Url { Loc = "https://example.org/a" }]));
+        using var host = await CreateHostAsync(new UrlSet([new Url { Loc = "https://example.org/a" }]));
 
         var body = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
 
@@ -311,7 +308,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_OnTheWire_HasNoEmptyNamespaceRedeclaration()
     {
-        using var host = CreateHost(SampleUrlSet());
+        using var host = await CreateHostAsync(SampleUrlSet());
 
         var body = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
 
@@ -325,7 +322,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_WithLinksImagesAndVideos_KeepsEveryNamespaceOnTheWire()
     {
-        using var host = CreateHost(new UrlSet(
+        using var host = await CreateHostAsync(new UrlSet(
         [
             new Url
             {
@@ -354,7 +351,7 @@ public class SitemapEndToEndTests
     [Fact]
     public async Task UrlSet_ServedUnderADutchCulture_StillUsesInvariantNumbersAndDates()
     {
-        using var host = CreateHost(new UrlSet(
+        using var host = await CreateHostAsync(new UrlSet(
         [
             new Url
             {

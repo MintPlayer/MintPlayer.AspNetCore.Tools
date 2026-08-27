@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using MintPlayer.AspNetCore.SitemapXml;
 using Xunit;
 
@@ -109,31 +110,27 @@ public class MapDefaultSitemapXmlStylesheetTests
         Assert.Contains("weekly", html);
     }
 
-    private static IWebHost CreateHost(Action<IServiceCollection>? configureServices = null)
-    {
-        var host = new WebHostBuilder()
-            .UseTestServer()
-            .ConfigureServices(services =>
-            {
-                services.AddRouting();
-                services.AddSitemapXml();
-                configureServices?.Invoke(services);
-            })
-            .Configure(app =>
-            {
-                app.UseRouting();
-                app.UseEndpoints(endpoints => endpoints.MapDefaultSitemapXmlStylesheet());
-            })
-            .Build();
-
-        host.Start();
-        return host;
-    }
+    private static Task<IHost> CreateHostAsync(Action<IServiceCollection>? configureServices = null) =>
+        new HostBuilder()
+            .ConfigureWebHost(webHost => webHost
+                .UseTestServer()
+                .ConfigureServices(services =>
+                {
+                    services.AddRouting();
+                    services.AddSitemapXml();
+                    configureServices?.Invoke(services);
+                })
+                .Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseEndpoints(endpoints => endpoints.MapDefaultSitemapXmlStylesheet());
+                }))
+            .StartAsync();
 
     [Fact]
     public async Task MapDefaultSitemapXmlStylesheet_NoUrlConfigured_ServesTheStylesheetAtSitemapXsl()
     {
-        using var host = CreateHost();
+        using var host = await CreateHostAsync();
 
         var response = await host.GetTestClient().GetAsync("/sitemap.xsl");
 
@@ -148,7 +145,7 @@ public class MapDefaultSitemapXmlStylesheetTests
     [Fact]
     public async Task MapDefaultSitemapXmlStylesheet_SetsTheXslContentType()
     {
-        using var host = CreateHost();
+        using var host = await CreateHostAsync();
 
         var response = await host.GetTestClient().GetAsync("/sitemap.xsl");
 
@@ -163,7 +160,7 @@ public class MapDefaultSitemapXmlStylesheetTests
         using var reader = new StreamReader(stream);
         var expected = await reader.ReadToEndAsync();
 
-        using var host = CreateHost();
+        using var host = await CreateHostAsync();
         var actual = await host.GetTestClient().GetStringAsync("/sitemap.xsl");
 
         Assert.Equal(expected, actual);
@@ -172,7 +169,7 @@ public class MapDefaultSitemapXmlStylesheetTests
     [Fact]
     public async Task MapDefaultSitemapXmlStylesheet_ConfiguredUrl_IsUsedInsteadOfTheDefault()
     {
-        using var host = CreateHost(services => services.Configure<MintPlayer.AspNetCore.SitemapXml.Options.SitemapXmlOptions>(
+        using var host = await CreateHostAsync(services => services.Configure<MintPlayer.AspNetCore.SitemapXml.Options.SitemapXmlOptions>(
             options => options.StylesheetUrl = "/assets/my-sitemap.xsl"));
 
         var client = host.GetTestClient();
@@ -188,7 +185,7 @@ public class MapDefaultSitemapXmlStylesheetTests
     [Fact]
     public async Task MapDefaultSitemapXmlStylesheet_EmptyConfiguredUrl_FallsBackToTheDefault()
     {
-        using var host = CreateHost(services => services.Configure<MintPlayer.AspNetCore.SitemapXml.Options.SitemapXmlOptions>(
+        using var host = await CreateHostAsync(services => services.Configure<MintPlayer.AspNetCore.SitemapXml.Options.SitemapXmlOptions>(
             options => options.StylesheetUrl = string.Empty));
 
         Assert.Equal(HttpStatusCode.OK, (await host.GetTestClient().GetAsync("/sitemap.xsl")).StatusCode);
@@ -206,7 +203,7 @@ public class MapDefaultSitemapXmlStylesheetTests
     [InlineData("\t")]
     public async Task MapDefaultSitemapXmlStylesheet_WhitespaceConfiguredUrl_FallsBackToTheDefault(string url)
     {
-        using var host = CreateHost(services => services.Configure<MintPlayer.AspNetCore.SitemapXml.Options.SitemapXmlOptions>(
+        using var host = await CreateHostAsync(services => services.Configure<MintPlayer.AspNetCore.SitemapXml.Options.SitemapXmlOptions>(
             options => options.StylesheetUrl = url));
 
         Assert.Equal(HttpStatusCode.OK, (await host.GetTestClient().GetAsync("/sitemap.xsl")).StatusCode);
@@ -225,9 +222,9 @@ public class MapDefaultSitemapXmlStylesheetTests
     [Theory]
     [InlineData("sitemap.xsl")]
     [InlineData("assets/sitemap.xsl")]
-    public void MapDefaultSitemapXmlStylesheet_UrlWithoutALeadingSlash_ThrowsAtMapTime(string url)
+    public async Task MapDefaultSitemapXmlStylesheet_UrlWithoutALeadingSlash_ThrowsAtMapTime(string url)
     {
-        var exception = Assert.Throws<InvalidOperationException>(() => CreateHost(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateHostAsync(
             services => services.Configure<MintPlayer.AspNetCore.SitemapXml.Options.SitemapXmlOptions>(
                 options => options.StylesheetUrl = url)));
 
@@ -236,9 +233,9 @@ public class MapDefaultSitemapXmlStylesheetTests
 
     /// <summary>D-S12's other consumer: the quote is rejected here too, at map time.</summary>
     [Fact]
-    public void MapDefaultSitemapXmlStylesheet_UrlContainingAQuote_ThrowsAtMapTime()
+    public async Task MapDefaultSitemapXmlStylesheet_UrlContainingAQuote_ThrowsAtMapTime()
     {
-        var exception = Assert.Throws<InvalidOperationException>(() => CreateHost(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => CreateHostAsync(
             services => services.Configure<MintPlayer.AspNetCore.SitemapXml.Options.SitemapXmlOptions>(
                 options => options.StylesheetUrl = "/s.xsl\" alternate=\"yes")));
 
@@ -249,7 +246,7 @@ public class MapDefaultSitemapXmlStylesheetTests
     [Fact]
     public async Task MapDefaultSitemapXmlStylesheet_Post_IsMethodNotAllowed()
     {
-        using var host = CreateHost();
+        using var host = await CreateHostAsync();
 
         var response = await host.GetTestClient().PostAsync("/sitemap.xsl", new StringContent(string.Empty));
 
@@ -271,17 +268,16 @@ public class MapDefaultSitemapXmlStylesheetTests
     [Fact]
     public async Task MapDefaultSitemapXmlStylesheet_WithoutAddSitemapXml_StillServesTheDefaultRoute()
     {
-        using var host = new WebHostBuilder()
-            .UseTestServer()
-            .ConfigureServices(services => services.AddRouting())
-            .Configure(app =>
-            {
-                app.UseRouting();
-                app.UseEndpoints(endpoints => endpoints.MapDefaultSitemapXmlStylesheet());
-            })
-            .Build();
-
-        host.Start();
+        using var host = await new HostBuilder()
+            .ConfigureWebHost(webHost => webHost
+                .UseTestServer()
+                .ConfigureServices(services => services.AddRouting())
+                .Configure(app =>
+                {
+                    app.UseRouting();
+                    app.UseEndpoints(endpoints => endpoints.MapDefaultSitemapXmlStylesheet());
+                }))
+            .StartAsync();
 
         var response = await host.GetTestClient().GetAsync("/sitemap.xsl");
 
@@ -292,7 +288,7 @@ public class MapDefaultSitemapXmlStylesheetTests
     [Fact]
     public async Task MapDefaultSitemapXmlStylesheet_ServedTwice_ReturnsTheSameContent()
     {
-        using var host = CreateHost();
+        using var host = await CreateHostAsync();
         var client = host.GetTestClient();
 
         var first = await client.GetStringAsync("/sitemap.xsl");

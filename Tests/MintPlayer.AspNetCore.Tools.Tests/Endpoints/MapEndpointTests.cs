@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Builder;
+﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using MintPlayer.AspNetCore.Endpoints;
@@ -29,7 +29,11 @@ public class MapEndpointTests
     // Microsoft.AspNetCore.Routing.EndpointNameAttribute, which a Web SDK project has in scope
     // through implicit usings, making `[EndpointName("x")]` a CS0104 in ordinary consumer code.
     [EndpointDescriptorName("health")]
-    [Obsolete("kept for the attribute-transfer test")]
+    // A BCL attribute from a System.* namespace, kept for the attribute-transfer tests: the
+    // filter excludes by namespace, so an attribute under System.* that is NOT compiler-emitted is
+    // the case that has to survive. (ObsoleteAttribute used to play this part, at the cost of a
+    // CS0618 on every use of the fixture.)
+    [System.ComponentModel.Description("kept for the attribute-transfer test")]
     [System.Runtime.CompilerServices.InCompilerServicesNamespace]
     [LooksCompilerEmitted]
     private sealed class HealthEndpoint : IGetEndpoint
@@ -142,7 +146,7 @@ public class MapEndpointTests
         var endpoint = Assert.Single(Map<HealthEndpoint>());
 
         Assert.Equal("health", endpoint.Metadata.GetMetadata<EndpointDescriptorNameAttribute>()?.Name);
-        Assert.NotNull(endpoint.Metadata.GetMetadata<ObsoleteAttribute>());
+        Assert.NotNull(endpoint.Metadata.GetMetadata<System.ComponentModel.DescriptionAttribute>());
     }
 
     /// <summary>
@@ -185,7 +189,7 @@ public class MapEndpointTests
         var transferred = EndpointAttributes.ForMetadata(typeof(HealthEndpoint));
 
         Assert.Contains(transferred, attribute => attribute is EndpointDescriptorNameAttribute);
-        Assert.Contains(transferred, attribute => attribute is ObsoleteAttribute);
+        Assert.Contains(transferred, attribute => attribute is System.ComponentModel.DescriptionAttribute);
     }
 
     [Fact]
