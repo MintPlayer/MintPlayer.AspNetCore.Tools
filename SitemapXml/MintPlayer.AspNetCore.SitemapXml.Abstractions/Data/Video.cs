@@ -1,4 +1,4 @@
-﻿using System.Xml.Serialization;
+using System.Xml.Serialization;
 
 namespace MintPlayer.AspNetCore.SitemapXml.Abstractions.Data;
 
@@ -8,29 +8,29 @@ public class Video
     #region ThumbnailLocation
     /// <summary>URL to the video thumbnail image</summary>
     [XmlElement("thumbnail_loc", Namespace = "http://www.google.com/schemas/sitemap-video/1.1")]
-    public string ThumbnailLocation { get; set; }
+    public string? ThumbnailLocation { get; set; }
 
     public bool ShouldSerializeThumbnailLocation() => ThumbnailLocation != null;
     #endregion
     #region Title
     /// <summary>Title for the video</summary>
     [XmlElement("title", Namespace = "http://www.google.com/schemas/sitemap-video/1.1")]
-    public string Title { get; set; }
+    public string? Title { get; set; }
     #endregion
     #region Description
     /// <summary>Description for the video</summary>
     [XmlElement("description", Namespace = "http://www.google.com/schemas/sitemap-video/1.1")]
-    public string Description { get; set; }
+    public string? Description { get; set; }
     #endregion
     #region ContentLocation
     /// <summary>URL to the actual video resource</summary>
     [XmlElement("content_loc", Namespace = "http://www.google.com/schemas/sitemap-video/1.1")]
-    public string ContentLocation { get; set; }
+    public string? ContentLocation { get; set; }
     #endregion
     #region PlayerLocation
     /// <summary>URL where the video is hosted</summary>
     [XmlElement("player_loc", Namespace = "http://www.google.com/schemas/sitemap-video/1.1")]
-    public string PlayerLocation { get; set; }
+    public string? PlayerLocation { get; set; }
     #endregion
     #region Duration
     /// <summary>Duration of the video</summary>
@@ -71,10 +71,14 @@ public class Video
     /// <summary>Specifies whether the video can be viewed by people of any age</summary>
     [XmlElement("family_friendly", Namespace = "http://www.google.com/schemas/sitemap-video/1.1")]
     public bool? FamilyFriendly { get; set; }
+
+    public bool ShouldSerializeFamilyFriendly() => FamilyFriendly != null;
     #endregion
     #region Live
     /// <summary>Specifies whether this video is a livestream</summary>
     [XmlElement("live", Namespace = "http://www.google.com/schemas/sitemap-video/1.1")]
     public bool? Live { get; set; }
+
+    public bool ShouldSerializeLive() => Live != null;
     #endregion
 }

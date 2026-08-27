@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
@@ -6,15 +6,16 @@
 		<Nullable>enable</Nullable>
 
 		<IsPackable>true</IsPackable>
-		<Version>10.0.1</Version>
+		<Version>11.0.0</Version>
 		<Authors>Pieterjan De Clippel</Authors>
 		<Company>MintPlayer</Company>
+		<Product>MintPlayer.AspNetCore.Hsts</Product>
 		<Description>Correct HSTS Middleware for ASP.NET Core.</Description>
-		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/Hsts/MintPlayer.AspNetCore.Hsts</PackageProjectUrl>
+		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/tree/master/Hsts/MintPlayer.AspNetCore.Hsts</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageId>MintPlayer.AspNetCore.Hsts</PackageId>
-		<PackageTags>ASP.NET;Hsts</PackageTags>
+		<PackageTags>ASP.NET;ASP.NET Core;HSTS;Strict-Transport-Security;Middleware;Security</PackageTags>
 		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>

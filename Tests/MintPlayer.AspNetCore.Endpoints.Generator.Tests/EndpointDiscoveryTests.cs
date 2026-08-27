@@ -1,0 +1,427 @@
+using Microsoft.CodeAnalysis;
+using MintPlayer.AspNetCore.Endpoints.Generator.Tests.Infrastructure;
+using Xunit;
+
+namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
+
+/// <summary>
+/// Which classes the generator picks up, which it skips, and what it tells the consumer when a shape
+/// is not supported.
+/// </summary>
+/// <remarks>
+/// Discovery is a two-stage filter: a cheap syntactic predicate on the base list, then a semantic
+/// check for <c>IEndpointBase</c>. Everything interesting happens in the gap between them, and every
+/// case where the semantic stage gives up has a diagnostic — MPEP001 to MPEP003 — because the
+/// alternative the consumer used to get was a bare CS0115 or CS0263 in their own file.
+/// </remarks>
+public class EndpointDiscoveryTests
+{
+    private const string Preamble = """
+        using System.Collections.Generic;
+        using System.Threading;
+        using System.Threading.Tasks;
+        using Microsoft.AspNetCore.Http;
+        using MintPlayer.AspNetCore.Endpoints;
+
+        namespace Fixtures;
+
+        public record UserRequest(int Id);
+        public record UserResponse(int Id, string Name);
+        """;
+
+    private static string Generated(GeneratorDriverRunResult result)
+        => string.Join("\n", result.GeneratedTrees.Select(tree => tree.ToString()));
+
+    private static Diagnostic[] Errors(IEnumerable<Diagnostic> diagnostics)
+        => [.. diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)];
+
+    /// <summary>The source text a diagnostic's location covers.</summary>
+    private static string TextAt(Location location)
+        => location.SourceTree!.GetText().ToString(location.SourceSpan);
+
+    [Fact]
+    public void RawEndpoint_IsMapped_AndGetsNoGeneratedBaseClass()
+    {
+        var result = EndpointGeneratorHarness.Run("Fixtures", FixtureSources.RawGetEndpoint);
+
+        var generated = Generated(result);
+
+        Assert.Contains("Map<global::Fixtures.HealthCheck>(app, _f0);", generated);
+        Assert.DoesNotContain("partial class HealthCheck", generated);
+        Assert.Empty(result.Diagnostics);
+    }
+
+    /// <summary>
+    /// An abstract endpoint is a base for other endpoints, not a route of its own. Nothing is
+    /// emitted for it — not even the partial base class, which is why an abstract typed endpoint has
+    /// to name its base class itself.
+    /// </summary>
+    [Fact]
+    public void AbstractEndpoint_IsSkippedEntirely()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            public abstract partial class AbstractEndpoint : IPostEndpoint<UserRequest, UserResponse>
+            {
+                public static string Path => "/abstract";
+            }
+
+            public class HealthCheck : IGetEndpoint
+            {
+                public static string Path => "/health";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var generated = Generated(EndpointGeneratorHarness.Run("Fixtures", source));
+
+        Assert.DoesNotContain("AbstractEndpoint", generated);
+        Assert.Contains("global::Fixtures.HealthCheck", generated);
+    }
+
+    /// <summary>
+    /// The syntactic predicate matches any base type whose name starts with <c>IEndpoint</c>, so an
+    /// unrelated interface of the consumer's own gets through it. The semantic
+    /// <c>AllInterfaces</c> check is what rejects it, and it must — otherwise the generator would
+    /// emit a route for a class that has no <c>Path</c>.
+    /// </summary>
+    [Fact]
+    public void ClassImplementingAForeignInterfaceNamedLikeAnEndpoint_IsNotDiscovered()
+    {
+        var source = """
+            namespace Fixtures;
+
+            public interface IEndpointOfMyOwn { }
+
+            public class NotAnEndpoint : IEndpointOfMyOwn { }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+
+        Assert.DoesNotContain("NotAnEndpoint", Generated(result));
+    }
+
+    /// <summary>
+    /// A typed endpoint that is not <c>partial</c> gets MPEP001.
+    /// </summary>
+    /// <remarks>
+    /// The generator cannot supply the base class holding
+    /// <c>HandleAsync(TRequest, CancellationToken)</c>, so the user's own <c>override</c> has nothing
+    /// to override. Silently skipping emission left them a bare CS0115 on their own line with no
+    /// mention of the missing <c>partial</c> — the diagnostic that says exactly that existed and was
+    /// referenced from nowhere.
+    /// </remarks>
+    [Fact]
+    public void NonPartialTypedEndpoint_ReportsMPEP001()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            public class CreateUser : IPostEndpoint<UserRequest, UserResponse>
+            {
+                public static string Path => "/users";
+
+                public override Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
+                    => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("MPEP001", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("CreateUser", diagnostic.GetMessage());
+        // Pointing at the class's own identifier, not at the file or at nothing.
+        Assert.Equal("CreateUser", TextAt(diagnostic.Location));
+
+        Assert.DoesNotContain("partial class CreateUser", Generated(result));
+    }
+
+    /// <summary>
+    /// A typed endpoint whose own base class does not reach an endpoint base gets MPEP002.
+    /// </summary>
+    /// <remarks>
+    /// The generator cannot inject a second base class, so it skips emission. Before, that was the
+    /// end of it: no diagnostic, and — unlike the non-partial case — not even a compiler error to go
+    /// on, because the fixture's base class happens to satisfy the override. Silence plus a route
+    /// with no request binding was the worst of the three.
+    /// </remarks>
+    [Fact]
+    public void TypedEndpointWithAForeignBaseClass_ReportsMPEP002()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            public abstract class MyOwnBase
+            {
+            }
+
+            public partial class CreateUser : MyOwnBase, IPostEndpoint<UserRequest, UserResponse>
+            {
+                public static string Path => "/users";
+
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+
+                public Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
+                    => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("MPEP002", diagnostic.Id);
+        Assert.Contains("CreateUser", diagnostic.GetMessage());
+        Assert.Equal("CreateUser", TextAt(diagnostic.Location));
+        Assert.DoesNotContain("partial class CreateUser", Generated(result));
+    }
+
+    /// <summary>
+    /// A base class that already derives from one of the library's endpoint bases is the supported
+    /// way to share endpoint behaviour, so it reports nothing.
+    /// </summary>
+    /// <remarks>
+    /// The distinction matters in both directions: emission still has to be suppressed (a second
+    /// base clause on the partial is a CS0263), but there is nothing missing to warn about. Nor may
+    /// MPEP001 fire here — the class does not need to be <c>partial</c> when there is no base clause
+    /// left to add.
+    /// </remarks>
+    [Fact]
+    public void TypedEndpointWhoseBaseClassAlreadyDerivesFromAnEndpointBase_ReportsNothing()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            public abstract class CreateUserBase : PostEndpoint<UserRequest>
+            {
+                public static string Path => "/users";
+            }
+
+            public class CreateUser : CreateUserBase, IPostEndpoint<UserRequest, UserResponse>
+            {
+                public override Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
+                    => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.DoesNotContain("partial class CreateUser", Generated(result));
+        Assert.Contains("Map<global::Fixtures.CreateUser>", Generated(result));
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", source)));
+    }
+
+    /// <summary>
+    /// An endpoint in two groups gets MPEP003 — and still gets its base class.
+    /// </summary>
+    /// <remarks>
+    /// Two <c>IMemberOf&lt;T&gt;</c> means there is no single prefix, so the endpoint cannot be
+    /// routed. It used to be filtered out of the one list that drives the partial base class as
+    /// well, so a typed endpoint lost its route, its descriptor <i>and</i> its base class and failed
+    /// to compile with an unexplained CS0115. The base class has nothing to do with grouping, so it
+    /// is emitted regardless and the one real problem is reported once.
+    /// </remarks>
+    [Fact]
+    public void EndpointInTwoGroups_ReportsMPEP003_ButKeepsItsBaseClass()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            public class ApiGroup : IEndpointGroup
+            {
+                public static string Prefix => "/api";
+            }
+
+            public class AdminGroup : IEndpointGroup
+            {
+                public static string Prefix => "/admin";
+            }
+
+            public partial class CreateUser : IPostEndpoint<UserRequest, UserResponse>, IMemberOf<ApiGroup>, IMemberOf<AdminGroup>
+            {
+                public static string Path => "/users";
+
+                public override Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
+                    => Task.FromResult(Results.Ok());
+            }
+
+            public class HealthCheck : IGetEndpoint
+            {
+                public static string Path => "/health";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+        var generated = Generated(result);
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("MPEP003", diagnostic.Id);
+        Assert.Contains("CreateUser", diagnostic.GetMessage());
+        Assert.Equal("CreateUser", TextAt(diagnostic.Location));
+
+        // The base class, so the user's override compiles and the only error is the one that explains
+        // the actual mistake.
+        Assert.Contains(
+            "partial class CreateUser : global::MintPlayer.AspNetCore.Endpoints.PostEndpoint<global::Fixtures.UserRequest> { }",
+            generated);
+
+        // But no route and no descriptor: there is no prefix to put it behind.
+        Assert.DoesNotContain("Map<global::Fixtures.CreateUser>", generated);
+        Assert.DoesNotContain("Describe<global::Fixtures.CreateUser>", generated);
+        Assert.Contains("global::Fixtures.HealthCheck", generated);
+
+        // MPEP003 is the only error; the CS0115 that used to accompany it is gone.
+        var errors = Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", source));
+        Assert.DoesNotContain(errors, error => error.Id == "CS0115");
+    }
+
+    /// <summary>
+    /// An endpoint that inherits its endpoint interfaces through a base class keeps its verb, its
+    /// request type and its <c>Produces</c> metadata.
+    /// </summary>
+    /// <remarks>
+    /// The semantic gate uses <c>AllInterfaces</c>, so such a class is discovered; the details used
+    /// to be read back from <c>Interfaces</c>, which is direct-only and does not contain
+    /// <c>IPostEndpoint&lt;,&gt;</c> at all. The endpoint silently degraded to Raw/Custom — it kept
+    /// its route, because verb and path resolve through the base class at runtime, and lost the one
+    /// thing the typed-with-response level exists for.
+    /// </remarks>
+    [Fact]
+    public void EndpointInheritingItsInterfacesViaABaseClass_KeepsItsProducesMetadata()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            public class ApiGroup : IEndpointGroup
+            {
+                public static string Prefix => "/api";
+            }
+
+            public abstract class CreateUserBase : PostEndpoint<UserRequest>, IPostEndpoint<UserRequest, UserResponse>
+            {
+                public static string Path => "/users";
+            }
+
+            public class CreateUser : CreateUserBase, IMemberOf<ApiGroup>
+            {
+                public override Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
+                    => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+        var generated = Generated(result);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.Contains("Map<global::Fixtures.CreateUser>", generated);
+        Assert.Contains(
+            "Produces<global::Fixtures.CreateUser, global::Fixtures.UserRequest, global::Fixtures.UserResponse>(b);",
+            generated);
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", source)));
+    }
+
+    /// <summary>
+    /// A partial class split across files produces the same output whichever order the compiler hands
+    /// the files over in.
+    /// </summary>
+    /// <remarks>
+    /// Both declarations describe the same symbol, so the interface-derived facts agree; what
+    /// differed was read from the single declaration that triggered the callback — <c>partial</c> and
+    /// the base list. <c>GroupBy(fqn).First()</c> then kept whichever came first, so one order saw
+    /// the user's base class and skipped emission while the other injected a second base class and
+    /// produced a CS0263 in the consumer's own partial. Both are now read from the symbol, which has
+    /// no order.
+    /// </remarks>
+    [Fact]
+    public void PartialSplitAcrossFiles_ProducesOrderIndependentOutput()
+    {
+        const string withUserBaseClass = """
+            using MintPlayer.AspNetCore.Endpoints;
+
+            namespace Fixtures;
+
+            public partial class CreateUser : MyOwnBase, IMemberOf<ApiGroup>
+            {
+            }
+            """;
+
+        var withEndpointInterface = $$"""
+            {{Preamble}}
+
+            public class ApiGroup : IEndpointGroup
+            {
+                public static string Prefix => "/api";
+            }
+
+            // A base class of the consumer's own that already reaches an endpoint base — the shape
+            // the two declarations of CreateUser used to disagree about.
+            public abstract class MyOwnBase : PostEndpoint<UserRequest>
+            {
+            }
+
+            public partial class CreateUser : IPostEndpoint<UserRequest, UserResponse>
+            {
+                public static string Path => "/users";
+
+                public override Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
+                    => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var baseClassFirst = EndpointGeneratorHarness.Run("Fixtures", withUserBaseClass, withEndpointInterface);
+        var interfaceFirst = EndpointGeneratorHarness.Run("Fixtures", withEndpointInterface, withUserBaseClass);
+
+        Assert.Equal(Generated(baseClassFirst), Generated(interfaceFirst));
+        Assert.Empty(baseClassFirst.Diagnostics);
+        Assert.Empty(interfaceFirst.Diagnostics);
+
+        // Neither order injects a second base class, so neither produces a CS0263.
+        Assert.DoesNotContain("partial class CreateUser :", Generated(baseClassFirst));
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", withUserBaseClass, withEndpointInterface)));
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", withEndpointInterface, withUserBaseClass)));
+    }
+
+    /// <summary>
+    /// An assembly with no endpoints still gets its mapping method, as a no-op.
+    /// </summary>
+    /// <remarks>
+    /// The producer used to return before writing a line, so no file was emitted and the
+    /// <c>app.MapFixturesEndpoints()</c> the consumer was told to write did not resolve. A project
+    /// that has not written its first endpoint yet, or whose endpoints all live in another assembly,
+    /// could not compile the call.
+    /// </remarks>
+    [Fact]
+    public void ZeroEndpoints_StillEmitsANoOpMappingMethod()
+    {
+        const string source = """
+            using Microsoft.AspNetCore.Routing;
+            using MintPlayer.AspNetCore.Endpoints;
+
+            namespace Fixtures;
+
+            public class ApiGroup : IEndpointGroup
+            {
+                public static string Prefix => "/api";
+            }
+
+            public static class Startup
+            {
+                public static void Configure(IEndpointRouteBuilder app) => app.MapFixturesEndpoints();
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+        var generated = Generated(result);
+
+        Assert.Contains("MapFixturesEndpoints(this", generated);
+        Assert.Contains("return app;", generated);
+        // Nothing to map, so no group is mapped either.
+        Assert.DoesNotContain("var grp0", generated);
+
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", source)));
+    }
+}

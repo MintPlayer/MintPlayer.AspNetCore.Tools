@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc.Formatters;
+using Microsoft.AspNetCore.Mvc.Formatters;
 using Microsoft.Extensions.Options;
 using MintPlayer.AspNetCore.SitemapXml.Abstractions.Data;
 using MintPlayer.AspNetCore.SitemapXml.Options;
@@ -13,6 +13,11 @@ internal class XmlSerializerOutputFormatter : Microsoft.AspNetCore.Mvc.Formatter
     public XmlSerializerOutputFormatter()
     {
         this.WriterSettings.OmitXmlDeclaration = false;
+
+        // We always close the TextWriter, so the XmlWriter shouldn't. Set once here rather than
+        // per request: WriterSettings is a single long-lived instance shared by every response.
+        this.WriterSettings.CloseOutput = false;
+
         this.SupportedMediaTypes.Clear();
         this.SupportedMediaTypes.Add("text/xml");
         this.SupportedMediaTypes.Add("application/xml");
@@ -28,39 +33,30 @@ internal class XmlSerializerOutputFormatter : Microsoft.AspNetCore.Mvc.Formatter
 
     public override XmlWriter CreateXmlWriter(OutputFormatterWriteContext context, TextWriter writer, XmlWriterSettings xmlWriterSettings)
     {
-        if (writer == null)
-            throw new ArgumentNullException(nameof(writer));
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(xmlWriterSettings);
 
-        if (xmlWriterSettings == null)
-            throw new ArgumentNullException(nameof(xmlWriterSettings));
+        // Clone before touching anything: the base class hands us its own shared WriterSettings,
+        // so mutating the instance would be a per-request write to formatter-wide state.
+        var settings = xmlWriterSettings.Clone();
+        settings.CloseOutput = false;
 
-        if (context.HttpContext == null)
-            throw new InvalidOperationException($"The {nameof(XmlSerializerOutputFormatter)} can only be used in an HTTP context");
+        var xmlWriter = XmlWriter.Create(writer, settings);
 
-        // We always close the TextWriter, so the XmlWriter shouldn't.
-        xmlWriterSettings.CloseOutput = false;
+        var options = context.HttpContext.RequestServices?.GetService<IOptions<SitemapXmlOptions>>();
+        if (StylesheetUrl.Resolve(options?.Value?.StylesheetUrl) is string stylesheetUrl)
+            xmlWriter.WriteProcessingInstruction("xml-stylesheet", $@"type=""text/xsl"" href=""{stylesheetUrl}""");
 
-        var xmlWriter = XmlWriter.Create(writer, xmlWriterSettings);
-        if (context.HttpContext.RequestServices.GetService<IOptions<SitemapXmlOptions>>() is IOptions<SitemapXmlOptions> options
-            && !string.IsNullOrEmpty(options?.Value?.StylesheetUrl))
-               xmlWriter.WriteProcessingInstruction("xml-stylesheet", $@"type=""text/xsl"" href=""{options.Value.StylesheetUrl}""");
-        
         return xmlWriter;
     }
 
+    /// <remarks>
+    /// <c>IsAssignableFrom</c> rather than type equality, so a consumer subclassing
+    /// <see cref="UrlSet"/> or <see cref="SitemapIndex"/> to add their own extension elements
+    /// keeps this formatter instead of silently falling through to the default XML formatter.
+    /// </remarks>
     protected override bool CanWriteType(Type? type)
-    {
-        if (type == typeof(SitemapIndex))
-        {
-            return true;
-        }
-        else if (type == typeof(UrlSet))
-        {
-            return true;
-        }
-        else
-        {
-            return false;
-        }
-    }
+        => type is not null
+            && (typeof(SitemapIndex).IsAssignableFrom(type) || typeof(UrlSet).IsAssignableFrom(type));
 }

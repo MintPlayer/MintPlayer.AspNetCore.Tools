@@ -142,6 +142,23 @@ Convenience interfaces automatically provide the HTTP method. Each comes in thre
 | `IPatchEndpoint` / `IPatchEndpoint<TReq>` / `IPatchEndpoint<TReq, TResp>` | PATCH | Yes |
 | `IDeleteEndpoint` / `IDeleteEndpoint<TReq>` / `IDeleteEndpoint<TReq, TResp>` | DELETE | No (manual binding) |
 
+A class may also declare its own `Methods` while implementing a convenience interface — the class
+member is more specific than the interface's, so it wins:
+
+```csharp
+public class HealthCheck : IGetEndpoint
+{
+    public static string Path => "/health";
+    public static IEnumerable<string> Methods => ["GET", "HEAD"];
+
+    public Task<IResult> HandleAsync(HttpContext httpContext)
+        => Task.FromResult(Results.Ok());
+}
+```
+
+A class implementing **two** convenience interfaces must do this — otherwise neither verb is most
+specific and the compiler reports `CS8705`. Declaring `Methods` resolves it and yields the union.
+
 For custom or multiple HTTP methods, implement `IEndpoint` directly and provide `Methods`:
 
 ```csharp
@@ -312,7 +329,9 @@ public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserRes
 }
 ```
 
-Endpoints also support `IDisposable` and `IAsyncDisposable` for cleanup:
+Endpoints also support `IDisposable` and `IAsyncDisposable` for cleanup. Both registration paths
+prefer `IAsyncDisposable`, and the base class's `DisposeAsync` forwards to `Dispose()`, so overriding
+either one is enough:
 
 ```csharp
 public partial class GetUser : IGetEndpoint<GetUserRequest, UserResponse>, IMemberOf<UsersApi>
@@ -357,6 +376,46 @@ public partial class UploadFile : IPostEndpoint<UploadRequest>
 }
 ```
 
+## Binding failures
+
+A request the library cannot bind never reaches your `HandleAsync(TRequest, CancellationToken)` —
+its signature promises a non-null request, so handing it a null would turn a malformed request into
+a 500 from inside your own code. Instead the bridge answers:
+
+| Request | Response |
+|---------|----------|
+| Empty, whitespace-only or malformed JSON body | `400 Bad Request` |
+| A content type the endpoint cannot read | `415 Unsupported Media Type` |
+| A literal JSON `null` body, or a binder returning `default` | `400 Bad Request` |
+| An input formatter that recorded validation errors | `400 Bad Request`, with the errors in the detail |
+
+Custom binders say the same thing by throwing `EndpointBindingException`:
+
+```csharp
+protected override ValueTask<GetUserRequest?> BindRequestAsync(HttpContext context)
+{
+    if (!int.TryParse(context.Request.RouteValues["id"]?.ToString(), out var id))
+        throw new EndpointBindingException(StatusCodes.Status400BadRequest, "The id must be an integer.");
+
+    return ValueTask.FromResult<GetUserRequest?>(new GetUserRequest(id));
+}
+```
+
+Any *other* exception from your binder propagates untouched: the library cannot tell a malformed
+request from a bug in the binder, and guessing `400` would hide the real ones.
+
+Override `OnBindFailedAsync` to change the response — to add problem details, to log, or to map a
+failure onto a different status code:
+
+```csharp
+protected override ValueTask<IResult> OnBindFailedAsync(HttpContext context, EndpointBindingException? failure)
+    => new(Results.Problem(
+        statusCode: failure?.StatusCode ?? StatusCodes.Status400BadRequest,
+        title: "The request could not be read."));
+```
+
+`failure` is `null` when binding completed but produced no request at all.
+
 ## Endpoint metadata
 
 The `EndpointDescriptor` list is available on the generated extensions class for introspection:
@@ -371,6 +430,22 @@ foreach (var ep in endpoints)
 }
 ```
 
+`Path` is the **fully resolved** route, with group prefixes composed in — the route a request has to
+use, not the group-relative `TEndpoint.Path`. So a grouped endpoint appears as `/api/users/{id}`.
+
+`Name` is the class name, unless `[EndpointDescriptorName]` says otherwise:
+
+```csharp
+[EndpointDescriptorName("Health")]
+public class HealthCheckEndpoint : IGetEndpoint
+{
+    // ... described as "Health"
+}
+```
+
+`EndpointDescriptor` compares by value, including its `Methods` list, so descriptors work as
+dictionary keys and in sets.
+
 ## Manual registration
 
 For one-off registrations without the source generator:
@@ -379,15 +454,34 @@ For one-off registrations without the source generator:
 app.MapEndpoint<HealthCheck>();
 ```
 
+Group membership is honoured, so an endpoint declaring `IMemberOf<UsersApi>` is mapped under its
+group's prefix — the same route the generated mapping gives it, including nested groups and the
+groups' `Configure` hooks. Each call builds its own group chain, so a group's `Configure` runs once
+per call.
+
+An endpoint (or group) declaring `IMemberOf<T>` for more than one group, and a cyclic group nesting,
+have no single prefix to resolve; `MapEndpoint<T>()` throws `InvalidOperationException` rather than
+picking one. The generator reports the same shapes as MPEP003, MPEP004 and MPEP005.
+
 ## Analyzer diagnostics
 
 The source generator emits diagnostics for common mistakes:
 
-| Code | Description |
-|------|-------------|
-| MPEP001 | Endpoint class implements a typed endpoint interface and must be declared as `partial` |
-| MPEP002 | Endpoint class already has a base class; the generator cannot add the required base class |
-| MPEP003 | Endpoint class implements `IMemberOf<T>` for multiple groups; only one group is allowed |
+| Code | Severity | Description |
+|------|----------|-------------|
+| MPEP001 | Error | Endpoint class implements a typed endpoint interface and must be declared as `partial` |
+| MPEP002 | Error | Endpoint class already has a base class that does not derive from an endpoint base, so the generator cannot add the required one |
+| MPEP003 | Error | Endpoint class implements `IMemberOf<T>` for multiple groups; only one group is allowed |
+| MPEP004 | Error | Endpoint group implements `IMemberOf<T>` for multiple parent groups; only one parent is allowed |
+| MPEP005 | Error | Endpoint group is nested inside itself through `IMemberOf<T>` |
+| MPEP006 | Warning | The mapping method name had to be adjusted, because the assembly name or `[assembly: EndpointsMethodName]` is not a valid C# identifier |
+
+A base class that **already** derives from one of the endpoint bases (`PostEndpoint<T>`,
+`GetEndpoint<T>`, …) is the supported way to share endpoint behaviour and reports nothing — the
+generator has nothing left to add, and such a class need not be `partial`.
+
+An endpoint dropped for MPEP003 still gets its generated base class, so the ambiguous group is the
+only error you see.
 
 ## How the source generator works
 
@@ -398,6 +492,16 @@ The source generator discovers all classes implementing `IEndpointBase` and gene
 3. **A single `Map{Name}Endpoints()` extension method** that registers all endpoints, including route groups
 4. **`.Produces<TResponse>(statusCode)`** calls for endpoints with a response type
 5. **An `Endpoints` property** listing all registered `EndpointDescriptor` records
+
+The extensions class is emitted into `MintPlayer.AspNetCore.Endpoints.Generated`, together with a
+`global using` for that namespace — so `app.Map{Name}Endpoints()` resolves with no extra import, and
+a method name that happens to strip down to a shipped type's name cannot shadow it. The emitted file
+carries the using directives its own calls need, so it also compiles in a plain `Microsoft.NET.Sdk`
+project and with `<ImplicitUsings>disable</ImplicitUsings>`.
+
+Emission is ordered by fully qualified name throughout — routes, factory fields and descriptors —
+so the generated file is identical across builds. An assembly with no endpoints still gets its
+mapping method, as a no-op.
 
 For a typed POST endpoint like:
 

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<TargetFramework>netstandard2.0</TargetFramework>
@@ -10,7 +10,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints.Generator</PackageId>
-		<Version>10.0.0</Version>
+		<Version>11.0.0</Version>
 		<IncludeSymbols>false</IncludeSymbols>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<DevelopmentDependency>true</DevelopmentDependency>
@@ -35,13 +35,24 @@
 		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="10.16.0" PrivateAssets="all" GeneratePathProperty="true" />
 	</ItemGroup>
 
-	<ItemGroup>
-		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" />
-	</ItemGroup>
+	<!--
+	One mechanism packs the analyzer here and in MintPlayer.AspNetCore.Endpoints: GetTargetPath,
+	whose TargetPathWithTargetPlatformMoniker output already carries this assembly *and* every
+	dependency GetDependencyTargetPaths adds below. The two hard-coded globs this replaces
+	disagreed with each other — the sibling project spelled out a literal
+	..\Generator\bin\$(Configuration)\netstandard2.0\ path — and only one of them was
+	Configuration-conditioned, so a Debug pack shipped without MintPlayer.SourceGenerators.Tools
+	and the analyzer then failed to load in the consumer, with nothing wrong at pack time.
+	-->
+	<PropertyGroup>
+		<TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackAnalyzerAssemblies</TargetsForTfmSpecificContentInPackage>
+	</PropertyGroup>
 
-	<ItemGroup Condition="'$(Configuration)' == 'Release' ">
-		<None Include="$(PkgMintPlayer_SourceGenerators_Tools)\lib\netstandard2.0\*.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-	</ItemGroup>
+	<Target Name="PackAnalyzerAssemblies" DependsOnTargets="GetTargetPath">
+		<ItemGroup>
+			<TfmSpecificPackageFile Include="@(TargetPathWithTargetPlatformMoniker)" PackagePath="analyzers/dotnet/cs" />
+		</ItemGroup>
+	</Target>
 
 	<Target Name="GetDependencyTargetPaths">
 		<ItemGroup>

@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+
+          <!--
+          Test fixtures must not dilute the number. The endpoint fixtures in
+          MintPlayer.AspNetCore.Endpoints.Generator.Tests exist purely to be fed to a
+          generator driver; instrumenting them would add coverable lines that are not
+          shipped code.
+          -->
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+
+          <!--
+          The ONLY assembly exclusion, and it is deliberate.
+
+          MintPlayer.AspNetCore.Endpoints.TestApp is IsPackable=false sample code. The
+          end-to-end tests need a ProjectReference to it for WebApplicationFactory<Program>,
+          which copies its DLL+PDB into the test output and makes it instrumentable. Sample
+          code in the denominator is how you get a coverage number that means nothing: the
+          sibling repo measured a project reporting 46.9% where 48% of the denominator was
+          unreachable generator code, and the honest figure was 88.5%.
+
+          Do NOT grow this list to hide uncovered shipped code. Everything else that is
+          instrumented here is published to NuGet and belongs in the number.
+          -->
+          <Exclude>[MintPlayer.AspNetCore.Endpoints.TestApp]*</Exclude>
+
+          <!--
+          Pinned to false, not left to the default.
+
+          SourceLink is ACTIVE in this repo: all 16 projects emit obj/**/*.sourcelink.json
+          via the SDK-bundled SourceLink, triggered by the <RepositoryUrl>/<RepositoryType>
+          metadata in every packable csproj (there is no Microsoft.SourceLink.* package
+          reference anywhere, which is why it is easy to miss).
+
+          UseSourceLink=true rewrites `filename` to raw.githubusercontent.com URLs. The
+          coverage server suffix-matches report paths against `git ls-files` and requires a
+          UNIQUE match; a URL tail makes every duplicated basename ambiguous, and ambiguous
+          paths are dropped SILENTLY and excluded from the totals. This repo has five
+          duplicated basenames (Image.cs, ServiceCollectionExtensions.cs, StringExtensions.cs,
+          Url.cs, XmlSerializerOutputFormatter.cs), so that would lose real data with no error.
+          -->
+          <UseSourceLink>false</UseSourceLink>
+
+          <!--
+          Pinned to false so the coupling is visible rather than discovered.
+
+          Correct TODAY only because ContinuousIntegrationBuild=true lives on the
+          `dotnet pack` (with no-build) command in publish-release.yml, where it never reaches the
+          compiler (the PDBs were already written by the Build step without it). Verified by
+          rebuilding one project with the flag: its document map collapsed from
+          C:\Repos\MintPlayer.AspNetCore.Tools\* to /_/*.
+
+          If that property ever moves to a Directory.Build.props or onto the Build step,
+          every path coverlet sees becomes /_/... and this MUST flip to true.
+          -->
+          <DeterministicReport>false</DeterministicReport>
+
+          <!--
+          Measured in the sibling repo as a 0.13pp change that also drops files from the
+          server's file tree entirely. Not worth it.
+          -->
+          <SkipAutoProps>false</SkipAutoProps>
+
+          <!--
+          MEASURED, and then re-measured after the first pattern proved to be fitted to an
+          unstable observation. Read this before changing it.
+
+          The four libraries consuming MintPlayer.SourceGenerators report generated documents that
+          do NOT exist on disk and are NOT git-tracked: they are virtual paths for source the
+          generator only ever held in memory. The coverage server cannot resolve them against
+          `git ls-files` and drops them silently, so leaving them in makes the local denominator
+          disagree with the server.
+
+          The first attempt was **/obj/** alone, because that is where those paths pointed at the
+          time: obj/Release/net10.0/MintPlayer.SourceGenerators/.../Inject.g.cs. On a later run the
+          very same generator reported them under a TEMP directory instead
+          (.../AppData/Local/Temp/.../gen/MintPlayer.SourceGenerators/.../Inject.g.cs). Those two
+          files then sat OUTSIDE the repository root, which dropped coverlet's longest-common-prefix
+          <sources> from the repo root to "C:/" and re-prefixed every path in the report with
+          "Repos/MintPlayer.AspNetCore.Tools/" — turning 49 previously-resolvable files into
+          unmatched ones in a single stroke.
+
+          So the exclusion is by FILENAME, which is a property of the generated document, rather
+          than by location, which is not. **/obj/** is kept as a second line of defence for anything
+          else under obj that is not named *.g.cs.
+
+          Note **/*.g.cs also matches the SDK's own *.GlobalUsings.g.cs. That is harmless: those
+          files carry no coverable lines and never appeared in a report.
+          -->
+          <ExcludeByFile>**/*.g.cs,**/obj/**</ExcludeByFile>
+
+          <!--
+          ExcludeByFile is deliberately NOT SET YET. It must be decided by measurement
+          against a real report, not copied from the sibling repo, because the situation
+          here is different:
+
+          The sibling's ExcludeByFile=**/*.g.cs removed 6 real files / 738 coverable lines
+          of on-disk generated code. In THIS repo the external MintPlayer.SourceGenerators
+          (10.13.0 — LoggerProviders, MustChangePassword, NoSniff, SitemapXml) writes
+          NOTHING to disk. Verified: the only 16 *.g.cs files under obj/ are the SDK's own
+          *.GlobalUsings.g.cs, and the obj/Release/net10.0/MintPlayer.SourceGenerators/.../
+          ClassNames.g.cs paths that appear in build warnings DO NOT EXIST as files.
+          EmitCompilerGeneratedFiles is set nowhere.
+
+          Those synthetic paths still appear in the PDB and will show up in the report.
+          Whether a coverlet file-glob can match a path with no file behind it is behaviour
+          to be TESTED once a real report exists — not assumed. See PLAN M10.
+
+          ExcludeByAttribute is also NOT set. The usual snippet is actively harmful; the
+          sibling measured it: Obsolete -125 lines (Roslyn puts a synthetic [Obsolete] on
+          `readonly ref struct`), CompilerGeneratedAttribute -194 lines (every async state
+          machine body), GeneratedCodeAttribute 0.
+
+          No <Include> allowlist either: instrumentation is already scoped by "has a PDB in
+          the test output", and an allowlist is just a second place to forget a new package.
+          -->
+
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

@@ -6,6 +6,14 @@ on:
       - 'master'
       # - 'release/**'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build:
     name: publish-release
@@ -13,27 +21,72 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@v4
-      
+      uses: actions/checkout@v5
+
     - name: Setup .NET Core
-      uses: actions/setup-dotnet@v4
+      uses: actions/setup-dotnet@v5
       with:
         dotnet-version: 10.0.100
         # Authenticates packages to push to GPR
         source-url: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
       env:
         NUGET_AUTH_TOKEN: '%NUGET_AUTH_TOKEN%'
-    
+
     - name: Install dependencies
       run: dotnet restore
       env:
         NUGET_AUTH_TOKEN: ${{ github.token }}
-        
+
     - name: Build
       run: dotnet build --configuration Release --no-restore
-      
+
     - name: Test
-      run: dotnet test --no-restore --verbosity normal
+      # --no-build: `--no-restore` alone does NOT imply it. Without this the solution gets
+      # built a second time in Debug and coverage is measured on that build while the Pack
+      # step below ships the Release one.
+      #
+      # --collect writes coverage.cobertura.xml into a GUID-named subdirectory of
+      # --results-directory, one per test project, hence the ** in the upload glob below.
+      run: >
+        dotnet test --no-restore --no-build --configuration Release
+        --settings coverlet.runsettings
+        --collect:"XPlat Code Coverage" --results-directory coverage
+
+    - name: Assert tests actually ran
+      # `dotnet test` exits 0 and prints NOTHING when it finds no test project — verified on
+      # SDK 10.0.400. Without this step a test project accidentally left out of the .sln is
+      # indistinguishable from a passing run, and this workflow would publish to NuGet on
+      # the strength of a green check that tested nothing.
+      run: |
+        shopt -s globstar nullglob
+        reports=(coverage/**/coverage.cobertura.xml)
+        if [ ${#reports[@]} -eq 0 ]; then
+          echo "::error::No coverage report was produced. Either no test project ran, or the coverlet collector failed."
+          exit 1
+        fi
+        echo "Found ${#reports[@]} coverage report(s):"
+        printf '  %s\n' "${reports[@]}"
+
+    # Deliberately BEFORE Pack: see fail-ci-if-error below.
+    - name: Upload coverage
+      # hashFiles guard: a run that produced no report is a no-op rather than an upload of
+      # nothing.
+      if: always() && hashFiles('coverage/**/coverage.cobertura.xml') != ''
+      uses: MintPlayer/CodeCoverage/action@master
+      with:
+        # Must be exactly this value, not a "normalised" variant: it doubles as the OIDC
+        # audience server-side.
+        url: https://coverage.mintplayer.com
+        token: ${{ secrets.COVERAGE_TOKEN }}
+        files: |
+          coverage/**/coverage.cobertura.xml
+        # With search on, a glob that matches nothing silently falls back to auto-detection
+        # and would upload stray unparsable reports.
+        disable-search: true
+        finish: true
+        # A coverage-service outage, or a missing COVERAGE_TOKEN, must not fail this workflow
+        # before Pack and block a NuGet release over a reporting problem.
+        fail-ci-if-error: false
 
     - name: Pack
       run: dotnet pack --no-build --configuration Release /p:ContinuousIntegrationBuild=true
