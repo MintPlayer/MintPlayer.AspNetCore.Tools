@@ -358,10 +358,29 @@ UriKind.Absolute, out _)` is `false` on Windows and **`true` on Linux**, where a
 slash is a valid Unix path and the value parses as `file:///p2`. The leading-slash
 validation gaps below are fixed with `string`/`PathString` checks.
 
+**R4.6 — `FileShare` is not enforced on Unix.** Added *after* it failed CI, not before. On
+Windows the OS enforces share modes, so a foreign writer holding a file with `FileShare.Read`
+makes the next writer fail with `IOException`; on Unix .NET does not translate share modes into
+advisory locks, so the second writer simply succeeds. A test asserting the Windows behaviour
+unconditionally passes locally and fails on the runner.
+
+Where a platform genuinely differs, **split the assertion and say why** rather than skipping the
+test: the logger's real contract — never silently drop a line — holds on both platforms, and only
+the mechanism differs.
+
 Before the suite is called done, grep every new test for `UriKind`, drive letters,
-`Environment.NewLine`, and culture-sensitive casing. The sibling recorded that naming a
-suspect is not the same as auditing the class of problem — its predicted hazard passed
-and an unremarkable `Uri.TryCreate` bit instead.
+`Environment.NewLine`, culture-sensitive casing, **and `FileShare`/`FileAccess` assertions**. The
+sibling recorded that naming a suspect is not the same as auditing the class of problem — its
+predicted hazard passed and an unremarkable `Uri.TryCreate` bit instead.
+
+**That lesson then repeated here, one level up.** The R4 list was written from the sibling's
+experience; the audit grepped exactly the patterns it named; it came back clean; and CI failed on
+a fifth pattern nobody had listed. **A grep for known patterns audits the patterns, not the class.**
+
+The habit this project keeps arriving at from different directions is the durable one: *a claim
+about framework behaviour is a hypothesis until the other platform has executed it.* The cheap way
+to buy that is to let CI run once before believing the suite is finished — which is what happened,
+and it cost one commit rather than a bad merge.
 
 ### R5 — Repo hygiene and guards
 
@@ -791,7 +810,7 @@ for lack of instrumentable IL was wrong twice over: it appeared from the first r
 | Generator coverage silently zero (R3.7) | Acceptance criterion 5 asserts non-zero covered lines, and the copy target carries a hard `<Error>` if the asset list is empty |
 | Report paths ambiguous ⇒ files silently dropped (P3.1) | R2.1 single project; acceptance criterion 3 simulates the server's matcher |
 | A test passing for the wrong reason against `DefaultHttpContext` (P3.2) | R3.1 recording feature; each such test asserts the callback *count* as well as the effect |
-| Windows-green / ubuntu-red (R4) | R4.1–R4.5 rules, plus the pre-completion grep |
+| Windows-green / ubuntu-red (R4) | R4.1–R4.6 rules, plus the pre-completion grep — and one CI round before declaring done, which is what actually caught R4.6 |
 | `COVERAGE_TOKEN` / GitHub App missing ⇒ upload warns and skips | Documented as an out-of-band prerequisite; `fail-ci-if-error: false` keeps it non-blocking either way |
 | Fixing 27 defects alongside a new suite is a large diff | Deliberate, per the repo's one-PR convention. Defects are fixed in a dedicated milestone *after* the tests that pin current behaviour exist, so each fix shows as a test change. |
 
