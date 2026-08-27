@@ -1,8 +1,15 @@
-using Microsoft.AspNetCore.Mvc.Razor;
+﻿using Microsoft.AspNetCore.Mvc.Razor;
 using Microsoft.Extensions.Options;
 
 namespace MintPlayer.AspNetCore.SubDirectoryViews;
 
+/// <summary>
+/// Relocates Razor view discovery into a subfolder of the project.
+/// </summary>
+/// <remarks>
+/// Useful when the views live alongside a client application rather than at the project root — for
+/// example a <c>ClientApp</c> or <c>Web</c> folder shared with a SPA build.
+/// </remarks>
 public static class ServiceCollectionExtensions
 {
     /// <summary>

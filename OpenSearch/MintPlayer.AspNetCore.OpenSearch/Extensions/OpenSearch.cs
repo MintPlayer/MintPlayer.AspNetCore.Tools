@@ -7,6 +7,11 @@ using System.Text;
 
 namespace MintPlayer.AspNetCore.OpenSearch
 {
+    /// <summary>
+    /// Wires an OpenSearch engine into the host app: <see cref="AddOpenSearch{TService}(IServiceCollection)"/>
+    /// registers the search implementation, <see cref="MapOpenSearch(IEndpointRouteBuilder)"/> exposes
+    /// the three endpoints a browser needs to discover and use it.
+    /// </summary>
     public static class OpenSearchExtensions
     {
         internal const string OsdxMediaType = "application/opensearchdescription+xml";
@@ -19,6 +24,21 @@ namespace MintPlayer.AspNetCore.OpenSearch
         /// </summary>
         private static readonly Formatters.XmlSerializerOutputFormatter osdxFormatter = new();
 
+        /// <summary>
+        /// Registers <typeparamref name="TService"/> as the app's search implementation and installs the
+        /// XML output formatter that writes the description document.
+        /// </summary>
+        /// <typeparam name="TService">
+        /// The host app's <see cref="IOpenSearchService"/>, resolved per request (scoped), so it may take
+        /// a scoped dependency such as a database context.
+        /// </typeparam>
+        /// <param name="services">The service collection.</param>
+        /// <remarks>
+        /// Leaves every <see cref="OpenSearchOptions"/> at its default; use the
+        /// <see cref="AddOpenSearch{TService}(IServiceCollection, Action{OpenSearchOptions})"/> overload to
+        /// configure them. Calling <see cref="MapOpenSearch(IEndpointRouteBuilder)"/> without having called
+        /// one of these first is an error the map call detects and reports.
+        /// </remarks>
         public static IServiceCollection AddOpenSearch<TService>(this IServiceCollection services) where TService : class, IOpenSearchService
         {
             services.AddControllersWithViews()
@@ -33,6 +53,17 @@ namespace MintPlayer.AspNetCore.OpenSearch
             return services.AddScoped<IOpenSearchService, TService>();
         }
 
+        /// <summary>
+        /// Registers <typeparamref name="TService"/> as the app's search implementation and configures how
+        /// the engine advertises itself.
+        /// </summary>
+        /// <typeparam name="TService">The host app's <see cref="IOpenSearchService"/>, registered scoped.</typeparam>
+        /// <param name="services">The service collection.</param>
+        /// <param name="options">
+        /// Applied to <see cref="OpenSearchOptions"/>. The values are read once, when
+        /// <see cref="MapOpenSearch(IEndpointRouteBuilder)"/> builds the endpoints — a later reconfiguration
+        /// has no effect, and an invalid path is reported from there rather than from here.
+        /// </param>
         public static IServiceCollection AddOpenSearch<TService>(this IServiceCollection services, Action<OpenSearchOptions> options) where TService : class, IOpenSearchService
         {
             services.AddOpenSearch<TService>();
@@ -40,6 +71,34 @@ namespace MintPlayer.AspNetCore.OpenSearch
             return services;
         }
 
+        /// <summary>
+        /// Maps the three endpoints an OpenSearch engine consists of.
+        /// </summary>
+        /// <param name="routes">The endpoint route builder.</param>
+        /// <remarks>
+        /// <list type="bullet">
+        /// <item><description>
+        /// <see cref="OpenSearchOptions.OsdxEndpoint"/> serves the description document, as
+        /// <c>application/opensearchdescription+xml</c> with a <c>Content-Disposition</c> filename derived
+        /// from <see cref="OpenSearchOptions.ShortName"/>. Link it from the page head with
+        /// <c>&lt;link rel="search" type="application/opensearchdescription+xml"&gt;</c> for browsers to
+        /// discover it. Every URL in the document is made absolute against the requesting host, so the
+        /// same app answers correctly behind a different origin or path base.
+        /// </description></item>
+        /// <item><description>
+        /// <see cref="OpenSearchOptions.SuggestUrl"/> answers autocomplete polls with the OpenSearch
+        /// suggestions JSON array from <see cref="IOpenSearchService.ProvideSuggestions"/>.
+        /// </description></item>
+        /// <item><description>
+        /// <see cref="OpenSearchOptions.SearchUrl"/> asks <see cref="IOpenSearchService.PerformSearch"/>
+        /// where to send the user and answers with that redirect.
+        /// </description></item>
+        /// </list>
+        /// </remarks>
+        /// <exception cref="InvalidOperationException">
+        /// <c>AddOpenSearch</c> was never called, or one of the three path options is not a usable route
+        /// pattern — it must start with <c>/</c> and must not contain a query string.
+        /// </exception>
         public static IEndpointRouteBuilder MapOpenSearch(this IEndpointRouteBuilder routes)
         {
             if (routes == null) throw new ArgumentNullException(nameof(routes));

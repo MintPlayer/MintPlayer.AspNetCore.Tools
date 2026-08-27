@@ -9,10 +9,13 @@ using Microsoft.Extensions.Options;
 namespace MintPlayer.AspNetCore.Endpoints;
 
 /// <summary>
-/// Base class for body-based endpoints (POST, PUT, PATCH).
-/// Provides content-negotiated request body parsing using MVC input formatters
-/// (if available) with JSON fallback.
+/// Base class for endpoints whose request comes from the body (POST, PUT, PATCH). The counterpart of
+/// <see cref="NonBodyEndpoint{TRequest}"/>: this one <i>does</i> supply a working
+/// <see cref="BindRequestAsync"/>, so a subclass need not write any binding at all — the body is
+/// content-negotiated through MVC's input formatters where they are registered, and deserialized as
+/// JSON where they are not.
 /// </summary>
+/// <typeparam name="TRequest">The type the request body is deserialized into.</typeparam>
 public abstract class BodyEndpoint<TRequest> : EndpointBase<TRequest>
 {
     /// <summary>
@@ -31,6 +34,7 @@ public abstract class BodyEndpoint<TRequest> : EndpointBase<TRequest>
     /// client for a double-read inside the library.
     /// </para>
     /// </remarks>
+    /// <param name="context">The request to read the body from.</param>
     protected override async ValueTask<TRequest?> BindRequestAsync(HttpContext context)
     {
         // Try MVC input formatters (available if AddControllers/AddMvc was called)

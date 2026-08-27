@@ -14,5 +14,10 @@ namespace MintPlayer.AspNetCore.Endpoints;
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
 public sealed class EndpointDescriptorNameAttribute(string name) : Attribute
 {
+    /// <summary>
+    /// The name recorded in the endpoint's <see cref="EndpointDescriptor"/>. Used verbatim — it is
+    /// not validated, deduplicated, or turned into an ASP.NET Core route name, so it does not
+    /// participate in link generation.
+    /// </summary>
     public string Name { get; } = name;
 }

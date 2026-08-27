@@ -1,4 +1,4 @@
-using MintPlayer.AspNetCore.SitemapXml.Abstractions;
+﻿using MintPlayer.AspNetCore.SitemapXml.Abstractions;
 using Xunit;
 using SitemapXmlService = MintPlayer.AspNetCore.SitemapXml.DependencyInjection.SitemapXml;
 
@@ -133,7 +133,7 @@ public class SitemapXmlServiceTests
 
         Assert.Equal(
             ["https://example.org/sitemap-1.xml", "https://example.org/sitemap-2.xml", "https://example.org/sitemap-3.xml"],
-            result.Select(s => s.Loc).ToArray());
+            result.Select(s => s.Loc!).ToArray());
     }
 
     /// <summary>
@@ -281,7 +281,7 @@ public class SitemapXmlServiceTests
 
         var result = CreateService().GetSitemapIndex(source, 2, (pp, page) => $"/s/{page}").ToList();
 
-        Assert.Equal(["/s/1", "/s/2", "/s/3"], result.Select(sitemap => sitemap.Loc).ToArray());
+        Assert.Equal(["/s/1", "/s/2", "/s/3"], result.Select(sitemap => sitemap.Loc!).ToArray());
         Assert.Equal(new DateTime(2024, 1, 5), result[2].LastMod);
     }
 

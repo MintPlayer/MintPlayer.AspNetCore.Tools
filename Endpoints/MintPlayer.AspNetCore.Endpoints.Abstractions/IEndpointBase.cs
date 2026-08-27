@@ -5,7 +5,16 @@ namespace MintPlayer.AspNetCore.Endpoints;
 /// </summary>
 public interface IEndpointBase
 {
-    /// <summary>The route pattern (e.g., "/api/users/{id}").</summary>
+    /// <summary>
+    /// The route pattern this endpoint answers on (e.g. <c>"/api/users/{id}"</c>), <b>relative to
+    /// the prefix of the group it belongs to</b>. An endpoint declaring
+    /// <c>IMemberOf&lt;UsersApi&gt;</c> where the group's prefix is <c>"/api/users"</c> writes
+    /// <c>"/{id}"</c> here, not the full route.
+    /// </summary>
+    /// <remarks>
+    /// The composed route — what a request actually has to spell — is reported by
+    /// <see cref="EndpointDescriptor.Path"/>, not by this member.
+    /// </remarks>
     static abstract string Path { get; }
 
     /// <summary>

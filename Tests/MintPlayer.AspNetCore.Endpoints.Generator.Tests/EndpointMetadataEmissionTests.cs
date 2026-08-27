@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Http.Metadata;
+﻿using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.CodeAnalysis;
 using MintPlayer.AspNetCore.Endpoints.Generator.Tests.Infrastructure;
@@ -142,18 +142,18 @@ public class EndpointMetadataEmissionTests
 
         var routes = GeneratedEndpointHost.MapAndCollectRoutes(generated, assemblyName);
 
-        var created = Assert.Single(routes.Where(route =>
-            route.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Contains("POST")));
+        var created = Assert.Single(routes, route =>
+            route.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Contains("POST"));
         var produces = Assert.Single(created.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>());
         Assert.Equal(201, produces.StatusCode);
 
         // The default is 200, and it must survive the presence of an override elsewhere.
-        var patched = Assert.Single(routes.Where(route =>
-            route.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Contains("PATCH")));
+        var patched = Assert.Single(routes, route =>
+            route.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Contains("PATCH"));
         Assert.Equal(200, Assert.Single(patched.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>()).StatusCode);
 
         // A raw endpoint declares no response type, so it gets no Produces metadata at all.
-        var health = Assert.Single(routes.Where(route => route.RoutePattern.RawText == "/health"));
+        var health = Assert.Single(routes, route => route.RoutePattern.RawText == "/health");
         Assert.Empty(health.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>());
     }
 
@@ -196,12 +196,12 @@ public class EndpointMetadataEmissionTests
 
         var descriptors = GeneratedEndpointHost.Descriptors(generated, assemblyName);
 
-        Assert.Equal("/api/users/{id}", Assert.Single(descriptors.Where(d => d.Name == "GetUser")).Path);
-        Assert.Equal("/api/users/", Assert.Single(descriptors.Where(d => d.Name == "ListUsers")).Path);
-        Assert.Equal("/api/products/", Assert.Single(descriptors.Where(d => d.Name == "ListProducts")).Path);
+        Assert.Equal("/api/users/{id}", Assert.Single(descriptors, d => d.Name == "GetUser").Path);
+        Assert.Equal("/api/users/", Assert.Single(descriptors, d => d.Name == "ListUsers").Path);
+        Assert.Equal("/api/products/", Assert.Single(descriptors, d => d.Name == "ListProducts").Path);
 
         // An ungrouped endpoint's path was always right, which is what hid this.
-        Assert.Equal("/health", Assert.Single(descriptors.Where(d => d.Name == "HealthCheck")).Path);
+        Assert.Equal("/health", Assert.Single(descriptors, d => d.Name == "HealthCheck").Path);
     }
 
     /// <summary>

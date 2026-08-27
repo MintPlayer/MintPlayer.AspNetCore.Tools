@@ -1,5 +1,14 @@
-namespace MintPlayer.AspNetCore.ChangePassword;
+﻿namespace MintPlayer.AspNetCore.ChangePassword;
 
+/// <summary>
+/// Maps the well-known change-password endpoint onto an <see cref="IEndpointRouteBuilder"/>.
+/// </summary>
+/// <remarks>
+/// Note this type shares its simple name with
+/// <c>Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions</c>, which is an implicit global
+/// using in Web SDK projects — so naming it explicitly from consumer code needs full
+/// qualification. Calling the extension methods does not.
+/// </remarks>
 public static class EndpointRouteBuilderExtensions
 {
     /// <summary>The route name applied to the mapped endpoint.</summary>

@@ -6,6 +6,7 @@ namespace MintPlayer.AspNetCore.Endpoints;
 /// Base class for all typed endpoints. Provides the HandleAsync(HttpContext) bridge
 /// and disposal logic. Subclassed by body-based and non-body-based variants.
 /// </summary>
+/// <typeparam name="TRequest">The bound request the typed handler receives.</typeparam>
 public abstract class EndpointBase<TRequest> : IDisposable, IAsyncDisposable
 {
     /// <summary>
@@ -14,6 +15,13 @@ public abstract class EndpointBase<TRequest> : IDisposable, IAsyncDisposable
     /// default using MVC input formatters with JSON fallback.
     /// Non-body subclasses (GetEndpoint, DeleteEndpoint) leave this abstract.
     /// </summary>
+    /// <remarks>
+    /// An override reports bad input by throwing <see cref="EndpointBindingException"/> with the
+    /// status code it deserves; that — and returning <see langword="null"/> — is what routes the
+    /// request to <see cref="OnBindFailedAsync"/> instead of the handler. Any <i>other</i> exception
+    /// is left alone and propagates as a 500, because the library cannot know what it means.
+    /// </remarks>
+    /// <param name="context">The request to bind from.</param>
     protected abstract ValueTask<TRequest?> BindRequestAsync(HttpContext context);
 
     /// <summary>Typed request handler — implemented by the user's endpoint class.</summary>

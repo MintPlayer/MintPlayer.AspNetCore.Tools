@@ -6,6 +6,21 @@ using System.Globalization;
 
 namespace MintPlayer.AspNetCore.Hsts;
 
+/// <summary>
+/// Writes the <c>Strict-Transport-Security</c> header on secure responses, in a way that survives
+/// downstream header rewriting.
+/// </summary>
+/// <remarks>
+/// The framework's own <c>HstsMiddleware</c> assigns the header on the way in, before calling the
+/// rest of the pipeline. Anything downstream that rewrites or clears the response headers — a
+/// reverse-proxy or SPA-server middleware copying an upstream response's headers over, an error
+/// handler resetting the response — silently drops it, and the site quietly stops being HSTS
+/// protected. This middleware instead registers a
+/// <see cref="HttpResponse.OnStarting(Func{object, Task}, object)"/> callback, which runs
+/// immediately before the headers are flushed and therefore after every such handler has had its
+/// turn. That timing difference is the entire reason this package exists; the header value and the
+/// exclusion rules are identical to the framework's.
+/// </remarks>
 internal class ImprovedHstsMiddleware
 {
 
@@ -72,7 +87,8 @@ internal class ImprovedHstsMiddleware
             return;
         }
 
-        // The difference with the AspNetCore HSTS-middleware.
+        // The difference with the AspNetCore HSTS-middleware: written at flush time, so a downstream
+        // handler that rewrites or clears the response headers cannot drop it.
         context.Response.OnStarting((state) =>
         {
             var httpContext = (HttpContext)state;
@@ -97,9 +113,27 @@ internal class ImprovedHstsMiddleware
     }
 }
 
-// Extension method used to add the middleware to the HTTP request pipeline.
+/// <summary>Pipeline registration for the improved HSTS middleware.</summary>
 public static class ImprovedHstsMiddlewareExtensions
 {
+    /// <summary>
+    /// Adds the improved HSTS middleware to the request pipeline, in place of the framework's
+    /// <c>UseHsts()</c>.
+    /// </summary>
+    /// <param name="builder">The application builder.</param>
+    /// <remarks>
+    /// Reads the same <see cref="HstsOptions"/> as the framework's middleware, so
+    /// <c>services.AddHsts(...)</c> configures this one too, and no header is written for a plain-HTTP
+    /// request or for a host listed in <see cref="HstsOptions.ExcludedHosts"/>. Exclusion is ordinal,
+    /// case-insensitive <b>equality</b> against the request host — there is no wildcard or
+    /// suffix matching, so <c>example.com</c> does not cover <c>www.example.com</c>, and each host has
+    /// to be listed in the exact form <see cref="HostString.Host"/> yields (an IPv6 literal
+    /// bracketed, a port never included).
+    /// <para>
+    /// Do not also call <c>UseHsts()</c>: both would write the header, and the framework's copy is
+    /// the one that can be lost.
+    /// </para>
+    /// </remarks>
     public static IApplicationBuilder UseImprovedHsts(this IApplicationBuilder builder)
     {
         return builder.UseMiddleware<ImprovedHstsMiddleware>();
