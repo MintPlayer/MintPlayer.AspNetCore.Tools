@@ -173,18 +173,27 @@ public class FileLoggerTests
     }
 
     /// <summary>
-    /// The writer opens the file with <c>FileShare.ReadWrite</c>, so it never locks readers out —
-    /// but a foreign writer holding the file with a share mode that excludes writers still wins,
-    /// and the resulting <see cref="IOException"/> surfaces to the caller rather than being
-    /// swallowed.
+    /// A foreign writer holding the file with a share mode that excludes writers is not swallowed:
+    /// on Windows the resulting <see cref="IOException"/> surfaces to the caller.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This is the deterministic counterpart to
     /// <c>Log_ConcurrentCallsFromMultipleThreads_AllLinesWritten</c>: the fix for D-M14 serialises
-    /// <i>this</i> process's writes, and cannot do anything about another process's exclusive lock.
+    /// <i>this</i> process's writes and can do nothing about another process's lock. Either way the
+    /// contract asserted is the same — the logger does not silently drop the line.
+    /// </para>
+    /// <para>
+    /// The assertion is platform-split because the underlying behaviour genuinely is.
+    /// <see cref="FileShare"/> is enforced by the OS on Windows, so the second writer fails; on
+    /// Unix .NET does not translate share modes into advisory locks, so the second writer simply
+    /// succeeds and both handles append. Asserting the Windows behaviour unconditionally is how
+    /// this test first shipped, and it passed locally and failed on the ubuntu CI runner — the
+    /// exact hazard class the PRD's R4 rules exist for, in a form the R4 grep did not look for.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void Log_FileLockedAgainstWritersByAnotherProcess_ThrowsIOException()
+    public void Log_FileLockedAgainstWritersByAnotherProcess_SurfacesThePlatformsBehaviour()
     {
         using var temp = new TempDirectoryFixture();
         var path = temp.GetPath("Log.txt");
@@ -192,7 +201,19 @@ public class FileLoggerTests
 
         using var holder = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read);
 
-        Assert.Throws<IOException>(() => LogInformation(logger, "hello"));
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Throws<IOException>(() => LogInformation(logger, "hello"));
+        }
+        else
+        {
+            // No exception, and the line is still written — what must never happen on either
+            // platform is the logger swallowing the entry.
+            LogInformation(logger, "hello");
+
+            holder.Dispose();
+            Assert.Contains("hello", File.ReadAllText(path));
+        }
     }
 
     /// <summary>
