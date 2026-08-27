@@ -20,11 +20,29 @@ namespace MintPlayer.AspNetCore.Tools.Tests.MustChangePassword.Fakes;
 /// </remarks>
 internal sealed class MustChangePasswordTestHarness : IDisposable
 {
-    /// <summary>A password that satisfies the default Identity password policy.</summary>
+    // Synthetic fixture credentials. Every credential-shaped string literal in this test area
+    // lives here, deliberately, so there is exactly one place to look.
+    //
+    // They have to look like real passwords: the harness builds a real UserManager with the
+    // default Identity password policy, so anything simpler is rejected by PasswordValidator
+    // and the tests would be asserting validation failures rather than the flow under test.
+    // That shape also makes automated secret scanners flag them — centralising them here is
+    // what makes a scanner hit quick to triage instead of a hunt through six files.
+
+    /// <summary>The account's starting password. Satisfies the default Identity policy.</summary>
     public const string InitialPassword = "Old1!pass";
 
-    /// <summary>A different password that also satisfies the default policy.</summary>
+    /// <summary>The password the user is changing to.</summary>
     public const string NewPassword = "New1!pass";
+
+    /// <summary>A third value, for "confirmation does not match" cases.</summary>
+    public const string MismatchedPassword = "Different1!pass";
+
+    /// <summary>A value that is no longer current, for replay/stale-credential cases.</summary>
+    public const string StalePassword = "Stale1!pass";
+
+    /// <summary>A further distinct value, for a second change attempt.</summary>
+    public const string SecondNewPassword = "Third1!pass";
 
     private readonly ServiceProvider root;
     private readonly IServiceScope scope;

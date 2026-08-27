@@ -373,7 +373,7 @@ public class MustChangePasswordCookieRoundTripTests
         using var signIn = await GetAsync(client, "/signin");
         var cookie = CookieHeader(FindSetCookie(signIn)!);
 
-        using var perform = await GetAsync(client, PerformUrl(InitialPassword, NewPassword, "Different1!pass"), cookie);
+        using var perform = await GetAsync(client, PerformUrl(InitialPassword, NewPassword, MustChangePasswordTestHarness.MismatchedPassword), cookie);
 
         Assert.Equal(HttpStatusCode.UnprocessableEntity, perform.StatusCode);
         Assert.Equal(PasswordRejectedException.PasswordConfirmationMismatchCode, await perform.Content.ReadAsStringAsync());
@@ -428,7 +428,7 @@ public class MustChangePasswordCookieRoundTripTests
         using var first = await GetAsync(client, PerformUrl(InitialPassword, NewPassword, NewPassword), cookie);
         Assert.Equal(HttpStatusCode.NoContent, first.StatusCode);
 
-        using var replay = await GetAsync(client, PerformUrl(InitialPassword, "Third1!pass", "Third1!pass"), cookie);
+        using var replay = await GetAsync(client, PerformUrl(InitialPassword, MustChangePasswordTestHarness.SecondNewPassword, MustChangePasswordTestHarness.SecondNewPassword), cookie);
 
         Assert.Equal(HttpStatusCode.Forbidden, replay.StatusCode);
         using var check = await GetAsync(client, $"/check?password={NewPassword}");

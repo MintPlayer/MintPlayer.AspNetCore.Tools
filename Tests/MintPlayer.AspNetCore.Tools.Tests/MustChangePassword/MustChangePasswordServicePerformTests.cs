@@ -140,7 +140,7 @@ public class MustChangePasswordServicePerformTests
         var user = await ArmTicketAsync(harness);
 
         await Assert.ThrowsAsync<IncorrectCurrentPasswordException>(
-            () => harness.Service.PerformChangePasswordAsync("Stale1!pass", New, New));
+            () => harness.Service.PerformChangePasswordAsync(MustChangePasswordTestHarness.StalePassword, New, New));
 
         Assert.Empty(harness.Authentication.SignOutCalls);
         Assert.True(await harness.UserManager.CheckPasswordAsync(user, Initial));
@@ -181,7 +181,7 @@ public class MustChangePasswordServicePerformTests
         var user = await ArmTicketAsync(harness);
 
         var exception = await Assert.ThrowsAsync<PasswordRejectedException>(
-            () => harness.Service.PerformChangePasswordAsync(Initial, New, "Different1!pass"));
+            () => harness.Service.PerformChangePasswordAsync(Initial, New, MustChangePasswordTestHarness.MismatchedPassword));
 
         Assert.Equal(PasswordRejectedException.PasswordConfirmationMismatchCode, Assert.Single(exception.Errors).Code);
         Assert.Empty(harness.Authentication.SignOutCalls);
@@ -208,7 +208,7 @@ public class MustChangePasswordServicePerformTests
     [Theory]
     [InlineData(null, null)]
     [InlineData("", "")]
-    [InlineData(null, "New1!pass")]
+    [InlineData(null, MustChangePasswordTestHarness.NewPassword)]
     public async Task PerformChangePasswordAsync_MissingNewPassword_IsRejectedBeforeIdentityIsReached(string? newPassword, string? confirmation)
     {
         using var harness = new MustChangePasswordTestHarness();
