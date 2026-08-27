@@ -27,8 +27,7 @@ public class AddMustChangePasswordServiceRegistrationTests
 
         services.AddMustChangePassword<TestUser, string>();
 
-        var descriptor = Assert.Single(services);
-        Assert.Equal(typeof(IMustChangePasswordService<TestUser, string>), descriptor.ServiceType);
+        var descriptor = services.Single(d => d.ServiceType == typeof(IMustChangePasswordService<TestUser, string>));
         Assert.Equal(typeof(MustChangePasswordService<TestUser, string>), descriptor.ImplementationType);
         Assert.Equal(ServiceLifetime.Scoped, descriptor.Lifetime);
     }
@@ -54,50 +53,29 @@ public class AddMustChangePasswordServiceRegistrationTests
 
         services.AddMustChangePassword<TestUser, string>();
 
-        var descriptor = Assert.Single(services);
+        var descriptor = services.Single(d => d.ServiceType == typeof(IMustChangePasswordService<TestUser, string>));
         Assert.False(descriptor.ServiceType.ContainsGenericParameters);
         Assert.False(descriptor.ImplementationType!.ContainsGenericParameters);
     }
 
     /// <summary>
-    /// D-M22: <c>AddMustChangePassword</c> registers a service whose generated constructor takes
-    /// <c>IHttpContextAccessor</c>, but never registers it. A consumer that follows the README and
-    /// calls only <c>AddIdentityCore</c> + <c>AddMustChangePassword</c> therefore gets an
-    /// unresolvable service — and, because the service is scoped and resolved per request, the
-    /// failure lands at the first request rather than at startup.
+    /// D-M22 fixed: the extension registers the <c>IHttpContextAccessor</c> its own service depends
+    /// on, so a consumer that follows the README and calls only <c>AddIdentityCore</c> +
+    /// <c>AddMustChangePassword</c> gets a resolvable service.
     /// </summary>
     /// <remarks>
-    /// Note this is not caught by <c>ValidateOnBuild</c> in a normal app either, since ASP.NET Core
-    /// registers <c>IHttpContextAccessor</c> itself — the gap only bites the "identity core, no MVC"
-    /// setups the package targets. The test asserts the dependency is genuinely missing from the
-    /// collection, which is the part <c>AddMustChangePassword</c> owns.
+    /// The failure this prevents was invisible in an MVC app — ASP.NET Core registers the accessor
+    /// itself — and bit exactly the "identity core, no MVC" setups the package targets, at the first
+    /// request rather than at startup, because the service is scoped.
     /// </remarks>
     [Fact]
-    public void AddMustChangePassword_DoesNotRegisterIHttpContextAccessor_KnownBug()
+    public void AddMustChangePassword_RegistersIHttpContextAccessor()
     {
         var services = IdentityOnly();
 
         services.AddMustChangePassword<TestUser, string>();
 
-        Assert.DoesNotContain(services, d => d.ServiceType == typeof(IHttpContextAccessor));
-
-        using var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => scope.ServiceProvider.GetRequiredService<IMustChangePasswordService<TestUser, string>>());
-        Assert.Contains(nameof(IHttpContextAccessor), exception.Message, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// The mirror of the bug above: add the one missing registration and the service resolves. This
-    /// is what the fix in M9 must keep true, and it is what every other suite in this folder relies on.
-    /// </summary>
-    [Fact]
-    public void AddMustChangePassword_ResolvesOnceIHttpContextAccessorIsRegistered()
-    {
-        var services = IdentityOnly();
-        services.AddHttpContextAccessor();
-        services.AddMustChangePassword<TestUser, string>();
+        Assert.Contains(services, d => d.ServiceType == typeof(IHttpContextAccessor));
 
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
@@ -108,34 +86,55 @@ public class AddMustChangePasswordServiceRegistrationTests
     }
 
     /// <summary>
-    /// Pins the "double registration without a guard" entry in the PRD's robustness group: the
-    /// extension uses <c>AddScoped</c>, not <c>TryAddScoped</c>, so calling it twice leaves two
-    /// descriptors behind and the enumerable resolution reports two instances.
+    /// Registering the accessor must not clobber one the application already registered — an app that
+    /// swapped in its own accessor keeps it, because the extension uses <c>TryAdd</c> semantics.
     /// </summary>
     [Fact]
-    public void AddMustChangePassword_CalledTwice_LeavesTwoDescriptors_KnownGap()
+    public void AddMustChangePassword_LeavesAnExistingHttpContextAccessorRegistrationAlone()
     {
         var services = IdentityOnly();
-        services.AddHttpContextAccessor();
+        var accessor = new HttpContextAccessor();
+        services.AddSingleton<IHttpContextAccessor>(accessor);
 
         services.AddMustChangePassword<TestUser, string>();
-        services.AddMustChangePassword<TestUser, string>();
-
-        Assert.Equal(2, services.Count(d => d.ServiceType == typeof(IMustChangePasswordService<TestUser, string>)));
 
         using var provider = services.BuildServiceProvider();
-        using var scope = provider.CreateScope();
-        Assert.Equal(2, scope.ServiceProvider.GetServices<IMustChangePasswordService<TestUser, string>>().Count());
+        Assert.Same(accessor, provider.GetRequiredService<IHttpContextAccessor>());
     }
 
     /// <summary>
-    /// Shape pin (D-M31..D-M34 group): the implementation type is <c>internal</c>, so a consumer
-    /// cannot subclass it, cannot register it under a second service type, and cannot resolve it
-    /// concretely. Combined with the exception-only contract, overriding any part of the flow means
-    /// reimplementing the whole interface.
+    /// The extension is idempotent: calling it twice leaves one descriptor and resolves one instance,
+    /// so a library and an application can both call it without the consumer getting two services.
     /// </summary>
     [Fact]
-    public void MustChangePasswordService_IsInternal_KnownGap()
+    public void AddMustChangePassword_CalledTwice_RegistersTheServiceOnce()
+    {
+        var services = IdentityOnly();
+
+        services.AddMustChangePassword<TestUser, string>();
+        services.AddMustChangePassword<TestUser, string>();
+
+        Assert.Equal(1, services.Count(d => d.ServiceType == typeof(IMustChangePasswordService<TestUser, string>)));
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        Assert.Single(scope.ServiceProvider.GetServices<IMustChangePasswordService<TestUser, string>>());
+    }
+
+    [Fact]
+    public void AddMustChangePassword_ThrowsOnANullServiceCollection()
+    {
+        Assert.Throws<ArgumentNullException>(() => ((IServiceCollection)null!).AddMustChangePassword<TestUser, string>());
+    }
+
+    /// <summary>
+    /// Shape pin: the implementation type is <c>internal</c>, so a consumer cannot subclass it and
+    /// overriding any part of the flow means reimplementing the interface. Deliberate — the type has no
+    /// extension points and every one of its decisions is a security decision — but pinned so making
+    /// it public would be a conscious act.
+    /// </summary>
+    [Fact]
+    public void MustChangePasswordService_IsInternal()
     {
         var type = typeof(MustChangePasswordService<TestUser, string>);
 

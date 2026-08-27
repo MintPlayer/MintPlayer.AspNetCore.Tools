@@ -47,11 +47,9 @@ public class EndpointInvocationTests
         }
     }
 
-    /// <summary>
-    /// Overrides both disposal members, so the test can observe which one the library actually
-    /// calls. This is the fixture for D-G6.
-    /// </summary>
     private sealed record Empty;
+
+    /// <summary>Overrides both disposal members, so the test can see which one the library calls.</summary>
 
     private sealed class BothDisposableEndpoint(Journal journal) : EndpointBase<Empty>, IGetEndpoint
     {
@@ -69,6 +67,22 @@ public class EndpointInvocationTests
             Interlocked.Increment(ref journal.AsyncDisposals);
             return ValueTask.CompletedTask;
         }
+    }
+
+    /// <summary>
+    /// A typed endpoint that overrides only <c>Dispose()</c> — the shape whose cleanup used to be
+    /// unreachable.
+    /// </summary>
+    private sealed class SyncOnlyDisposableEndpoint(Journal journal) : EndpointBase<Empty>, IGetEndpoint
+    {
+        public static string Path => "/sync-disposable";
+
+        protected override ValueTask<Empty?> BindRequestAsync(HttpContext context) => new(new Empty());
+
+        public override Task<IResult> HandleAsync(Empty request, CancellationToken cancellationToken)
+            => Task.FromResult(Results.Ok());
+
+        public override void Dispose() => Interlocked.Increment(ref journal.Disposals);
     }
 
     /// <summary>Implements only <see cref="IDisposable"/>, so the sync branch is reachable.</summary>
@@ -153,19 +167,11 @@ public class EndpointInvocationTests
     }
 
     /// <summary>
-    /// For an endpoint that is both disposable and async-disposable, only
-    /// <c>DisposeAsync</c> runs — so an overridden <c>Dispose()</c> is dead code.
+    /// For an endpoint that overrides both, only <c>DisposeAsync</c> runs — that is the normal
+    /// contract, and an override that does not call <c>base.DisposeAsync()</c> takes over completely.
     /// </summary>
-    /// <remarks>
-    /// D-G6. Both disposal sites test <see cref="IAsyncDisposable"/> first, and every typed
-    /// endpoint inherits both interfaces from <see cref="EndpointBase{TRequest}"/>. So a developer
-    /// who releases resources in <c>Dispose()</c> — a perfectly reasonable thing to write, and what
-    /// the compiler's own nullable/dispose analysers nudge you toward — leaks silently. Either
-    /// <see cref="IDisposable"/> should come off the base class, or the default
-    /// <c>DisposeAsync</c> should call <c>Dispose()</c>.
-    /// </remarks>
     [Fact]
-    public async Task Invoke_EndpointImplementingBoth_OnlyDisposeAsyncRuns_KnownBug()
+    public async Task Invoke_EndpointOverridingBoth_OnlyDisposeAsyncRuns()
     {
         var journal = new Journal();
         using var host = await StartHost<BothDisposableEndpoint>(journal);
@@ -174,6 +180,27 @@ public class EndpointInvocationTests
 
         Assert.Equal(1, journal.AsyncDisposals);
         Assert.Equal(0, journal.Disposals);
+    }
+
+    /// <summary>
+    /// A typed endpoint that overrides only <c>Dispose()</c> is disposed.
+    /// </summary>
+    /// <remarks>
+    /// Both disposal sites test <see cref="IAsyncDisposable"/> first, and every typed endpoint
+    /// inherits both interfaces from <see cref="EndpointBase{TRequest}"/> — so releasing resources in
+    /// <c>Dispose()</c>, which is a perfectly reasonable thing to write and what the compiler's own
+    /// dispose analysers nudge you toward, leaked silently on every request. The base class's
+    /// <c>DisposeAsync</c> now forwards, so the sync override runs wherever the async path is taken.
+    /// </remarks>
+    [Fact]
+    public async Task Invoke_TypedEndpointOverridingOnlyDispose_IsStillDisposed()
+    {
+        var journal = new Journal();
+        using var host = await StartHost<SyncOnlyDisposableEndpoint>(journal);
+
+        await host.GetTestClient().GetAsync("/sync-disposable");
+
+        Assert.Equal(1, journal.Disposals);
     }
 
     [Fact]

@@ -8,6 +8,23 @@ namespace MintPlayer.AspNetCore.Tools.Tests.NoSniff;
 
 public class NoSniffMiddlewareTests
 {
+    /// <summary>
+    /// A null <c>next</c> is rejected at construction time.
+    /// </summary>
+    /// <remarks>
+    /// D-M6, fixed. The constructor used to be source-generated from <c>[Inject]</c> with no guard,
+    /// so <c>new NoSniffMiddleware(null!)</c> succeeded and failed a request later with an opaque
+    /// <see cref="NullReferenceException"/> from inside <c>Invoke</c>. The sibling HSTS middleware
+    /// guards; the constructor is now written by hand so this one does too.
+    /// </remarks>
+    [Fact]
+    public void Ctor_NullNext_ThrowsArgumentNullException()
+    {
+        var ex = Assert.Throws<ArgumentNullException>(() => new NoSniffMiddleware(null!));
+
+        Assert.Equal("next", ex.ParamName);
+    }
+
     [Fact]
     public async Task Invoke_SetsXContentTypeOptionsNosniff()
     {

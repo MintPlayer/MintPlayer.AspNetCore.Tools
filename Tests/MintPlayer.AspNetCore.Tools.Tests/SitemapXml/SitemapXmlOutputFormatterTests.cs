@@ -28,6 +28,8 @@ public class SitemapXmlOutputFormatterTests
 
     private sealed class DerivedUrlSet : UrlSet;
 
+    private sealed class DerivedSitemapIndex : SitemapIndex;
+
     private static OutputFormatterWriteContext CreateContext(IServiceProvider? services = null)
     {
         // DefaultHttpContext.RequestServices is null unless assigned, and the formatter
@@ -100,14 +102,17 @@ public class SitemapXmlOutputFormatterTests
     }
 
     /// <summary>
-    /// Pins PRD defect D-S11: the check is exact type equality, so a consumer who subclasses
-    /// <c>UrlSet</c> to add their own extension elements silently loses the formatter — and gets
+    /// PRD defect D-S11: the check used to be exact type equality, so a consumer who subclassed
+    /// <c>UrlSet</c> to add their own extension elements silently lost the formatter — and got
     /// JSON, or a 406, with nothing pointing at the cause.
     /// </summary>
     [Fact]
-    public void CanWriteType_ASubclassOfUrlSet_IsRejected_KnownBug()
+    public void CanWriteType_ASubclassOfUrlSetOrSitemapIndex_IsAccepted()
     {
-        Assert.False(new ProbeFormatter().CanWrite(typeof(DerivedUrlSet)));
+        var formatter = new ProbeFormatter();
+
+        Assert.True(formatter.CanWrite(typeof(DerivedUrlSet)));
+        Assert.True(formatter.CanWrite(typeof(DerivedSitemapIndex)));
     }
 
     /// <summary>
@@ -163,14 +168,28 @@ public class SitemapXmlOutputFormatterTests
     }
 
     /// <summary>
-    /// Pins PRD defect D-S24: the <c>context.HttpContext == null</c> guard is dead code.
-    /// <c>OutputFormatterWriteContext</c> refuses to be constructed with a null
-    /// <c>HttpContext</c> in the first place, so the <see cref="InvalidOperationException"/> it
-    /// raises is unreachable — while <c>context</c> itself, which IS nullable at the call site, is
-    /// dereferenced with no guard at all.
+    /// PRD defect D-S24: <c>context</c> is the one argument that can genuinely be null at the call
+    /// site, and it used to be the only one with no guard — a null context produced a bare
+    /// <see cref="NullReferenceException"/> from the dereference, ahead of the
+    /// <c>context.HttpContext == null</c> check that was meant to catch it.
     /// </summary>
     [Fact]
-    public void CreateXmlWriter_TheHttpContextGuardIsUnreachable_KnownBug()
+    public void CreateXmlWriter_NullContext_ThrowsArgumentNullException()
+    {
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => new ProbeFormatter().CreateXmlWriter(null!, new StringWriter(), new XmlWriterSettings()));
+
+        Assert.Equal("context", exception.ParamName);
+    }
+
+    /// <summary>
+    /// Second half of D-S24: the guards now run outermost-argument-first, so the null that made the
+    /// call impossible is the one reported. The removed <c>context.HttpContext == null</c> guard was
+    /// unreachable — pinned here, because <c>OutputFormatterWriteContext</c> refuses to be
+    /// constructed with a null <c>HttpContext</c> in the first place.
+    /// </summary>
+    [Fact]
+    public void CreateXmlWriter_NullContextAndNullWriter_ReportsTheContext()
     {
         Assert.Throws<ArgumentNullException>(() => new OutputFormatterWriteContext(
             null!,
@@ -178,38 +197,51 @@ public class SitemapXmlOutputFormatterTests
             typeof(UrlSet),
             new UrlSet()));
 
-        Assert.Throws<NullReferenceException>(
-            () => new ProbeFormatter().CreateXmlWriter(null!, new StringWriter(), new XmlWriterSettings()));
-    }
-
-    /// <summary>
-    /// Second half of D-S24: the guards run in the wrong order to be useful — <c>writer</c> is
-    /// validated before <c>context</c> is even looked at, so the one argument that can actually be
-    /// null in production is the one checked last (never).
-    /// </summary>
-    [Fact]
-    public void CreateXmlWriter_NullContextAndNullWriter_ReportsTheWriter_KnownBug()
-    {
         var exception = Assert.Throws<ArgumentNullException>(
             () => new ProbeFormatter().CreateXmlWriter(null!, null!, new XmlWriterSettings()));
 
-        Assert.Equal("writer", exception.ParamName);
+        Assert.Equal("context", exception.ParamName);
     }
 
     /// <summary>
-    /// Pins PRD defect D-S13: the method mutates the <see cref="XmlWriterSettings"/> instance it
-    /// is handed. The base formatter hands it its own long-lived <c>WriterSettings</c>, so this is
-    /// a per-request write to shared state.
+    /// PRD defect D-S13: the method used to mutate the <see cref="XmlWriterSettings"/> instance it
+    /// is handed. The base formatter hands it its own long-lived <c>WriterSettings</c>, so that was
+    /// a per-request write to formatter-wide shared state. It now clones before touching anything.
     /// </summary>
     [Fact]
-    public void CreateXmlWriter_MutatesTheSettingsItIsGiven_KnownBug()
+    public void CreateXmlWriter_DoesNotMutateTheSettingsItIsGiven()
     {
         var formatter = new ProbeFormatter();
         formatter.WriterSettings.CloseOutput = true;
 
         using var writer = formatter.CreateXmlWriter(CreateContext(), new StringWriter(), formatter.WriterSettings);
 
+        Assert.True(formatter.WriterSettings.CloseOutput);
+    }
+
+    /// <summary>
+    /// The reason the mutation existed in the first place: the base class closes the
+    /// <see cref="TextWriter"/> itself, so the <see cref="System.Xml.XmlWriter"/> must not. Set once
+    /// in the constructor rather than per request, and re-applied to the clone so a caller passing
+    /// their own settings gets it too.
+    /// </summary>
+    [Fact]
+    public void CreateXmlWriter_LeavesTheUnderlyingWriterOpen()
+    {
+        var formatter = new ProbeFormatter();
+
         Assert.False(formatter.WriterSettings.CloseOutput);
+
+        var text = new StringWriter();
+        using (var writer = formatter.CreateXmlWriter(CreateContext(), text, new XmlWriterSettings { CloseOutput = true, OmitXmlDeclaration = true }))
+        {
+            writer.WriteStartElement("root");
+            writer.WriteEndElement();
+        }
+
+        // Would throw ObjectDisposedException had the XmlWriter closed it.
+        text.Write("still open");
+        Assert.Contains("still open", text.ToString());
     }
 
     // ── the stylesheet processing instruction ─────────────────────────────────────────────────
@@ -254,16 +286,19 @@ public class SitemapXmlOutputFormatterTests
     }
 
     /// <summary>
-    /// A whitespace-only URL still produces a stylesheet reference, because the check is
-    /// <c>IsNullOrEmpty</c> rather than <c>IsNullOrWhiteSpace</c> — the same blind spot as D-S9's
-    /// <c>NullIfEmpty</c>.
+    /// PRD defect D-S31: a whitespace-only URL used to produce <c>href="   "</c>, because the guard
+    /// was <c>IsNullOrEmpty</c> rather than <c>IsNullOrWhiteSpace</c> — the same blind spot as
+    /// D-S9's <c>NullIfEmpty</c>, which now owns the decision for both call sites.
     /// </summary>
-    [Fact]
-    public void CreateXmlWriter_WithAWhitespaceStylesheetUrl_StillWritesTheInstruction_KnownGap()
+    [Theory]
+    [InlineData(" ")]
+    [InlineData("   ")]
+    [InlineData("\t")]
+    public void CreateXmlWriter_WithAWhitespaceStylesheetUrl_WritesNoProcessingInstruction(string url)
     {
-        var xml = WriteDocument(new ProbeFormatter(), CreateContext(ServicesWithStylesheet("   ")));
+        var xml = WriteDocument(new ProbeFormatter(), CreateContext(ServicesWithStylesheet(url)));
 
-        Assert.Contains("href=\"   \"", xml);
+        Assert.DoesNotContain("xml-stylesheet", xml);
     }
 
     /// <summary>
@@ -279,31 +314,35 @@ public class SitemapXmlOutputFormatterTests
     }
 
     /// <summary>
-    /// Pins PRD defect D-S12: <c>StylesheetUrl</c> is interpolated into the processing
-    /// instruction with no escaping, so a configured value containing a double quote injects
-    /// arbitrary pseudo-attributes into the emitted instruction.
+    /// PRD defect D-S12: <c>StylesheetUrl</c> is interpolated into the processing instruction, and
+    /// nothing inside a processing instruction is escapable — so a configured value containing a
+    /// double quote used to inject arbitrary pseudo-attributes into the emitted instruction. The
+    /// quote is now rejected outright rather than escaped, because there is no escape to apply.
     /// </summary>
-    [Fact]
-    public void CreateXmlWriter_StylesheetUrlContainingAQuote_IsInjectedRaw_KnownBug()
+    [Theory]
+    [InlineData("/s.xsl\" alternate=\"yes")]
+    [InlineData("/\"")]
+    public void CreateXmlWriter_StylesheetUrlContainingAQuote_Throws(string url)
     {
-        var xml = WriteDocument(new ProbeFormatter(), CreateContext(ServicesWithStylesheet("/s.xsl\" alternate=\"yes")));
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => WriteDocument(new ProbeFormatter(), CreateContext(ServicesWithStylesheet(url))));
 
-        Assert.Contains("href=\"/s.xsl\" alternate=\"yes\"", xml);
+        Assert.Contains("double quote", exception.Message);
     }
 
     /// <summary>
-    /// Second half of D-S12: a value containing the instruction terminator does not break
-    /// well-formedness, because <see cref="XmlWriter"/> silently rewrites <c>?&gt;</c> as
-    /// <c>?&#160;&gt;</c> inside a processing instruction. So the document still parses — with a
-    /// stylesheet href that is not the configured one, and no error anywhere.
+    /// The boundary of D-S12, left as it was. A value containing the instruction terminator does not
+    /// break well-formedness, because <see cref="XmlWriter"/> silently rewrites <c>?&gt;</c> as
+    /// <c>?&#160;&gt;</c> inside a processing instruction — the document still parses, with a
+    /// stylesheet href that is not the configured one.
     /// </summary>
     /// <remarks>
-    /// Pinned as the boundary of D-S12: the writer limits the damage to a corrupted href, which
-    /// is why the injection in the test above (a bare double quote, which the writer does NOT
-    /// rewrite) is the severe case.
+    /// Not rejected by the D-S12 fix, which rejects only the double quote: the writer already limits
+    /// the damage here to a corrupted href, and the character is legal in a path. Pinned so the
+    /// difference between the two halves stays visible.
     /// </remarks>
     [Fact]
-    public void CreateXmlWriter_StylesheetUrlContainingTheInstructionTerminator_IsSilentlyRewritten_KnownBug()
+    public void CreateXmlWriter_StylesheetUrlContainingTheInstructionTerminator_IsSilentlyRewritten()
     {
         var xml = WriteDocument(new ProbeFormatter(), CreateContext(ServicesWithStylesheet("/s.xsl?>")));
 
@@ -317,14 +356,37 @@ public class SitemapXmlOutputFormatterTests
     }
 
     /// <summary>
-    /// Nothing validates that the URL is even a URL, so a relative value is emitted as-is and
-    /// resolves differently depending on the depth of the requesting path (D-S14).
+    /// PRD defect D-S14: a relative value used to be emitted as-is, and then resolved against the
+    /// depth of the requesting path — so <c>/sitemap.xml</c> found the stylesheet and
+    /// <c>/sitemap/100/2</c> did not. The same value is simultaneously a route pattern, so it has to
+    /// be rooted; validated in the one place both consumers share.
+    /// </summary>
+    /// <remarks>
+    /// Validated with a plain <c>StartsWith('/')</c> and deliberately NOT with <c>Uri.TryCreate</c>:
+    /// for a leading-slash string that answers false on Windows and true on Linux (as
+    /// <c>file:///…</c>), which is exactly the shape of bug that passes locally and fails in CI.
+    /// </remarks>
+    [Theory]
+    [InlineData("sitemap.xsl")]
+    [InlineData("assets/sitemap.xsl")]
+    [InlineData("./sitemap.xsl")]
+    public void CreateXmlWriter_RelativeStylesheetUrl_Throws(string url)
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => WriteDocument(new ProbeFormatter(), CreateContext(ServicesWithStylesheet(url))));
+
+        Assert.Contains("absolute path", exception.Message);
+    }
+
+    /// <summary>
+    /// An absolute URL on another host is rooted-only-by-scheme, so it is rejected too. The
+    /// stylesheet is served by this application from a route, so a cross-origin href could never
+    /// have matched it.
     /// </summary>
     [Fact]
-    public void CreateXmlWriter_RelativeStylesheetUrl_IsEmittedWithoutALeadingSlash_KnownGap()
+    public void CreateXmlWriter_AbsoluteHttpStylesheetUrl_Throws()
     {
-        var xml = WriteDocument(new ProbeFormatter(), CreateContext(ServicesWithStylesheet("sitemap.xsl")));
-
-        Assert.Contains("href=\"sitemap.xsl\"", xml);
+        Assert.Throws<InvalidOperationException>(
+            () => WriteDocument(new ProbeFormatter(), CreateContext(ServicesWithStylesheet("https://cdn.example.org/sitemap.xsl"))));
     }
 }

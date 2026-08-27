@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
@@ -8,7 +8,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints</PackageId>
-		<Version>10.0.0</Version>
+		<Version>11.0.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>Class-per-endpoint mapping library for ASP.NET Core with constructor injection, content negotiation, and source-generated endpoint discovery.</Description>
@@ -43,12 +43,31 @@
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 	</PropertyGroup>
 
-	<!-- Pack the source generator and its dependencies into the analyzers folder -->
-	<ItemGroup>
-		<None Include="..\MintPlayer.AspNetCore.Endpoints.Generator\bin\$(Configuration)\netstandard2.0\MintPlayer.AspNetCore.Endpoints.Generator.dll"
-		      Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-		<None Include="$(PkgMintPlayer_SourceGenerators_Tools)\lib\netstandard2.0\*.dll"
-		      Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-	</ItemGroup>
+	<!--
+	Pack the source generator and its dependencies into the analyzers folder.
+
+	The generator project is asked where its outputs are (GetTargetPath) instead of having its
+	output layout spelled out here. A literal ..\Generator\bin\$(Configuration)\netstandard2.0\
+	path is a second, silently divergent copy of that layout, and it goes stale the moment either
+	project changes its TargetFramework or output path — producing a nupkg with no analyzer in it
+	and no error. GetTargetPath also returns what the generator's own GetDependencyTargetPaths
+	target adds, so MintPlayer.SourceGenerators.Tools comes along in every configuration rather
+	than only in Release.
+	-->
+	<PropertyGroup>
+		<TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackEndpointsGenerator</TargetsForTfmSpecificContentInPackage>
+	</PropertyGroup>
+
+	<Target Name="PackEndpointsGenerator">
+		<MSBuild Projects="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
+		         Targets="GetTargetPath"
+		         Properties="Configuration=$(Configuration)"
+		         RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier">
+			<Output TaskParameter="TargetOutputs" ItemName="_EndpointsGeneratorAnalyzer" />
+		</MSBuild>
+		<ItemGroup>
+			<TfmSpecificPackageFile Include="@(_EndpointsGeneratorAnalyzer)" PackagePath="analyzers/dotnet/cs" />
+		</ItemGroup>
+	</Target>
 
 </Project>

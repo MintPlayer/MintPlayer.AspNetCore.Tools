@@ -20,24 +20,14 @@ namespace MintPlayer.AspNetCore.OpenSearch.Formatters
             xmlSerializer.Serialize(xmlWriter, value, ns);
         }
 
+        /// <remarks>
+        /// Assignability, not equality, so a consumer that subclasses
+        /// <see cref="Data.OpenSearchDescription"/> keeps this formatter. Everything else — including
+        /// the <c>object[]</c> the suggest endpoint writes — must still be refused: this formatter
+        /// sits at index 0 of <c>OutputFormatters</c>, so claiming a type here takes it away from the
+        /// JSON formatter.
+        /// </remarks>
         protected override bool CanWriteType(Type? type)
-        {
-            if (type == typeof(Data.OpenSearchDescription))
-            {
-                return true;
-            }
-            //else if (type == typeof(Data.Image))
-            //{
-            //    return true;
-            //}
-            //else if (type == typeof(Data.Url))
-            //{
-            //    return true;
-            //}
-            else
-            {
-                return false;
-            }
-        }
+            => type is not null && typeof(Data.OpenSearchDescription).IsAssignableFrom(type);
     }
 }

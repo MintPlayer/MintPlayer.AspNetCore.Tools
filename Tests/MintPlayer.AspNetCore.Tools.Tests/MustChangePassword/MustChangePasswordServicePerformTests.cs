@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication;
 using MintPlayer.AspNetCore.MustChangePassword.Constants;
+using MintPlayer.AspNetCore.MustChangePassword.Exceptions;
 using MintPlayer.AspNetCore.Tools.Tests.MustChangePassword.Fakes;
 using System.Security.Claims;
 using Xunit;
@@ -8,31 +9,23 @@ namespace MintPlayer.AspNetCore.Tools.Tests.MustChangePassword;
 
 public class MustChangePasswordServicePerformTests
 {
+    private const string Initial = MustChangePasswordTestHarness.InitialPassword;
+    private const string New = MustChangePasswordTestHarness.NewPassword;
+
     private static string Scheme => MustChangePasswordConstants.MustChangePasswordScheme;
 
     /// <summary>
     /// Seeds a user and arms the recording authentication service with the ticket
-    /// <c>ChangePasswordSignInAsync</c> would have produced for them.
+    /// <c>ChangePasswordSignInAsync</c> would have produced for them — since the D-M23 redesign, a
+    /// single user-id claim.
     /// </summary>
-    private static async Task<TestUser> ArmTicketAsync(
-        MustChangePasswordTestHarness harness,
-        string? userId = null,
-        string? oldPassword = MustChangePasswordTestHarness.InitialPassword)
+    private static async Task<TestUser> ArmTicketAsync(MustChangePasswordTestHarness harness, string? userId = null)
     {
         var user = await harness.SeedUserAsync();
 
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.Name, userId ?? user.Id),
-            new(ClaimTypes.Email, user.Email!),
-        };
-
-        if (!string.IsNullOrEmpty(oldPassword))
-        {
-            claims.Add(new Claim("OldPassword", oldPassword));
-        }
-
-        harness.Authentication.NextAuthenticateResult = RecordingAuthenticationService.Ticket(Scheme, [.. claims]);
+        harness.Authentication.NextAuthenticateResult = RecordingAuthenticationService.Ticket(
+            Scheme,
+            new Claim(ClaimTypes.Name, userId ?? user.Id));
 
         // Seeding validated the initial password; only what happens after arming is of interest.
         harness.PasswordValidator.ValidatedPasswords.Clear();
@@ -45,12 +38,10 @@ public class MustChangePasswordServicePerformTests
         using var harness = new MustChangePasswordTestHarness();
         var user = await ArmTicketAsync(harness);
 
-        await harness.Service.PerformChangePasswordAsync(
-            MustChangePasswordTestHarness.NewPassword,
-            MustChangePasswordTestHarness.NewPassword);
+        await harness.Service.PerformChangePasswordAsync(Initial, New, New);
 
-        Assert.True(await harness.UserManager.CheckPasswordAsync(user, MustChangePasswordTestHarness.NewPassword));
-        Assert.False(await harness.UserManager.CheckPasswordAsync(user, MustChangePasswordTestHarness.InitialPassword));
+        Assert.True(await harness.UserManager.CheckPasswordAsync(user, New));
+        Assert.False(await harness.UserManager.CheckPasswordAsync(user, Initial));
     }
 
     [Fact]
@@ -59,239 +50,219 @@ public class MustChangePasswordServicePerformTests
         using var harness = new MustChangePasswordTestHarness();
         await ArmTicketAsync(harness);
 
-        await harness.Service.PerformChangePasswordAsync(
-            MustChangePasswordTestHarness.NewPassword,
-            MustChangePasswordTestHarness.NewPassword);
+        await harness.Service.PerformChangePasswordAsync(Initial, New, New);
 
         Assert.Equal(Scheme, Assert.Single(harness.Authentication.AuthenticateCalls));
     }
 
     /// <summary>
-    /// D-M26: on the success path the change-password cookie is never signed out. The five-minute
-    /// ticket — which carries the user's <i>old</i> plaintext password (D-M23) — stays valid and
-    /// replayable after the password has already been rotated.
+    /// D-M26 fixed: the flow ends when it succeeds. The ticket used to stay valid and replayable for
+    /// the rest of its five minutes, which — combined with D-M23 — left a decryptable copy of the
+    /// former credential on the client after rotation (D-M42).
     /// </summary>
     [Fact]
-    public async Task PerformChangePasswordAsync_DoesNotSignOutOnSuccess_KnownBug()
+    public async Task PerformChangePasswordAsync_SignsOutOnSuccess()
     {
         using var harness = new MustChangePasswordTestHarness();
         await ArmTicketAsync(harness);
 
-        await harness.Service.PerformChangePasswordAsync(
-            MustChangePasswordTestHarness.NewPassword,
-            MustChangePasswordTestHarness.NewPassword);
+        await harness.Service.PerformChangePasswordAsync(Initial, New, New);
 
-        Assert.Empty(harness.Authentication.SignOutCalls);
+        Assert.Equal(Scheme, Assert.Single(harness.Authentication.SignOutCalls));
     }
 
     /// <summary>
-    /// D-M27: three distinct failure modes — no ticket at all, a ticket with no user id, and a user
-    /// id that no longer resolves — all surface as a bare <c>throw new Exception()</c>. A caller
-    /// cannot tell "your session expired, sign in again" from "your account was deleted", and neither
-    /// can a log: <c>new Exception()</c> carries no message of its own.
+    /// D-M27 fixed, first of the five failure modes that used to be indistinguishable: no ticket on the
+    /// request at all. A consumer can now render "your session expired, sign in again" for exactly
+    /// this case.
     /// </summary>
-    /// <remarks>
-    /// The exact type is asserted (<c>IsType</c> is an exact match in xunit) rather than the message,
-    /// because the default <c>Exception</c> message is a localized framework resource string and
-    /// would differ between a Dutch dev box and the CI runner.
-    /// </remarks>
     [Fact]
-    public async Task PerformChangePasswordAsync_NoTicket_ThrowsBareException_KnownGap()
+    public async Task PerformChangePasswordAsync_NoTicket_ThrowsSessionExpired()
     {
         using var harness = new MustChangePasswordTestHarness();
         await harness.SeedUserAsync();
         harness.Authentication.NextAuthenticateResult = AuthenticateResult.NoResult();
 
-        var exception = await Assert.ThrowsAnyAsync<Exception>(
-            () => harness.Service.PerformChangePasswordAsync(
-                MustChangePasswordTestHarness.NewPassword,
-                MustChangePasswordTestHarness.NewPassword));
+        var exception = await Assert.ThrowsAsync<ChangePasswordSessionExpiredException>(
+            () => harness.Service.PerformChangePasswordAsync(Initial, New, New));
 
-        Assert.IsType<Exception>(exception);
+        Assert.NotEmpty(exception.Message);
+        Assert.Equal(Scheme, Assert.Single(harness.Authentication.SignOutCalls));
     }
 
-    /// <summary>D-M27, second of the three indistinguishable sites: a ticket with no user id.</summary>
+    /// <summary>
+    /// D-M27, second failure mode: a ticket that authenticated but carries no user id. Distinct from
+    /// "no ticket" — it means something other than this library issued the cookie — and the first bare
+    /// <c>throw new Exception()</c> conflated the two.
+    /// </summary>
     [Fact]
-    public async Task PerformChangePasswordAsync_TicketWithoutUserId_ThrowsBareException_KnownGap()
+    public async Task PerformChangePasswordAsync_TicketWithoutUserId_ThrowsSessionInvalid()
     {
         using var harness = new MustChangePasswordTestHarness();
         await harness.SeedUserAsync();
         harness.Authentication.NextAuthenticateResult = RecordingAuthenticationService.Ticket(
             Scheme,
-            new Claim(ClaimTypes.Email, "alice@example.com"),
-            new Claim("OldPassword", MustChangePasswordTestHarness.InitialPassword));
+            new Claim(ClaimTypes.Email, "alice@example.com"));
 
-        var exception = await Assert.ThrowsAnyAsync<Exception>(
-            () => harness.Service.PerformChangePasswordAsync(
-                MustChangePasswordTestHarness.NewPassword,
-                MustChangePasswordTestHarness.NewPassword));
-
-        Assert.IsType<Exception>(exception);
-    }
-
-    /// <summary>D-M27, third site: the user id in the ticket no longer resolves to a user.</summary>
-    [Fact]
-    public async Task PerformChangePasswordAsync_UnknownUserId_ThrowsBareException_KnownGap()
-    {
-        using var harness = new MustChangePasswordTestHarness();
-        await ArmTicketAsync(harness, userId: Guid.NewGuid().ToString("N"));
-
-        var exception = await Assert.ThrowsAnyAsync<Exception>(
-            () => harness.Service.PerformChangePasswordAsync(
-                MustChangePasswordTestHarness.NewPassword,
-                MustChangePasswordTestHarness.NewPassword));
-
-        Assert.IsType<Exception>(exception);
-    }
-
-    /// <summary>
-    /// The fourth bare <c>throw new Exception()</c> — a ticket whose <c>OldPassword</c> no longer
-    /// matches, which is the normal outcome once the password has already been changed once. Also
-    /// D-M27.
-    /// </summary>
-    [Fact]
-    public async Task PerformChangePasswordAsync_WrongCurrentPassword_ThrowsBareException_KnownGap()
-    {
-        using var harness = new MustChangePasswordTestHarness();
-        await ArmTicketAsync(harness, oldPassword: "Stale1!pass");
-
-        var exception = await Assert.ThrowsAnyAsync<Exception>(
-            () => harness.Service.PerformChangePasswordAsync(
-                MustChangePasswordTestHarness.NewPassword,
-                MustChangePasswordTestHarness.NewPassword));
-
-        Assert.IsType<Exception>(exception);
-    }
-
-    /// <summary>
-    /// Every failure path signs the user out of the change-password flow, so the ticket has to be
-    /// re-obtained. This is the correct half of the <c>catch</c> block; D-M28 below is the incorrect half.
-    /// </summary>
-    [Fact]
-    public async Task PerformChangePasswordAsync_SignsOutTheChangePasswordSchemeOnFailure()
-    {
-        using var harness = new MustChangePasswordTestHarness();
-        await harness.SeedUserAsync();
-        harness.Authentication.NextAuthenticateResult = AuthenticateResult.NoResult();
-
-        await Assert.ThrowsAnyAsync<Exception>(
-            () => harness.Service.PerformChangePasswordAsync(
-                MustChangePasswordTestHarness.NewPassword,
-                MustChangePasswordTestHarness.NewPassword));
+        await Assert.ThrowsAsync<ChangePasswordSessionInvalidException>(
+            () => harness.Service.PerformChangePasswordAsync(Initial, New, New));
 
         Assert.Equal(Scheme, Assert.Single(harness.Authentication.SignOutCalls));
     }
 
+    /// <summary>
+    /// D-M27, third failure mode: the account was deleted while the flow was in progress. The
+    /// exception carries the user id, so it can be logged without guessing.
+    /// </summary>
     [Fact]
-    public async Task PerformChangePasswordAsync_MismatchedConfirmation_ThrowsUnauthorizedAccess()
+    public async Task PerformChangePasswordAsync_UnknownUserId_ThrowsUserNotFound()
+    {
+        using var harness = new MustChangePasswordTestHarness();
+        var missing = Guid.NewGuid().ToString("N");
+        await ArmTicketAsync(harness, userId: missing);
+
+        var exception = await Assert.ThrowsAsync<ChangePasswordUserNotFoundException>(
+            () => harness.Service.PerformChangePasswordAsync(Initial, New, New));
+
+        Assert.Equal(missing, exception.UserId);
+        Assert.Equal(Scheme, Assert.Single(harness.Authentication.SignOutCalls));
+    }
+
+    /// <summary>
+    /// D-M27, fourth failure mode: the re-entered current password does not verify. The ticket is
+    /// deliberately <i>kept</i> — its holder already proved knowledge of the password once, so this is
+    /// almost always a typo, and destroying the ticket would force a full re-authentication for it.
+    /// </summary>
+    [Fact]
+    public async Task PerformChangePasswordAsync_WrongCurrentPassword_ThrowsIncorrectCurrentPasswordAndKeepsTheTicket()
     {
         using var harness = new MustChangePasswordTestHarness();
         var user = await ArmTicketAsync(harness);
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(
-            () => harness.Service.PerformChangePasswordAsync(
-                MustChangePasswordTestHarness.NewPassword,
-                "Different1!pass"));
+        await Assert.ThrowsAsync<IncorrectCurrentPasswordException>(
+            () => harness.Service.PerformChangePasswordAsync("Stale1!pass", New, New));
 
-        Assert.Single(harness.Authentication.SignOutCalls);
+        Assert.Empty(harness.Authentication.SignOutCalls);
+        Assert.True(await harness.UserManager.CheckPasswordAsync(user, Initial));
+    }
+
+    /// <summary>
+    /// D-M27, fifth failure mode: the new password is refused. D-M45 fixed with it — Identity's own
+    /// <c>IdentityError</c>s reach the caller, so the user is told "your password needs a digit"
+    /// instead of "unauthorized".
+    /// </summary>
+    [Fact]
+    public async Task PerformChangePasswordAsync_WeakNewPassword_SurfacesTheIdentityErrors()
+    {
+        using var harness = new MustChangePasswordTestHarness();
+        var user = await ArmTicketAsync(harness);
+
+        var exception = await Assert.ThrowsAsync<PasswordRejectedException>(
+            () => harness.Service.PerformChangePasswordAsync(Initial, "abc", "abc"));
+
+        Assert.NotEmpty(exception.Errors);
+        Assert.All(exception.Errors, e =>
+        {
+            Assert.False(string.IsNullOrEmpty(e.Code));
+            Assert.False(string.IsNullOrEmpty(e.Description));
+        });
+        Assert.Contains(exception.Errors, e => e.Code.StartsWith("Password", StringComparison.Ordinal));
+        Assert.Contains(exception.Errors.First().Description, exception.Message, StringComparison.Ordinal);
+
+        // Recoverable: the user can correct the form, so the ticket survives.
+        Assert.Empty(harness.Authentication.SignOutCalls);
+        Assert.True(await harness.UserManager.CheckPasswordAsync(user, Initial));
+    }
+
+    [Fact]
+    public async Task PerformChangePasswordAsync_MismatchedConfirmation_ThrowsPasswordRejected()
+    {
+        using var harness = new MustChangePasswordTestHarness();
+        var user = await ArmTicketAsync(harness);
+
+        var exception = await Assert.ThrowsAsync<PasswordRejectedException>(
+            () => harness.Service.PerformChangePasswordAsync(Initial, New, "Different1!pass"));
+
+        Assert.Equal(PasswordRejectedException.PasswordConfirmationMismatchCode, Assert.Single(exception.Errors).Code);
+        Assert.Empty(harness.Authentication.SignOutCalls);
         Assert.True(
-            await harness.UserManager.CheckPasswordAsync(user, MustChangePasswordTestHarness.InitialPassword),
+            await harness.UserManager.CheckPasswordAsync(user, Initial),
             "the password must be untouched when the confirmation does not match");
 
-        // The guard fired before Identity was asked to do anything — the contrast the D-M29 pin needs.
+        // The guard fires before Identity is asked to do anything.
         Assert.Empty(harness.PasswordValidator.ValidatedPasswords);
     }
 
     /// <summary>
-    /// D-M29: the mismatch guard is a plain <c>!=</c>, so two nulls compare <b>equal</b> and fall
-    /// straight through to <c>ChangePasswordAsync(user, current, null)</c>.
+    /// D-M29 fixed: <c>newPassword != newPasswordConfirmation</c> compared <b>equal</b> when both were
+    /// null and fell straight through to <c>ChangePasswordAsync(user, current, null)</c> — a request
+    /// with no password fields at all was silently treated as "set the password to nothing". Emptiness
+    /// is now checked first, and reported as its own error code.
     /// </summary>
     /// <remarks>
-    /// The exception the caller sees is <see cref="UnauthorizedAccessException"/> — byte for byte the
-    /// same as a genuine mismatch — so the fall-through is invisible from the outside. What proves it
-    /// happened is that Identity's password validation <i>ran</i>, with <c>null</c> as the candidate
-    /// password: a real mismatch stops before that (see
-    /// <c>PerformChangePasswordAsync_MismatchedConfirmation_ThrowsUnauthorizedAccess</c>, which
-    /// asserts the empty list). So a request with no password fields at all is silently treated as
-    /// "the user asked to set the password to nothing" rather than as a malformed request.
+    /// The fall-through used to be invisible from the outside: Identity's <c>PasswordValidator</c>
+    /// fails a null candidate rather than throwing, so the caller saw the same
+    /// <c>UnauthorizedAccessException</c> either way. What proves it no longer happens is that Identity
+    /// is never reached — the validator records nothing.
     /// </remarks>
-    [Fact]
-    public async Task PerformChangePasswordAsync_BothNullPasswords_FallThroughTheMismatchGuard_KnownBug()
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", "")]
+    [InlineData(null, "New1!pass")]
+    public async Task PerformChangePasswordAsync_MissingNewPassword_IsRejectedBeforeIdentityIsReached(string? newPassword, string? confirmation)
     {
         using var harness = new MustChangePasswordTestHarness();
         var user = await ArmTicketAsync(harness);
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(
-            () => harness.Service.PerformChangePasswordAsync(null!, null!));
+        var exception = await Assert.ThrowsAsync<PasswordRejectedException>(
+            () => harness.Service.PerformChangePasswordAsync(Initial, newPassword!, confirmation!));
 
-        Assert.Equal([null], harness.PasswordValidator.ValidatedPasswords);
-        Assert.True(
-            await harness.UserManager.CheckPasswordAsync(user, MustChangePasswordTestHarness.InitialPassword),
-            "the password must still be the original one");
+        Assert.Equal(PasswordRejectedException.PasswordRequiredCode, Assert.Single(exception.Errors).Code);
+        Assert.Empty(harness.PasswordValidator.ValidatedPasswords);
+        Assert.True(await harness.UserManager.CheckPasswordAsync(user, Initial), "the password must still be the original one");
     }
 
     /// <summary>
-    /// Two empty strings compare equal too, and an empty new password is then rejected by Identity's
-    /// password policy rather than by the service — surfacing as
-    /// <see cref="UnauthorizedAccessException"/> from the <c>result.Succeeded</c> check, which is the
-    /// same exception a mismatch produces. Companion to D-M29 and D-M27's indistinguishability theme.
+    /// A missing current password is reported as a missing field rather than as an incorrect password,
+    /// and both missing fields are reported together — the form can highlight both at once.
     /// </summary>
     [Fact]
-    public async Task PerformChangePasswordAsync_BothEmptyPasswords_RejectedByIdentityNotByTheGuard_KnownGap()
+    public async Task PerformChangePasswordAsync_MissingCurrentPassword_IsReportedAsItsOwnError()
     {
         using var harness = new MustChangePasswordTestHarness();
-        var user = await ArmTicketAsync(harness);
+        await ArmTicketAsync(harness);
 
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(
-            () => harness.Service.PerformChangePasswordAsync(string.Empty, string.Empty));
+        var exception = await Assert.ThrowsAsync<PasswordRejectedException>(
+            () => harness.Service.PerformChangePasswordAsync(null!, null!, null!));
 
-        Assert.Equal([string.Empty], harness.PasswordValidator.ValidatedPasswords);
-        Assert.True(await harness.UserManager.CheckPasswordAsync(user, MustChangePasswordTestHarness.InitialPassword));
+        Assert.Equal(
+            [PasswordRejectedException.CurrentPasswordRequiredCode, PasswordRejectedException.PasswordRequiredCode],
+            exception.Errors.Select(e => e.Code));
+        Assert.Empty(harness.PasswordValidator.ValidatedPasswords);
     }
 
     /// <summary>
-    /// A new password that fails the Identity password policy is reported as
-    /// <see cref="UnauthorizedAccessException"/>, discarding every <c>IdentityError</c> the manager
-    /// produced. The user is told "unauthorized" when the real answer is "your password needs a
-    /// digit". Same family as D-M27.
+    /// D-M28 fixed: the blanket <c>catch (Exception) { SignOutAsync(); throw; }</c> could not tell a
+    /// rejected credential from a database being briefly unreachable, so a transient infrastructure
+    /// fault destroyed the ticket and made the user restart the whole sign-in dance for something that
+    /// had nothing to do with them. Infrastructure faults now propagate untouched.
     /// </summary>
     [Fact]
-    public async Task PerformChangePasswordAsync_WeakNewPassword_LosesTheIdentityErrors_KnownGap()
-    {
-        using var harness = new MustChangePasswordTestHarness();
-        var user = await ArmTicketAsync(harness);
-
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(
-            () => harness.Service.PerformChangePasswordAsync("abc", "abc"));
-
-        Assert.True(await harness.UserManager.CheckPasswordAsync(user, MustChangePasswordTestHarness.InitialPassword));
-    }
-
-    /// <summary>
-    /// D-M28: the blanket <c>catch (Exception)</c> cannot tell a rejected credential from a database
-    /// being briefly unreachable, so a transient infrastructure failure also signs the user out of
-    /// the change-password flow. The ticket is destroyed, so the user must restart the whole sign-in
-    /// dance for a fault that had nothing to do with them.
-    /// </summary>
-    [Fact]
-    public async Task PerformChangePasswordAsync_TransientStoreFailure_StillSignsTheUserOut_KnownBug()
+    public async Task PerformChangePasswordAsync_TransientStoreFailure_DoesNotSignTheUserOut()
     {
         using var harness = new MustChangePasswordTestHarness();
         await ArmTicketAsync(harness);
         harness.UserData.FindByIdFault = new TimeoutException("the user store is briefly unreachable");
 
         await Assert.ThrowsAsync<TimeoutException>(
-            () => harness.Service.PerformChangePasswordAsync(
-                MustChangePasswordTestHarness.NewPassword,
-                MustChangePasswordTestHarness.NewPassword));
+            () => harness.Service.PerformChangePasswordAsync(Initial, New, New));
 
-        Assert.Equal(Scheme, Assert.Single(harness.Authentication.SignOutCalls));
+        Assert.Empty(harness.Authentication.SignOutCalls);
     }
 
     /// <summary>
-    /// D-M28, the other half: the original exception is re-thrown rather than swallowed, so the
-    /// caller does at least see the real fault. Pinned so a "fix" for D-M28 does not accidentally
-    /// start hiding infrastructure errors.
+    /// D-M28, the half that had to stay true: the original exception still reaches the caller. Pinned
+    /// so narrowing the <c>catch</c> did not start swallowing faults.
     /// </summary>
     [Fact]
     public async Task PerformChangePasswordAsync_RethrowsTheOriginalException()
@@ -302,53 +273,68 @@ public class MustChangePasswordServicePerformTests
         harness.UserData.FindByIdFault = fault;
 
         var thrown = await Assert.ThrowsAsync<TimeoutException>(
-            () => harness.Service.PerformChangePasswordAsync(
-                MustChangePasswordTestHarness.NewPassword,
-                MustChangePasswordTestHarness.NewPassword));
+            () => harness.Service.PerformChangePasswordAsync(Initial, New, New));
 
         Assert.Same(fault, thrown);
     }
 
     /// <summary>
-    /// D-M25 (second and third sites): with no <c>HttpContext</c>, <c>AuthenticateAsync</c> throws a
-    /// <see cref="NullReferenceException"/>, the blanket <c>catch</c> then dereferences the same null
-    /// <c>HttpContext</c> to sign out, and the exception the caller sees comes from the
-    /// <i>error handler</i> rather than from the original failure.
+    /// The same for a fault raised by the authentication stack itself — the cookie handler failing is
+    /// not a reason to declare the session over.
     /// </summary>
     [Fact]
-    public async Task PerformChangePasswordAsync_ThrowsNullReferenceExceptionWithoutAnHttpContext_KnownBug()
+    public async Task PerformChangePasswordAsync_AuthenticationFailure_PropagatesWithoutSigningOut()
+    {
+        using var harness = new MustChangePasswordTestHarness();
+        await ArmTicketAsync(harness);
+        var fault = new InvalidOperationException("the data protection key ring is unavailable");
+        harness.Authentication.AuthenticateFault = fault;
+
+        var thrown = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => harness.Service.PerformChangePasswordAsync(Initial, New, New));
+
+        Assert.Same(fault, thrown);
+        Assert.Empty(harness.Authentication.SignOutCalls);
+    }
+
+    /// <summary>
+    /// D-M25 fixed (second and third sites): with no <c>HttpContext</c> the caller used to get a
+    /// <see cref="NullReferenceException"/> raised by the <c>catch</c> block's own dereference — the
+    /// exception came from the error handler rather than from the failure. There is now one guarded
+    /// accessor, and it reports what is wrong.
+    /// </summary>
+    [Fact]
+    public async Task PerformChangePasswordAsync_ThrowsInvalidOperationExceptionWithoutAnHttpContext()
     {
         using var harness = new MustChangePasswordTestHarness();
         await ArmTicketAsync(harness);
         harness.Accessor.HttpContext = null;
 
-        await Assert.ThrowsAsync<NullReferenceException>(
-            () => harness.Service.PerformChangePasswordAsync(
-                MustChangePasswordTestHarness.NewPassword,
-                MustChangePasswordTestHarness.NewPassword));
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => harness.Service.PerformChangePasswordAsync(Initial, New, New));
 
+        Assert.Contains("IHttpContextAccessor", exception.Message, StringComparison.Ordinal);
         Assert.Empty(harness.Authentication.SignOutCalls);
+        Assert.Empty(harness.Authentication.AuthenticateCalls);
     }
 
     /// <summary>
-    /// The <c>Email</c> claim is read out of the ticket into <c>MustChangePasswordInfo.Email</c> and
-    /// then never used — the change is driven entirely by the user id and the old password. Pinned
-    /// because it is the observable half of carrying the address in the cookie at all.
+    /// A ticket that carries an e-mail claim from an older version of the library still works: only the
+    /// user-id claim is read. This is the compatibility half of the D-M44 removal.
     /// </summary>
     [Fact]
-    public async Task PerformChangePasswordAsync_SucceedsWithoutAnEmailClaim_KnownGap()
+    public async Task PerformChangePasswordAsync_IgnoresExtraClaimsOnTheTicket()
     {
         using var harness = new MustChangePasswordTestHarness();
         var user = await harness.SeedUserAsync();
         harness.Authentication.NextAuthenticateResult = RecordingAuthenticationService.Ticket(
             Scheme,
             new Claim(ClaimTypes.Name, user.Id),
-            new Claim("OldPassword", MustChangePasswordTestHarness.InitialPassword));
+            new Claim(ClaimTypes.Email, user.Email!),
+            new Claim("OldPassword", Initial));
 
-        await harness.Service.PerformChangePasswordAsync(
-            MustChangePasswordTestHarness.NewPassword,
-            MustChangePasswordTestHarness.NewPassword);
+        await harness.Service.PerformChangePasswordAsync(Initial, New, New);
 
-        Assert.True(await harness.UserManager.CheckPasswordAsync(user, MustChangePasswordTestHarness.NewPassword));
+        Assert.True(await harness.UserManager.CheckPasswordAsync(user, New));
     }
 }

@@ -1,9 +1,9 @@
-﻿using Microsoft.AspNetCore.Mvc;
-
-namespace MintPlayer.AspNetCore.OpenSearch.Abstractions;
+﻿namespace MintPlayer.AspNetCore.OpenSearch.Abstractions;
 
 public interface IOpenSearchService
 {
     Task<IEnumerable<string>> ProvideSuggestions(string? searchTerms);
-    Task<RedirectResult> PerformSearch(string? searchTerms);
+
+    /// <summary>Resolves the search page the user must be sent to for <paramref name="searchTerms"/>.</summary>
+    Task<OpenSearchRedirect> PerformSearch(string? searchTerms);
 }

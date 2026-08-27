@@ -8,24 +8,19 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.NoSniff</PackageId>
-		<Version>10.0.1</Version>
+		<Version>11.0.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>ASP.NET Core middleware that adds the X-Content-Type-Options: nosniff header.</Description>
 		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-		<PackageTags>ASP.NET;NoSniff</PackageTags>
-		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/NoSniff/MintPlayer.AspNetCore.NoSniff</PackageProjectUrl>
+		<PackageTags>ASP.NET;ASP.NET Core;NoSniff;X-Content-Type-Options;Middleware;Security</PackageTags>
+		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/tree/master/NoSniff/MintPlayer.AspNetCore.NoSniff</PackageProjectUrl>
 		<RepositoryUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<Authors>Pieterjan De Clippel</Authors>
 		<Company>MintPlayer</Company>
 		<Product>MintPlayer.AspNetCore.NoSniff</Product>
 	</PropertyGroup>
-
-	<ItemGroup>
-		<PackageReference Include="MintPlayer.SourceGenerators" Version="10.13.0" PrivateAssets="all" IncludeAssets="runtime; build; native; contentfiles; analyzers; buildtransitive" />
-		<PackageReference Include="MintPlayer.SourceGenerators.Attributes" Version="10.13.0" GeneratePathProperty="true" />
-	</ItemGroup>
 
 	<!-- Include XML markups in the nupkg -->
 	<PropertyGroup Condition="'$(Configuration)'=='Release'">

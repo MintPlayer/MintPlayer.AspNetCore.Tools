@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Primitives;
+using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -55,43 +55,50 @@ public class ImprovedHstsMiddlewareTests
         Assert.Equal("next", ex.ParamName);
     }
 
+    [Fact]
+    public void Ctor_NullLoggerFactory_ThrowsArgumentNullException()
+    {
+        var ex = Assert.Throws<ArgumentNullException>(
+            () => new ImprovedHstsMiddleware(_ => Task.CompletedTask, Options.Create(new HstsOptions()), null!));
+
+        Assert.Equal("loggerFactory", ex.ParamName);
+    }
+
     /// <summary>
-    /// Pins the argument-validation order: <c>options</c> is checked before <c>next</c>.
+    /// Pins the argument-validation order: <c>next</c> is checked first.
     /// </summary>
     /// <remarks>
-    /// D-M4. With both arguments null the reported parameter name is "options", which points the
-    /// caller at the wrong argument. Cosmetic, but the order is observable, so it is pinned here
-    /// and the test flips when the guards are reordered.
+    /// D-M4, fixed. The guards used to run <c>options</c>-first, so a doubly-null call reported
+    /// "options" and pointed the caller at the wrong argument. They now run in parameter order.
     /// </remarks>
     [Fact]
-    public void Ctor_NullNextAndNullOptions_ReportsOptionsFirst_KnownGap()
+    public void Ctor_NullNextAndNullOptions_ReportsNextFirst()
     {
         var ex = Assert.Throws<ArgumentNullException>(
             () => new ImprovedHstsMiddleware(null!, null!, NullLoggerFactory.Instance));
 
-        Assert.Equal("options", ex.ParamName);
+        Assert.Equal("next", ex.ParamName);
     }
 
     /// <summary>
-    /// The two-argument overload is the only way to reach the <c>NullLoggerFactory</c> path.
+    /// There is exactly one public constructor, and it takes the logger factory.
     /// </summary>
     /// <remarks>
-    /// D-M2: <c>UseMiddleware&lt;T&gt;</c> resolves through <c>ActivatorUtilities</c>, which prefers
-    /// the greediest satisfiable constructor — and an <c>ILoggerFactory</c> is registered in every
-    /// real application. So this overload is dead code in practice and is only reachable by
-    /// constructing the middleware directly.
+    /// D-M2, fixed. There used to be two constructors both starting with <c>RequestDelegate</c>.
+    /// <c>UseMiddleware&lt;T&gt;</c> resolves through <c>ActivatorUtilities</c>, which prefers the
+    /// greediest satisfiable constructor, so the shorter overload was dead code in every real
+    /// application while the pair remained an ambiguity hazard. One constructor removes both.
     /// </remarks>
     [Fact]
-    public async Task Ctor_TwoArgumentOverload_UsesNullLoggerFactoryAndWorks()
+    public void Type_HasExactlyOneConstructor()
     {
-        var middleware = new ImprovedHstsMiddleware(_ => Task.CompletedTask, Options.Create(NoExclusions()));
-        var (context, response) = RecordingResponseFeature.CreateContext();
-        context.Request.Scheme = "https";
+        var constructors = typeof(ImprovedHstsMiddleware).GetConstructors();
 
-        await middleware.Invoke(context);
-        await response.FireOnStartingAsync();
+        var parameters = Assert.Single(constructors).GetParameters();
 
-        Assert.False(StringValues.IsNullOrEmpty(response.Headers.StrictTransportSecurity));
+        Assert.Equal(
+            [typeof(RequestDelegate), typeof(IOptions<HstsOptions>), typeof(ILoggerFactory)],
+            parameters.Select(parameter => parameter.ParameterType));
     }
 
     [Fact]
@@ -233,4 +240,104 @@ public class ImprovedHstsMiddlewareTests
         Assert.Equal(1, response.StartingCallbackCount);
     }
 
+    /// <summary>
+    /// Both skip paths are logged.
+    /// </summary>
+    /// <remarks>
+    /// D-M1, fixed. The <see cref="ILoggerFactory"/> used to be accepted and then dropped on the
+    /// floor, so the two cases in which no header is written — the request was not HTTPS, or the
+    /// host is excluded — happened in total silence, while the framework's own
+    /// <c>HstsMiddleware</c> reports both. "Why is there no HSTS header?" is exactly the question
+    /// these two messages answer.
+    /// </remarks>
+    [Fact]
+    public async Task Invoke_PlainHttpRequest_LogsThatTheRequestIsInsecure()
+    {
+        var recorder = new RecordingLoggerFactory();
+        var middleware = new ImprovedHstsMiddleware(
+            _ => Task.CompletedTask, Options.Create(NoExclusions()), recorder);
+        var (context, _) = RecordingResponseFeature.CreateContext();
+        context.Request.Scheme = "http";
+
+        await middleware.Invoke(context);
+
+        Assert.Contains(recorder.Messages, message => message.Contains("insecure"));
+    }
+
+    [Fact]
+    public async Task Invoke_ExcludedHost_LogsThatTheHostIsExcluded()
+    {
+        var recorder = new RecordingLoggerFactory();
+        var middleware = new ImprovedHstsMiddleware(
+            _ => Task.CompletedTask, Options.Create(ExcludingOnly("example.com")), recorder);
+        var (context, _) = RecordingResponseFeature.CreateContext();
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString("example.com");
+
+        await middleware.Invoke(context);
+
+        Assert.Contains(recorder.Messages, message => message.Contains("excluded"));
+    }
+
+    [Fact]
+    public async Task Invoke_HeaderWritten_LogsNothing()
+    {
+        var recorder = new RecordingLoggerFactory();
+        var middleware = new ImprovedHstsMiddleware(
+            _ => Task.CompletedTask, Options.Create(NoExclusions()), recorder);
+        var (context, _) = RecordingResponseFeature.CreateContext();
+        context.Request.Scheme = "https";
+
+        await middleware.Invoke(context);
+
+        Assert.Empty(recorder.Messages);
+    }
+
+    /// <summary>
+    /// Exclusion is equality only — no wildcards, no suffix matching, no IPv6 normalisation.
+    /// </summary>
+    /// <remarks>
+    /// Not a defect: this is exactly what the framework's <c>HstsMiddleware</c> does, and matching
+    /// it is the point of the library. It is pinned (and documented on <c>Invoke</c>) because the
+    /// alternative reading — that <c>"*.example.com"</c> or <c>"::1"</c> would work — is a natural
+    /// one to make and fails silently by writing the header on a host the caller meant to exclude.
+    /// </remarks>
+    [Theory]
+    [InlineData("api.example.com", "*.example.com")]
+    [InlineData("api.example.com", ".example.com")]
+    [InlineData("api.example.com", "example.com")]
+    [InlineData("[::1]", "::1")]
+    public async Task Invoke_ExclusionIsEqualityOnly_StillSetsHeader(string requestHost, string excludedHost)
+    {
+        var middleware = Create(ExcludingOnly(excludedHost));
+        var (context, response) = RecordingResponseFeature.CreateContext();
+        context.Request.Scheme = "https";
+        context.Request.Host = new HostString(requestHost);
+
+        await middleware.Invoke(context);
+        await response.FireOnStartingAsync();
+
+        Assert.Equal("max-age=2592000", response.Headers.StrictTransportSecurity);
+    }
+
+    /// <summary>Captures every message the middleware logs, at any level.</summary>
+    private sealed class RecordingLoggerFactory : ILoggerFactory, ILogger
+    {
+        public List<string> Messages { get; } = [];
+
+        public ILogger CreateLogger(string categoryName) => this;
+        public void AddProvider(ILoggerProvider provider) { }
+        public void Dispose() { }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
+    }
 }

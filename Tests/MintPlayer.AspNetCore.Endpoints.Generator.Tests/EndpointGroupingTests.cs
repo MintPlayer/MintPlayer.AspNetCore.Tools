@@ -1,18 +1,17 @@
 using Microsoft.AspNetCore.Routing;
+using Microsoft.CodeAnalysis;
 using MintPlayer.AspNetCore.Endpoints.Generator.Tests.Infrastructure;
 using Xunit;
 
 namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
 
 /// <summary>
-/// Group nesting, root-group discovery, and the stability of the emitted order.
+/// Group nesting, root-group discovery, and the order the emitted mapping is written in.
 /// </summary>
 /// <remarks>
-/// Grouping is the only place the generator builds a graph rather than a list, and it does so from
-/// two providers that disagree about what a group is: the group provider requires both
-/// <c>IEndpointGroup</c> and <c>IMemberOf&lt;T&gt;</c> in the base list, while a root group by
-/// definition has no <c>IMemberOf</c>. Root groups therefore exist only as strings pulled out of
-/// other people's parent references.
+/// Grouping is the only place the generator builds a graph rather than a list, so it is the only
+/// place that can be ambiguous (a group with two parents) or unbounded (a cycle). Both are reported
+/// rather than resolved by guessing.
 /// </remarks>
 public class EndpointGroupingTests
 {
@@ -33,23 +32,42 @@ public class EndpointGroupingTests
             "\n",
             EndpointGeneratorHarness.Run(assemblyName, sources).GeneratedTrees.Select(tree => tree.ToString()));
 
+    /// <summary>
+    /// Nested groups are mapped on their parent's group builder, in ordinal order of their fully
+    /// qualified names.
+    /// </summary>
+    /// <remarks>
+    /// The order is asserted exactly because it is emitted text: route order, the <c>grp</c>/<c>_f</c>
+    /// numbering and the descriptor list all ride on it. It used to come from iterating a
+    /// <c>HashSet&lt;string&gt;</c>, which enumerates identically within one process but not across
+    /// processes — string hashing is randomised per process — so the generated file was not
+    /// reproducible between builds.
+    /// </remarks>
     [Fact]
-    public void NestedGroups_AreMappedOnTheirParentGroupBuilder()
+    public void NestedGroups_AreMappedOnTheirParentGroupBuilder_InOrdinalOrder()
     {
         var generated = Generated("Fixtures", FixtureSources.Corpus);
 
         Assert.Contains("var grp0 = MapGroup<global::Fixtures.ApiGroup>(app);", generated);
-        Assert.Contains("var grp1 = MapGroup<global::Fixtures.UsersApi>(grp0);", generated);
-        Assert.Contains("var grp2 = MapGroup<global::Fixtures.ProductsApi>(grp0);", generated);
+        Assert.Contains("var grp1 = MapGroup<global::Fixtures.ProductsApi>(grp0);", generated);
+        Assert.Contains("var grp2 = MapGroup<global::Fixtures.UsersApi>(grp0);", generated);
+
+        Assert.True(
+            generated.IndexOf("MapGroup<global::Fixtures.ProductsApi>", StringComparison.Ordinal)
+                < generated.IndexOf("MapGroup<global::Fixtures.UsersApi>", StringComparison.Ordinal),
+            "ProductsApi sorts before UsersApi, so it must be emitted first.");
     }
 
     /// <summary>
-    /// A root group is never discovered as a group in its own right — it is only ever learned about
-    /// from a child's <c>IMemberOf&lt;T&gt;</c> or an endpoint's membership. So it gets mapped when
-    /// something points at it, and is invisible when nothing does.
+    /// A group nothing joins is not mapped, even though it is discovered.
     /// </summary>
+    /// <remarks>
+    /// Only the groups endpoints actually join — and their ancestors — are worth a <c>MapGroup</c>
+    /// call. Mapping an unreferenced one would add an empty route group to every application that
+    /// declared a group ahead of writing its endpoints.
+    /// </remarks>
     [Fact]
-    public void RootGroup_IsDiscoveredOnlyThroughSomethingThatReferencesIt()
+    public void GroupWithNoEndpointsAnywhereBeneathIt_IsNotMapped()
     {
         var source = $$"""
             {{Preamble}}
@@ -78,8 +96,8 @@ public class EndpointGroupingTests
     }
 
     /// <summary>
-    /// A group that has children but no endpoints of its own still gets a <c>MapGroup</c> call, which
-    /// is what makes the nesting work at all.
+    /// A group that has no endpoints of its own but has children that do still gets a
+    /// <c>MapGroup</c> call, which is what makes the nesting work at all.
     /// </summary>
     [Fact]
     public void GroupWithoutOwnEndpoints_IsStillMapped()
@@ -91,18 +109,21 @@ public class EndpointGroupingTests
     }
 
     /// <summary>
-    /// Pins D-G15: a group with two <c>IMemberOf&lt;T&gt;</c> silently becomes a root group.
+    /// A group with two parents gets MPEP004, and neither it nor its endpoints are mapped.
     /// </summary>
     /// <remarks>
-    /// <c>HasMultipleParents</c> removes the group from the parent map and from the child lookup, but
-    /// it is still reachable as an endpoint's <c>GroupTypeFqn</c> — and "not in the parent map" is
-    /// exactly the test for being a root. So instead of an error the user gets working routes at the
-    /// wrong place: <c>/users/…</c> where they asked for <c>/api/users/…</c>. Compare D-G4, where the
-    /// same ambiguity on an <i>endpoint</i> drops it entirely; the two halves of the same rule
-    /// disagree about what to do.
+    /// It used to become a <i>root</i> group: <c>HasMultipleParents</c> removed it from the parent
+    /// map, and "not in the parent map" was exactly the test for being a root. So instead of an error
+    /// the consumer got working routes in the wrong place — <c>/users/…</c> where they asked for
+    /// <c>/api/users/…</c>. A missing route is far easier to notice than a wrong one.
+    /// <para>
+    /// MPEP004 rather than MPEP003: the shapes and the consequences differ. MPEP003 is about an
+    /// endpoint and its one route; this moves every endpoint beneath the group, and someone filtering
+    /// diagnostics needs to be able to tell the two apart.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void GroupWithTwoParents_BecomesARootGroup_KnownBug()
+    public void GroupWithTwoParents_ReportsMPEP004_AndIsNotMapped()
     {
         var source = $$"""
             {{Preamble}}
@@ -129,26 +150,110 @@ public class EndpointGroupingTests
             }
             """;
 
-        var generated = Generated("Fixtures", source);
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+        var generated = string.Join("\n", result.GeneratedTrees.Select(tree => tree.ToString()));
 
-        Assert.Contains("var grp0 = MapGroup<global::Fixtures.UsersApi>(app);", generated);
-        Assert.DoesNotContain("ApiGroup", generated);
-        Assert.DoesNotContain("AdminGroup", generated);
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("MPEP004", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
+        Assert.Contains("UsersApi", diagnostic.GetMessage());
+
+        Assert.DoesNotContain("MapGroup<global::Fixtures.UsersApi>", generated);
+        Assert.DoesNotContain("Map<global::Fixtures.ListUsers>", generated);
     }
 
     /// <summary>
-    /// Pins D-G18: emission order must be reproducible.
+    /// Two groups that name each other as parent get MPEP005, and nothing recurses.
     /// </summary>
     /// <remarks>
-    /// Nothing in the producer sorts: root groups come out of a <c>HashSet&lt;string&gt;</c>, and
-    /// <c>valid</c> keeps whatever order the syntax provider produced. Route order, the
-    /// <c>_f</c>/<c>grp</c> numbering and the descriptor list all ride on that. Within one process
-    /// the hash set enumerates the same way for the same insertions, so this assertion can pass by
-    /// luck while the underlying order is still unspecified — it is written as the assertion the fix
-    /// has to keep satisfying, not as a reproduction.
+    /// This test was previously skipped, because <c>EmitGroupTree</c> had no visited set and a
+    /// <c>StackOverflowException</c> cannot be caught: running it would have taken the whole test host
+    /// down. Reading the producer suggested the recursion was in fact unreachable — every member of a
+    /// cycle has a non-null parent, so none qualified as a root group and <c>rootGroups</c> came out
+    /// empty. That reading is now confirmed, and it makes the real symptom quieter and worse than a
+    /// crash: the cyclic groups and every endpoint in them were silently dropped.
+    /// <para>
+    /// Both halves are fixed. The cycle is detected and reported, so it is no longer silent; and
+    /// <c>EmitGroupTree</c> carries a visited set anyway, so a future change that does reach it cannot
+    /// take the compiler with it. That is what makes this test safe to run.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void EmissionOrder_IsStableAcrossRuns()
+    public void CyclicGroups_ReportMPEP005_AndAreNotMapped()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            public class GroupA : IEndpointGroup, IMemberOf<GroupB>
+            {
+                public static string Prefix => "/a";
+            }
+
+            public class GroupB : IEndpointGroup, IMemberOf<GroupA>
+            {
+                public static string Prefix => "/b";
+            }
+
+            public class InA : IGetEndpoint, IMemberOf<GroupA>
+            {
+                public static string Path => "/";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+        var generated = string.Join("\n", result.GeneratedTrees.Select(tree => tree.ToString()));
+
+        Assert.Equal(2, result.Diagnostics.Length);
+        Assert.All(result.Diagnostics, diagnostic => Assert.Equal("MPEP005", diagnostic.Id));
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.GetMessage().Contains("GroupA"));
+        Assert.Contains(result.Diagnostics, diagnostic => diagnostic.GetMessage().Contains("GroupB"));
+
+        Assert.DoesNotContain("MapGroup<global::Fixtures.GroupA>", generated);
+        Assert.DoesNotContain("MapGroup<global::Fixtures.GroupB>", generated);
+        Assert.DoesNotContain("Map<global::Fixtures.InA>", generated);
+
+        // The mapping method itself is still emitted, so the consumer's call site is not a second,
+        // unrelated error on top of MPEP005.
+        Assert.Contains("MapFixturesEndpoints(this", generated);
+    }
+
+    /// <summary>A group nested inside itself is a cycle of one.</summary>
+    [Fact]
+    public void SelfNestedGroup_ReportsMPEP005()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            public class Loop : IEndpointGroup, IMemberOf<Loop>
+            {
+                public static string Prefix => "/loop";
+            }
+
+            public class InLoop : IGetEndpoint, IMemberOf<Loop>
+            {
+                public static string Path => "/";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+
+        Assert.Equal("MPEP005", Assert.Single(result.Diagnostics).Id);
+    }
+
+    /// <summary>
+    /// Emission order is reproducible, and it is the sorted order rather than whatever the syntax
+    /// provider happened to produce.
+    /// </summary>
+    /// <remarks>
+    /// Comparing two runs in one process cannot catch the original defect on its own — a
+    /// <c>HashSet&lt;string&gt;</c> enumerates identically for identical insertions within a process.
+    /// So the order is also asserted against the ordinal sort, which is a property a hash set cannot
+    /// satisfy by luck.
+    /// </remarks>
+    [Fact]
+    public void EmissionOrder_IsTheOrdinalSortedOrder_AndStableAcrossRuns()
     {
         var source = $$"""
             {{Preamble}}
@@ -180,7 +285,17 @@ public class EndpointGroupingTests
             }
             """;
 
-        Assert.Equal(Generated("Fixtures", source), Generated("Fixtures", source));
+        var generated = Generated("Fixtures", source);
+
+        Assert.Equal(Generated("Fixtures", source), generated);
+
+        // Roots ordinally: RootOne, RootThree, RootTwo. Each carries its one child.
+        Assert.Contains("var grp0 = MapGroup<global::Fixtures.RootOne>(app);", generated);
+        Assert.Contains("var grp1 = MapGroup<global::Fixtures.ChildOne>(grp0);", generated);
+        Assert.Contains("var grp2 = MapGroup<global::Fixtures.RootThree>(app);", generated);
+        Assert.Contains("var grp3 = MapGroup<global::Fixtures.ChildThree>(grp2);", generated);
+        Assert.Contains("var grp4 = MapGroup<global::Fixtures.RootTwo>(app);", generated);
+        Assert.Contains("var grp5 = MapGroup<global::Fixtures.ChildTwo>(grp4);", generated);
     }
 
     /// <summary>
@@ -222,18 +337,18 @@ public class EndpointGroupingTests
     }
 
     /// <summary>
-    /// Pins D-G19: a grouped endpoint whose <c>Path</c> is <c>"/"</c> resolves to a route with a
-    /// trailing slash, which does not match a request for the collection URL.
+    /// A grouped endpoint whose <c>Path</c> is <c>"/"</c> composes to a route with a trailing slash —
+    /// and that is correct, not a defect.
     /// </summary>
     /// <remarks>
-    /// <c>"/"</c> is the natural way to say "the group's own URL", and the sample app uses it for
-    /// four endpoints. Composing <c>/api/users</c> with <c>/</c> gives <c>/api/users/</c>, so
-    /// <c>GET /api/users</c> is a 404 unless the app also enables trailing-slash redirection. The
-    /// generator is the right place to trim it, because it is the only part that knows the path is
-    /// group-relative.
+    /// The composed pattern really is <c>/api/users/</c>, but ASP.NET Core routing treats the
+    /// trailing empty segment as equivalent, so <c>GET /api/users</c> matches too — measured against
+    /// a live server in <c>TestAppEndToEndTests</c>. This test exists to stop someone "normalising"
+    /// the pattern on the strength of reading it; trimming the slash here would change the pattern
+    /// every route assertion in this suite names, for no behavioural gain.
     /// </remarks>
     [Fact]
-    public void GroupedEndpointWithRootPath_ResolvesToATrailingSlashRoute_KnownBug()
+    public void GroupedEndpointWithRootPath_ComposesToATrailingSlashRoute()
     {
         const string assemblyName = "Fixtures.TrailingSlash";
         var generated = EndpointGeneratorHarness.RunAndLoad(assemblyName, FixtureSources.Corpus);
@@ -245,50 +360,5 @@ public class EndpointGroupingTests
 
         Assert.Contains("/api/users/", paths);
         Assert.DoesNotContain("/api/users", paths);
-    }
-
-    /// <summary>
-    /// Pins D-G17: two groups that name each other as parent make <c>EmitGroupTree</c> recurse
-    /// without end.
-    /// </summary>
-    /// <remarks>
-    /// There is no visited set, so the recursion is bounded only by the stack. The result is a
-    /// <c>StackOverflowException</c> inside the generator, which .NET cannot catch: it terminates the
-    /// process, so running this test would take the entire test host — and every other result in the
-    /// run — down with it. It stays skipped until the visited set and its diagnostic exist, at which
-    /// point this becomes an assertion about that diagnostic.
-    /// <para>
-    /// Reading the producer suggests this particular pair may not reach the recursion at all: every
-    /// member of a cycle has a non-null parent, so none of them qualifies as a root group, and
-    /// <c>rootGroups</c> comes out empty — in which case the observable symptom is that the cyclic
-    /// groups and all their endpoints are silently dropped instead. That is a guess from reading,
-    /// and confirming it means running the recursion. Not worth the whole test run, so it stays
-    /// skipped either way.
-    /// </para>
-    /// </remarks>
-    [Fact(Skip = "D-G17: uncatchable StackOverflowException inside the generator; would kill the test host.")]
-    public void CyclicGroups_StackOverflow_KnownBug()
-    {
-        var source = $$"""
-            {{Preamble}}
-
-            public class GroupA : IEndpointGroup, IMemberOf<GroupB>
-            {
-                public static string Prefix => "/a";
-            }
-
-            public class GroupB : IEndpointGroup, IMemberOf<GroupA>
-            {
-                public static string Prefix => "/b";
-            }
-
-            public class InA : IGetEndpoint, IMemberOf<GroupA>
-            {
-                public static string Path => "/";
-                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
-            }
-            """;
-
-        Generated("Fixtures", source);
     }
 }

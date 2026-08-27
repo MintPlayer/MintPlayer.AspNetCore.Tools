@@ -7,9 +7,9 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
 /// extension method every consumer calls, and the name of the class that carries it.
 /// </summary>
 /// <remarks>
-/// These are asserted directly rather than through generated text because they carry real defects
-/// (D-G12 crash inputs, D-G13 collision) whose inputs a compilation cannot even express — an
-/// assembly name is not required to be a valid identifier.
+/// These are asserted directly rather than through generated text because their hard inputs cannot
+/// be expressed by a compilation at all — an assembly name is not required to be a valid C#
+/// identifier, and the override is whatever string the consumer typed.
 /// </remarks>
 public class AssemblyInfoTests
 {
@@ -23,6 +23,7 @@ public class AssemblyInfoTests
         var info = new AssemblyInfo(assemblyName, null);
 
         Assert.Equal(expected, info.GetMethodName());
+        Assert.False(info.MethodNameWasSanitised);
     }
 
     [Fact]
@@ -31,49 +32,78 @@ public class AssemblyInfoTests
         var info = new AssemblyInfo("MyApp.Api", "MapCustomEndpoints");
 
         Assert.Equal("MapCustomEndpoints", info.GetMethodName());
+        Assert.False(info.MethodNameWasSanitised);
     }
 
     /// <summary>
-    /// Pins D-G12: an empty dot-segment indexes <c>s[0]</c> on an empty string. The exception
-    /// escapes into Roslyn, which turns the whole generator off for that compilation.
+    /// An empty dot-segment is skipped rather than indexing <c>s[0]</c> on an empty string.
     /// </summary>
+    /// <remarks>
+    /// The <see cref="IndexOutOfRangeException"/> this used to throw did not surface anywhere: the
+    /// Tools package's <c>Produce</c> swallows it, so the consumer got no file, no diagnostic and not
+    /// even CS8785 — only a CS1061 on the <c>Map…Endpoints()</c> call they were told to write.
+    /// <c>"My..Api"</c> is unusual but legal, and a trailing dot arrives the same way from a mistyped
+    /// <c>&lt;AssemblyName&gt;</c>.
+    /// </remarks>
     [Theory]
-    [InlineData("My..Api")]
-    [InlineData(".My")]
-    [InlineData("My.")]
-    [InlineData("")]
-    public void GetMethodName_EmptySegment_Throws_KnownBug(string assemblyName)
-    {
-        var info = new AssemblyInfo(assemblyName, null);
-
-        Assert.Throws<IndexOutOfRangeException>(() => info.GetMethodName());
-    }
-
-    /// <summary>
-    /// Pins D-G12: nothing sanitises the segments, so any character that is legal in an assembly
-    /// name but illegal in an identifier is copied straight into the emitted method name.
-    /// </summary>
-    [Theory]
-    [InlineData("My-App", "MapMy-AppEndpoints")]
-    [InlineData("My App", "MapMy AppEndpoints")]
-    [InlineData("2Fast", "Map2FastEndpoints")]
-    public void GetMethodName_IllegalIdentifierCharacters_PassThrough_KnownBug(string assemblyName, string expected)
+    [InlineData("My..Api", "MapMyApiEndpoints")]
+    [InlineData(".My", "MapMyEndpoints")]
+    [InlineData("My.", "MapMyEndpoints")]
+    [InlineData("", "MapAssemblyEndpoints")]
+    public void GetMethodName_EmptySegment_IsSkipped_AndReportedAsSanitised(string assemblyName, string expected)
     {
         var info = new AssemblyInfo(assemblyName, null);
 
         Assert.Equal(expected, info.GetMethodName());
+        Assert.True(info.MethodNameWasSanitised);
     }
 
     /// <summary>
-    /// Pins D-G12: an empty override is taken at face value, so the generator emits a method with
-    /// no name at all.
+    /// Characters that are legal in an assembly name but not in an identifier are dropped.
     /// </summary>
-    [Fact]
-    public void GetMethodName_EmptyOverride_YieldsNoName_KnownBug()
+    /// <remarks>
+    /// A hyphenated assembly name is entirely ordinary (<c>my-app.csproj</c>). Letting one through
+    /// produced generated code that could not compile, with the errors in a file the consumer never
+    /// wrote.
+    /// </remarks>
+    [Theory]
+    [InlineData("My-App", "MapMyAppEndpoints", true)]
+    [InlineData("My App", "MapMyAppEndpoints", true)]
+    // A leading digit needs no fixup: the "Map" prefix already starts the identifier.
+    [InlineData("2Fast", "Map2FastEndpoints", false)]
+    public void GetMethodName_IllegalIdentifierCharacters_AreDropped(
+        string assemblyName, string expected, bool sanitised)
     {
-        var info = new AssemblyInfo("MyApp.Api", "");
+        var info = new AssemblyInfo(assemblyName, null);
 
-        Assert.Equal("", info.GetMethodName());
+        Assert.Equal(expected, info.GetMethodName());
+        Assert.Equal(sanitised, info.MethodNameWasSanitised);
+    }
+
+    /// <summary>
+    /// An override that survives sanitisation to nothing falls back to the assembly-derived name,
+    /// rather than emitting a method with no name at all.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("-")]
+    public void GetMethodName_UnusableOverride_FallsBackToTheAssemblyName(string methodNameOverride)
+    {
+        var info = new AssemblyInfo("MyApp.Api", methodNameOverride);
+
+        Assert.Equal("MapMyAppApiEndpoints", info.GetMethodName());
+        Assert.True(info.MethodNameWasSanitised);
+    }
+
+    /// <summary>An override starting with a digit is prefixed, because nothing else precedes it.</summary>
+    [Fact]
+    public void GetMethodName_OverrideStartingWithADigit_IsMadeAValidIdentifier()
+    {
+        var info = new AssemblyInfo("MyApp.Api", "2Map");
+
+        Assert.Equal("_2Map", info.GetMethodName());
+        Assert.True(info.MethodNameWasSanitised);
     }
 
     [Theory]
@@ -81,6 +111,8 @@ public class AssemblyInfoTests
     [InlineData("MyApp.Api", "MapCustomEndpoints", "CustomEndpointsExtensions")]
     // No "Map" prefix to strip, so the whole override becomes part of the class name.
     [InlineData("MyApp.Api", "RegisterEndpoints", "RegisterEndpointsExtensions")]
+    // "Map" and nothing else would leave an empty class name.
+    [InlineData("MyApp.Api", "Map", "EndpointMappingExtensions")]
     public void GetSafeClassName_StripsAMapPrefixAndAppendsExtensions(
         string assemblyName, string? methodNameOverride, string expected)
     {
@@ -90,18 +122,22 @@ public class AssemblyInfoTests
     }
 
     /// <summary>
-    /// Pins D-G13: <c>GetSafeClassName</c> is "safe" in name only. The generated class always lands
-    /// in the library's own namespace, so an override that strips down to the name of a shipped type
-    /// collides with it — here with the real
-    /// <c>MintPlayer.AspNetCore.Endpoints.EndpointRouteBuilderExtensions</c>, giving the consumer a
-    /// CS0101 in code they cannot edit.
+    /// The class name can still coincide with a shipped type's name — what makes that harmless is
+    /// the namespace it is emitted into, which is not the library's own.
     /// </summary>
+    /// <remarks>
+    /// <c>"MapEndpointRouteBuilder"</c> reads like a perfectly reasonable choice and strips down to
+    /// <c>EndpointRouteBuilderExtensions</c>, which the runtime package defines. In the library's own
+    /// namespace that silently shadowed the shipped type — source beats metadata for a name, so it
+    /// was not even a CS0101. See
+    /// <see cref="EndpointMethodNameTests.MethodNameOverrideMatchingAShippedTypeName_DoesNotShadowIt"/>
+    /// for the half that fixes it.
+    /// </remarks>
     [Fact]
-    public void GetSafeClassName_CollidesWithAShippedType_KnownBug()
+    public void GetSafeClassName_MayCoincideWithAShippedTypeName()
     {
         var info = new AssemblyInfo("MyApp.Api", "MapEndpointRouteBuilder");
 
-        Assert.Equal("EndpointRouteBuilderExtensions", info.GetSafeClassName());
         Assert.Equal(typeof(EndpointRouteBuilderExtensions).Name, info.GetSafeClassName());
     }
 

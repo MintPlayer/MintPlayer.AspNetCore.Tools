@@ -62,16 +62,20 @@ public class ImageSerializationTests
     }
 
     /// <summary>
-    /// The image sitemap requires <c>image:loc</c>, but a null <c>Location</c> produces an empty
-    /// <c>image:image</c> element instead of an error. Same class as the null-<c>loc</c> gap on
-    /// <c>Url</c>; not in the PRD register.
+    /// PRD defect D-S29: the image sitemap extension requires <c>image:loc</c>, and a null
+    /// <c>Location</c> used to produce an empty <c>image:image</c> element instead of an error —
+    /// the same silent-invalid-document failure as the null <c>Url.Loc</c>.
     /// </summary>
-    [Fact]
-    public void Image_NullLocation_EmitsAnEmptyImageElement_KnownGap()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Image_LocationNullOrBlank_FailsSerialization(string? location)
     {
-        var image = SerializeImage(new Image());
+        var exception = Assert.Throws<InvalidOperationException>(() => XmlTestHelpers.SerializeToString(
+            new UrlSet([new Url { Loc = "https://example.org/a", Images = { new Image { Location = location } } }])));
 
-        Assert.Empty(image.Elements());
+        Assert.Contains("Location", exception.InnerException!.Message);
     }
 
     /// <summary>

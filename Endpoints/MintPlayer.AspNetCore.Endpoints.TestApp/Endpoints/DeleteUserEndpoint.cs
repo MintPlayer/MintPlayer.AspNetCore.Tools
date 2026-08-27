@@ -12,7 +12,12 @@ public partial class DeleteUser : IDeleteEndpoint<GetUserRequest>, IMemberOf<Use
 
     protected override ValueTask<GetUserRequest?> BindRequestAsync(HttpContext context)
     {
-        var id = int.Parse(context.Request.RouteValues["id"]!.ToString()!);
+        // A hand-written binder says what a malformed request is; the library cannot guess. Left as a
+        // bare int.Parse this is a 500, because a FormatException out of user code could equally be a
+        // bug and the library will not swallow it.
+        if (!int.TryParse(context.Request.RouteValues["id"]?.ToString(), out var id))
+            throw new EndpointBindingException(StatusCodes.Status400BadRequest, "The id must be an integer.");
+
         return ValueTask.FromResult<GetUserRequest?>(new GetUserRequest(id));
     }
 

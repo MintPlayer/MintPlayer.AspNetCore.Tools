@@ -85,6 +85,8 @@ public class VideoSerializationTests
     [InlineData("rating")]
     [InlineData("view_count")]
     [InlineData("publication_date")]
+    [InlineData("family_friendly")]
+    [InlineData("live")]
     public void Video_UnsetOptionalMembers_AreOmitted(string elementName)
     {
         var video = SerializeVideo(new Video { Title = "T" });
@@ -93,26 +95,42 @@ public class VideoSerializationTests
     }
 
     /// <summary>
-    /// <c>FamilyFriendly</c> and <c>Live</c> are the two nullable members with NO
-    /// <c>ShouldSerialize*</c> companion, so an unset video always emits two
-    /// <c>xsi:nil="true"</c> elements — which the video sitemap schema does not allow, and which
-    /// no other optional member on the type does.
+    /// PRD defect D-S28: <c>FamilyFriendly</c> and <c>Live</c> were the two nullable members with no
+    /// <c>ShouldSerialize*</c> companion, so EVERY video emitted two <c>xsi:nil="true"</c> elements
+    /// — which the video sitemap schema does not allow, and which no other optional member on the
+    /// type did.
     /// </summary>
     /// <remarks>
-    /// Not in the PRD register; reported as a new finding by the M5 milestone. It also drags the
-    /// <c>xsi</c> namespace declaration into every response containing a video, defeating the
-    /// formatter's <c>ns.Add(string.Empty, string.Empty)</c>.
+    /// It also dragged the <c>xsi</c> namespace declaration into every response containing a video,
+    /// defeating the formatter's <c>ns.Add(string.Empty, string.Empty)</c>. That half is asserted
+    /// here too, because the declaration is what a schema validator trips over first.
     /// </remarks>
     [Fact]
-    public void Video_UnsetFamilyFriendlyAndLive_AreEmittedAsXsiNil_KnownGap()
+    public void Video_UnsetFamilyFriendlyAndLive_AreOmitted()
     {
         var video = SerializeVideo(new Video { Title = "T" });
 
-        Assert.Equal(
-            ["title", "family_friendly", "live"],
-            video.Elements().Select(e => e.Name.LocalName).ToArray());
-        Assert.Equal("true", video.Element(Ns.Video + "family_friendly")!.Attribute(Ns.Xsi + "nil")!.Value);
-        Assert.Equal("true", video.Element(Ns.Video + "live")!.Attribute(Ns.Xsi + "nil")!.Value);
+        Assert.Equal(["title"], video.Elements().Select(e => e.Name.LocalName).ToArray());
+
+        var xml = XmlTestHelpers.SerializeToString(new UrlSet(
+        [
+            new Url { Loc = "https://example.org/a", Videos = { new Video { Title = "T" } } },
+        ]));
+
+        Assert.DoesNotContain("nil=\"true\"", xml);
+        Assert.DoesNotContain("XMLSchema-instance", xml);
+    }
+
+    /// <summary>The other side of the D-S28 guard: a value that WAS set still reaches the wire.</summary>
+    [Theory]
+    [InlineData(true, "true")]
+    [InlineData(false, "false")]
+    public void Video_SetFamilyFriendlyAndLive_AreEmitted(bool value, string expected)
+    {
+        var video = SerializeVideo(new Video { Title = "T", FamilyFriendly = value, Live = value });
+
+        Assert.Equal(expected, video.Element(Ns.Video + "family_friendly")!.Value);
+        Assert.Equal(expected, video.Element(Ns.Video + "live")!.Value);
     }
 
     [Fact]

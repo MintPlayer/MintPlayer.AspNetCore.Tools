@@ -5,31 +5,24 @@ using Xunit;
 namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
 
 /// <summary>
-/// Pins defect D-G25: the generated code only compiles when the consuming project supplies
-/// ASP.NET Core global usings.
+/// The generated code compiles in any project that can reference ASP.NET Core, not only in a
+/// <c>Microsoft.NET.Sdk.Web</c> one with implicit usings on.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The generator fully qualifies every <i>type</i> it names with <c>global::</c>, which correctly
-/// makes it immune to the consumer's namespace imports — but it then calls the <i>extension
-/// methods</i> <c>MapMethods</c>, <c>MapGroup</c> and <c>Produces</c>. An extension-method
-/// invocation cannot be resolved from a <c>global::</c> type name; the declaring namespace has to
-/// be in scope. The emitted file contains no using directives at all.
+/// makes it immune to the consumer's namespace imports — and it then calls the <i>extension
+/// methods</i> <c>MapMethods</c>, <c>MapGroup</c>, <c>Produces</c> and <c>WithMetadata</c>. An
+/// extension-method invocation cannot be resolved from a <c>global::</c> type name; the declaring
+/// namespace has to be in scope, and the emitted file contained no using directives at all.
 /// </para>
 /// <para>
-/// So it works in <c>Microsoft.NET.Sdk.Web</c> projects with <c>ImplicitUsings</c> enabled — which
-/// is what the sample TestApp is, and why this went unnoticed — and fails in a plain
-/// <c>Microsoft.NET.Sdk</c> library with <c>FrameworkReference Microsoft.AspNetCore.App</c>, or in
-/// any project with <c>&lt;ImplicitUsings&gt;disable&lt;/ImplicitUsings&gt;</c>. Both are entirely
-/// reasonable ways to consume the package.
-/// </para>
-/// <para>
-/// The fix (deferred to the defect-fixing milestone) is for the producer to emit its own using
-/// directives, or to call the extension methods as plain static invocations
-/// (<c>global::Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapMethods(routes, …)</c>),
-/// which is what "fully qualified" should have meant here. When that lands,
-/// <see cref="GeneratedCode_WithoutImplicitUsings_DoesNotCompile_KnownBug"/> flips to asserting no
-/// errors and this class's name stops mentioning a bug.
+/// So it worked in the sample TestApp — a Web SDK project with implicit usings, which is why this
+/// went unnoticed — and failed in a plain <c>Microsoft.NET.Sdk</c> library with
+/// <c>FrameworkReference Microsoft.AspNetCore.App</c>, or in any project with
+/// <c>&lt;ImplicitUsings&gt;disable&lt;/ImplicitUsings&gt;</c>. Both are entirely reasonable ways to
+/// consume the package, and the consumer got three CS1061 errors in generated source they cannot
+/// edit. The file now emits the three usings its own calls need.
 /// </para>
 /// </remarks>
 public class GeneratedCodeUsingsTests
@@ -54,7 +47,7 @@ public class GeneratedCodeUsingsTests
         }
         """;
 
-    /// <summary>The supported case: a Web SDK consumer with implicit usings.</summary>
+    /// <summary>A Web SDK consumer with implicit usings — the case that always worked.</summary>
     [Fact]
     public void GeneratedCode_WithWebSdkImplicitUsings_Compiles()
     {
@@ -64,11 +57,10 @@ public class GeneratedCodeUsingsTests
     }
 
     /// <summary>
-    /// The defect: without those usings the generated code does not compile, and the errors point
-    /// at generated source the consumer cannot edit.
+    /// A plain SDK consumer, or one with implicit usings disabled — the case that did not.
     /// </summary>
     [Fact]
-    public void GeneratedCode_WithoutImplicitUsings_DoesNotCompile_KnownBug()
+    public void GeneratedCode_WithoutImplicitUsings_Compiles()
     {
         var compilation = EndpointGeneratorHarness.CreateCompilation(
             "Fixtures",
@@ -80,16 +72,39 @@ public class GeneratedCodeUsingsTests
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToArray();
 
-        // Every error must be an unresolved extension method in the generated file — if this ever
-        // reports something else, the fixture itself has broken and the test is lying.
-        Assert.NotEmpty(errors);
-        Assert.All(errors, error =>
-        {
-            Assert.Equal("CS1061", error.Id);
-            Assert.Contains("EndpointMapping.g.cs", error.Location.GetLineSpan().Path);
-        });
+        Assert.Empty(errors);
+    }
 
-        var messages = string.Join(" | ", errors.Select(e => e.GetMessage()));
-        Assert.Contains("MapMethods", messages);
+    /// <summary>
+    /// The whole corpus, without implicit usings: the group and <c>Produces</c> calls go through
+    /// different namespaces from <c>MapMethods</c>, so one endpoint would not have caught all three.
+    /// </summary>
+    [Fact]
+    public void GeneratedCode_ForEveryShape_WithoutImplicitUsings_Compiles()
+    {
+        var compilation = EndpointGeneratorHarness.CreateCompilation(
+            "Fixtures",
+            [FixtureSources.Corpus],
+            includeImplicitUsings: false);
+
+        var errors = EndpointGeneratorHarness
+            .RunAndCompile(compilation)
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+
+        Assert.Empty(errors);
+    }
+
+    /// <summary>The using directives are actually in the file, rather than happening to be in scope.</summary>
+    [Fact]
+    public void GeneratedFile_EmitsTheUsingsItsExtensionCallsNeed()
+    {
+        var generated = string.Join(
+            "\n",
+            EndpointGeneratorHarness.Run("Fixtures", TypedPostEndpoint).GeneratedTrees.Select(tree => tree.ToString()));
+
+        Assert.Contains("using Microsoft.AspNetCore.Builder;", generated);
+        Assert.Contains("using Microsoft.AspNetCore.Http;", generated);
+        Assert.Contains("using Microsoft.AspNetCore.Routing;", generated);
     }
 }

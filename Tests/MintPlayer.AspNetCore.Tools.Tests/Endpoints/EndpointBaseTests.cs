@@ -91,27 +91,85 @@ public class EndpointBaseTests
     }
 
     /// <summary>
-    /// A null bound request is passed straight through to user code.
+    /// A null bound request never reaches the typed handler; the bridge answers 400 instead.
     /// </summary>
     /// <remarks>
-    /// D-G5. The bridge does <c>HandleAsync(request!, …)</c> — the null-forgiving operator silences
-    /// the compiler without changing anything at runtime. An empty body, an unbound GET, or a
-    /// formatter that returned no value all produce null here, and the endpoint author's handler
-    /// receives a null it was told (by the signature) it would never get. The observable result in
-    /// an application is a 500 from inside user code rather than a 400.
+    /// The bridge used to do <c>HandleAsync(request!, …)</c> — the null-forgiving operator silences
+    /// the compiler without changing anything at runtime. A literal JSON <c>null</c> body, or a
+    /// hand-written binder that returns <c>default</c>, then handed user code a null it had been told
+    /// (by the signature) it would never get, and the observable result was a 500 from inside the
+    /// endpoint author's own code for what is a malformed request.
     /// </remarks>
     [Fact]
-    public async Task HandleAsync_NullBoundRequest_IsPassedToUserCodeAsNull_KnownBug()
+    public async Task HandleAsync_NullBoundRequest_ReturnsBadRequest_WithoutCallingTheHandler()
     {
         var endpoint = new SpyEndpoint(_ => new ValueTask<Req?>((Req?)null));
 
-        await endpoint.HandleAsync(new DefaultHttpContext());
+        var result = await endpoint.HandleAsync(new DefaultHttpContext());
 
-        Assert.Equal(1, endpoint.HandleCalls);
-        Assert.Null(endpoint.ReceivedRequest);
+        Assert.Equal(0, endpoint.HandleCalls);
+        Assert.Equal(StatusCodes.Status400BadRequest, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
     }
 
-    /// <summary>Binding failures are not translated — there is no try/catch in the bridge.</summary>
+    /// <summary>
+    /// A binding failure the library raised becomes its own status code, and the handler is skipped.
+    /// </summary>
+    [Theory]
+    [InlineData(StatusCodes.Status400BadRequest)]
+    [InlineData(StatusCodes.Status415UnsupportedMediaType)]
+    public async Task HandleAsync_BindingFailure_ReturnsItsStatusCode(int statusCode)
+    {
+        var endpoint = new SpyEndpoint(_ => throw new EndpointBindingException(statusCode, "no"));
+
+        var result = await endpoint.HandleAsync(new DefaultHttpContext());
+
+        Assert.Equal(0, endpoint.HandleCalls);
+        Assert.Equal(statusCode, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+    }
+
+    /// <summary>An endpoint can take over the binding-failure response.</summary>
+    private sealed class CustomFailureEndpoint : EndpointBase<Req>
+    {
+        public EndpointBindingException? SeenFailure { get; private set; }
+        public bool WasCalled { get; private set; }
+
+        protected override ValueTask<Req?> BindRequestAsync(HttpContext context)
+            => throw new EndpointBindingException(StatusCodes.Status400BadRequest, "bad body");
+
+        protected override ValueTask<IResult> OnBindFailedAsync(HttpContext context, EndpointBindingException? failure)
+        {
+            WasCalled = true;
+            SeenFailure = failure;
+            return new(Results.StatusCode(StatusCodes.Status422UnprocessableEntity));
+        }
+
+        public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
+            => Task.FromResult(Results.Ok());
+    }
+
+    [Fact]
+    public async Task OnBindFailedAsync_CanBeOverriddenToChangeTheResponse()
+    {
+        var endpoint = new CustomFailureEndpoint();
+
+        var result = await endpoint.HandleAsync(new DefaultHttpContext());
+
+        Assert.True(endpoint.WasCalled);
+        Assert.Equal("bad body", endpoint.SeenFailure?.Message);
+        Assert.Equal(
+            StatusCodes.Status422UnprocessableEntity,
+            Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+    }
+
+    /// <summary>
+    /// An exception the <i>endpoint's own</i> binder threw is not translated.
+    /// </summary>
+    /// <remarks>
+    /// Only <see cref="EndpointBindingException"/> is caught. The library has no idea what a
+    /// <see cref="FormatException"/> from a hand-written binder means, and guessing 400 would swallow
+    /// genuine bugs — an endpoint that wants a status code for its own parse failures throws
+    /// <see cref="EndpointBindingException"/> and gets one.
+    /// </remarks>
     [Fact]
     public async Task HandleAsync_BindThrows_ExceptionPropagatesAndHandlerIsNotCalled()
     {
@@ -142,6 +200,10 @@ public class EndpointBaseTests
         endpoint.Dispose();
     }
 
+    /// <summary>
+    /// The forwarding must stay synchronous, or every request pays an allocation to dispose an
+    /// endpoint that has nothing to release.
+    /// </summary>
     [Fact]
     public void DisposeAsync_DefaultImplementation_CompletesSynchronously()
     {
@@ -151,19 +213,39 @@ public class EndpointBaseTests
     }
 
     /// <summary>
-    /// <see cref="EndpointBase{TRequest}"/> implements both disposal interfaces.
+    /// <see cref="EndpointBase{TRequest}"/> implements both disposal interfaces, and the async one
+    /// forwards to the synchronous one.
     /// </summary>
     /// <remarks>
-    /// This is what makes D-G6 possible: both disposal call sites check
-    /// <see cref="IAsyncDisposable"/> first, so for anything deriving from this base — which is
-    /// every typed endpoint — an overridden <c>Dispose()</c> can never run. Pinned here so the
-    /// cause is documented next to the effect.
+    /// Both disposal call sites test <see cref="IAsyncDisposable"/> first, and every typed endpoint
+    /// inherits both interfaces from this base — so without the forwarding an overridden
+    /// <c>Dispose()</c> could never run for any of them. That is a perfectly reasonable thing to
+    /// write, and what the compiler's own dispose analysers nudge you toward, so it leaked silently.
     /// </remarks>
     [Fact]
-    public void EndpointBase_ImplementsBothDisposableInterfaces()
+    public async Task DisposeAsync_DefaultImplementation_ForwardsToDispose()
     {
         Assert.True(typeof(IDisposable).IsAssignableFrom(typeof(EndpointBase<Req>)));
         Assert.True(typeof(IAsyncDisposable).IsAssignableFrom(typeof(EndpointBase<Req>)));
+
+        var endpoint = new SyncOnlyDisposableEndpoint();
+
+        await ((IAsyncDisposable)endpoint).DisposeAsync();
+
+        Assert.Equal(1, endpoint.Disposals);
+    }
+
+    /// <summary>Overrides only <c>Dispose()</c>, which is the shape that used to leak.</summary>
+    private sealed class SyncOnlyDisposableEndpoint : EndpointBase<Req>
+    {
+        public int Disposals { get; private set; }
+
+        protected override ValueTask<Req?> BindRequestAsync(HttpContext context) => new(new Req(1));
+
+        public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
+            => Task.FromResult(Results.Ok());
+
+        public override void Dispose() => Disposals++;
     }
 
     /// <summary>

@@ -91,56 +91,56 @@ If any of these fail, fix the design here rather than proceeding.
 
 `Hsts`, `NoSniff`, `ChangePassword`, `SubDirectoryViews`.
 
-- [ ] `ImprovedHstsMiddlewareTests` + `ImprovedHstsHeaderValueTests` + `UseImprovedHstsTests`
+- [x] `ImprovedHstsMiddlewareTests` + `ImprovedHstsHeaderValueTests` + `UseImprovedHstsTests`
       — ctor guards and their order, HTTPS gate, excluded-host matching (casing, port),
       header-value assembly across `MaxAge`/`IncludeSubDomains`/`Preload`, invariant
       culture under `nl-BE` (R4.2).
-- [ ] `NoSniffMiddlewareTests` + `UseNoSniffTests` — unconditional header, deferral,
+- [x] `NoSniffMiddlewareTests` + `UseNoSniffTests` — unconditional header, deferral,
       overwrite, `next` propagation.
-- [ ] `MapChangePasswordTests` + `ChangePasswordEndpointBehaviourTests` — both overloads,
+- [x] `MapChangePasswordTests` + `ChangePasswordEndpointBehaviourTests` — both overloads,
       the literal `/.well-known/change-password` pattern, GET-only, 302 + `Location`,
       async awaiting, factory called per request.
-- [ ] `ConfigureViewsInSubfolderTests` + `…WithRealDefaultsTests` — prefixing, slash
+- [x] `ConfigureViewsInSubfolderTests` + `…WithRealDefaultsTests` — prefixing, slash
       trimming, and the ordering trap (called before `AddControllersWithViews()` it
       silently does nothing — D-M39, the highest-value test in that library).
-- [ ] `TestServer` groups (R3.2): HSTS header survives a downstream `Headers.Clear()`
+- [x] `TestServer` groups (R3.2): HSTS header survives a downstream `Headers.Clear()`
       (the library's entire reason to exist vs. the built-in), NoSniff on the wire and
       `OnStarting` ordering, `.well-known` routing, `POST` → 405.
-- [ ] Tests pinning current behaviour for D-M3, D-M4, D-M6, D-M18, D-M19, D-M20, D-M36,
+- [x] Tests pinning current behaviour for D-M3, D-M4, D-M6, D-M18, D-M19, D-M20, D-M36,
       D-M37, D-M39, each named `…_KnownBug`/`…_KnownGap` so M9 can flip them.
 
 ---
 
 ## M3 — LoggerProviders
 
-- [ ] `LoggerExtensionsTests`, `FileLoggerOptionsTests`, `LoggerFileProviderTests`,
+- [x] `LoggerExtensionsTests`, `FileLoggerOptionsTests`, `LoggerFileProviderTests`,
       `FileLoggerTests`, `FileLoggerEndToEndTests`.
-- [ ] Temp-directory fixture under `Path.GetTempPath()`; **no** `FakeLogger` — this
+- [x] Temp-directory fixture under `Path.GetTempPath()`; **no** `FakeLogger` — this
       library *is* the sink, so a fake logger would replace the thing under test.
-- [ ] Extension allowlist including the case-sensitivity gap (D-M11), the `Log.txt`
+- [x] Extension allowlist including the case-sensitivity gap (D-M11), the `Log.txt`
       fallback, append-not-truncate, unwritable path.
-- [ ] Pin the two significant gaps: **exceptions are never written** (D-M7) and no
+- [x] Pin the two significant gaps: **exceptions are never written** (D-M7) and no
       level/category/timestamp (D-M8).
-- [ ] The concurrency test (D-M14) is written `[Fact(Skip=…)]` referencing D-M14 — it is a
+- [x] The concurrency test (D-M14) is written `[Fact(Skip=…)]` referencing D-M14 — it is a
       bug reproduction, not a stable regression test, until M9 fixes it.
 
 ---
 
 ## M4 — MustChangePassword
 
-- [ ] `TestUserStore` + real `UserManager` (R3.4), recording `IAuthenticationService`.
-- [ ] `MustChangePasswordConstantsTests` — pin the wire value `"Identity.ChangePassword"`;
+- [x] `TestUserStore` + real `UserManager` (R3.4), recording `IAuthenticationService`.
+- [x] `MustChangePasswordConstantsTests` — pin the wire value `"Identity.ChangePassword"`;
       changing it silently invalidates live cookies.
-- [ ] `AuthenticationBuilderExtensionsTests` — scheme registration, cookie name, the
+- [x] `AuthenticationBuilderExtensionsTests` — scheme registration, cookie name, the
       5-minute expiry, no disturbance to other schemes.
-- [ ] `AddMustChangePasswordServiceRegistrationTests` — including the missing
+- [x] `AddMustChangePasswordServiceRegistrationTests` — including the missing
       `IHttpContextAccessor` (D-M22).
-- [ ] `MustChangePasswordServiceSignInTests` / `…PerformTests` — claim contents including
+- [x] `MustChangePasswordServiceSignInTests` / `…PerformTests` — claim contents including
       the `OldPassword` claim (D-M23), every failure path, sign-out ordering, and the
       success path *not* signing out (D-M26).
-- [ ] `MustChangePasswordCookieRoundTripTests` on `TestServer` — the one place a real
+- [x] `MustChangePasswordCookieRoundTripTests` on `TestServer` — the one place a real
       cookie + data protection round trip earns its keep.
-- [ ] `IMustChangePasswordServiceContractTests` — constraint and shape pins for the
+- [x] `IMustChangePasswordServiceContractTests` — constraint and shape pins for the
       zero-IL Abstractions package.
 
 ---
@@ -152,64 +152,64 @@ with zero executable lines, and its real contract (`T : IUpdateTimestamp` as con
 `GetSitemapIndex`) is exercised by the service tests. Two reflection shape-guards live in
 a `Timestamps/` folder.
 
-- [ ] Serialization suites: `UrlSetSerializationTests`, `SitemapIndexSerializationTests`,
+- [x] Serialization suites: `UrlSetSerializationTests`, `SitemapIndexSerializationTests`,
       `VideoSerializationTests`, `ImageSerializationTests`, `LinkSerializationTests`,
       `ChangeFreqTests`.
-- [ ] Shared helpers: `SerializeToString`/`SerializeToDocument`/`WithCulture`, `XNamespace`
+- [x] Shared helpers: `SerializeToString`/`SerializeToDocument`/`WithCulture`, `XNamespace`
       constants. Assert through `XDocument`, raw strings only where the lexical form is
       the subject (R4.3).
-- [ ] R4.1 discipline: no hard-coded UTC offsets; the one deliberate `Local`-kind test
+- [x] R4.1 discipline: no hard-coded UTC offsets; the one deliberate `Local`-kind test
       derives its expectation from `TimeZoneInfo.Local.GetUtcOffset(...)`.
-- [ ] `SitemapXmlServiceTests` — `PageCount` boundaries (D-S6, D-S7), `GetSitemapIndex`
+- [x] `SitemapXmlServiceTests` — `PageCount` boundaries (D-S6, D-S7), `GetSitemapIndex`
       slicing, the surprising `urlFunc(perPage, page)` argument order, laziness, and the
       multi-enumeration cost (D-S8) via a counting enumerable.
-- [ ] `SitemapXmlOutputFormatterTests`, `AddSitemapXmlTests`,
+- [x] `SitemapXmlOutputFormatterTests`, `AddSitemapXmlTests`,
       `MapDefaultSitemapXmlStylesheetTests`, `SitemapEndToEndTests`.
-- [ ] `EmbeddedResource_ExistsWithExpectedManifestName` (R4.4) — cheapest high-value test
+- [x] `EmbeddedResource_ExistsWithExpectedManifestName` (R4.4) — cheapest high-value test
       in the repo.
-- [ ] Optional, decided during the milestone: validate output against vendored
+- [x] Optional, decided during the milestone: validate output against vendored
       `sitemap.xsd`/`siteindex.xsd` fixtures (embedded, never fetched). This catches D-S1
       and D-S3 automatically.
-- [ ] Pin current behaviour for D-S1, D-S3, D-S4, D-S6–S14, D-S24.
+- [x] Pin current behaviour for D-S1, D-S3, D-S4, D-S6–S14, D-S24.
 
 ---
 
 ## M6 — OpenSearch and Abstractions
 
-- [ ] `OpenSearchDescriptionSerializationTests` — including `SearchForm`'s empty namespace
+- [x] `OpenSearchDescriptionSerializationTests` — including `SearchForm`'s empty namespace
       (D-S15) and invariant numeric attributes under a native-digits culture.
-- [ ] `OpenSearchOutputFormatterTests` — notably `CanWriteType(typeof(object[])) == false`,
+- [x] `OpenSearchOutputFormatterTests` — notably `CanWriteType(typeof(object[])) == false`,
       which is what lets the suggest endpoint fall through to JSON.
-- [ ] `HttpContextExtensionsTests` — `DeclaredType = typeof(TModel)` is what makes the
+- [x] `HttpContextExtensionsTests` — `DeclaredType = typeof(TModel)` is what makes the
       formatter match; guards and the `?? new RouteData()` branch.
-- [ ] `AddOpenSearchTests`, `MapOpenSearchValidationTests`.
-- [ ] `OsdxEndpointTests`, `SuggestEndpointTests`, `SearchEndpointTests` on `TestServer` —
+- [x] `AddOpenSearchTests`, `MapOpenSearchValidationTests`.
+- [x] `OsdxEndpointTests`, `SuggestEndpointTests`, `SearchEndpointTests` on `TestServer` —
       pinning D-S18 (no `{searchTerms}` macro; route value always `null`), D-S19 (the
       library's own assembly name in `Content-Disposition`), D-S20, D-S21 (browser
       `Accept: text/html` → 406, which is the primary real-world caller), D-S22, D-S23.
-- [ ] `OpenSearchContractTests` + a note on the `RedirectResult` leak in the abstraction.
+- [x] `OpenSearchContractTests` + a note on the `RedirectResult` leak in the abstraction.
 
 ---
 
 ## M7 — Endpoints runtime, Abstractions, and TestApp end-to-end
 
-- [ ] `HttpMethodInterfaceTests` — the verb literals across all 15 interfaces; the files
+- [x] `HttpMethodInterfaceTests` — the verb literals across all 15 interfaces; the files
       are literal copies, so a copy-paste verb error in one arity is a real risk.
-- [ ] `EndpointBaseDefaultsTests`, `EndpointDescriptorTests`, `AttributeTests`,
+- [x] `EndpointBaseDefaultsTests`, `EndpointDescriptorTests`, `AttributeTests`,
       `NonBodyEndpointTests` (including the reflection pin that `BindRequestAsync` is
       still abstract — one deleted keyword from silently breaking).
-- [ ] `EndpointBaseTests` + `BodyEndpointBindingTests` — the densest real logic: JSON
+- [x] `EndpointBaseTests` + `BodyEndpointBindingTests` — the densest real logic: JSON
       fallback vs. MVC formatter path, `CanRead` skipping, `NoValue`/`Failure` handling,
       the drained-body fallthrough (D-G7), the null-laundering (D-G5).
-- [ ] `EndpointRouteBuilderExtensionsTests` — route pattern, methods, attribute→metadata
+- [x] `EndpointRouteBuilderExtensionsTests` — route pattern, methods, attribute→metadata
       transfer, the `Configure` hook and its ordering, and that `IMemberOf<TGroup>` is
       ignored on manual registration (D-G14).
-- [ ] `EndpointInvocationTests` on `TestServer` — per-request resolution, scoped injection,
+- [x] `EndpointInvocationTests` on `TestServer` — per-request resolution, scoped injection,
       disposal, and that `Dispose()` is never called for a typed endpoint (D-G6).
-- [ ] `TestAppEndToEndTests` on `WebApplicationFactory<Program>` — all 12 shapes the
+- [x] `TestAppEndToEndTests` on `WebApplicationFactory<Program>` — all 12 shapes the
       sample demonstrates, group tags, `Produces` metadata including the `201` override,
       the descriptor list, and the trailing-slash route question (D-G19).
-- [ ] Fixtures for the shapes the sample never exercises: PATCH, `IGetEndpoint<TReq>`,
+- [x] Fixtures for the shapes the sample never exercises: PATCH, `IGetEndpoint<TReq>`,
       constructor injection, disposal overrides, endpoint-level `Configure`,
       `EndpointNameAttribute`, and MVC content negotiation (the sample never calls
       `AddControllers()`, so that whole branch is dead in it).
@@ -218,27 +218,49 @@ a `Timestamps/` folder.
 
 ## M8 — The source generator
 
-- [ ] Raw `CSharpGeneratorDriver` harness (R3.5): references from
+- [x] Raw `CSharpGeneratorDriver` harness (R3.5): references from
       `TRUSTED_PLATFORM_ASSEMBLIES` (R3.6), `LanguageVersion.Latest`,
       `NullableContextOptions.Enable`, and a deliberate `assemblyName:` since it drives
       `GetMethodName()`.
-- [ ] `AssemblyInfoTests`, `EndpointInfoTests` — the pure string functions, including the
+- [x] `AssemblyInfoTests`, `EndpointInfoTests` — the pure string functions, including the
       crash inputs (D-G12) and the collision (D-G13).
-- [ ] `EndpointDiscoveryTests` — every shape and every guard: abstract skip, namespace
+- [x] `EndpointDiscoveryTests` — every shape and every guard: abstract skip, namespace
       filters, the `StartsWith("IEndpoint")` false positive, interfaces-via-base-class
       (D-G10), split partials (D-G9), the two-group drop (D-G4), zero endpoints (D-G11).
-- [ ] `EndpointGroupingTests` — nesting, the root-group discovery asymmetry, the
+- [x] `EndpointGroupingTests` — nesting, the root-group discovery asymmetry, the
       multi-parent group becoming a root (D-G15), and **determinism**: run the driver
       twice on the same compilation and diff the text (D-G18).
-- [ ] `EndpointMethodNameTests`, `EndpointMetadataEmissionTests` — including
+- [x] `EndpointMethodNameTests`, `EndpointMetadataEmissionTests` — including
       `Generate_OutputCompiles_WithZeroErrors`, the single highest-value generator test:
       feed the generated trees into a second compilation and assert no errors. Nothing
       else catches a malformed emit.
-- [ ] `EndpointGeneratorIncrementalTests` with `TrackIncrementalGeneratorSteps` — this is
+- [x] `EndpointGeneratorIncrementalTests` with `TrackIncrementalGeneratorSteps` — this is
       what all the `IEquatable` ceremony in `Models.cs` exists for, and it is currently
       unverified.
-- [ ] The cyclic-group test (D-G17) stays `[Fact(Skip=…)]` until M9 adds the guard — an
+- [x] The cyclic-group test (D-G17) stays `[Fact(Skip=…)]` until M9 adds the guard — an
       uncatchable `StackOverflowException` would take the whole test run down with it.
+
+---
+
+## M2–M8 outcome
+
+**747 tests, 745 passing, 2 deliberately skipped, 0 failures.** Coverage 88.7% (784/884
+lines) max-merged as the server computes it. Report paths re-verified: 65 matched,
+0 ambiguous, 0 unmatched.
+
+Two things the suite forced back into M1's work:
+
+- `ExcludeByFile` widened from `**/obj/**` to `**/*.g.cs,**/obj/**`. The
+  MintPlayer.SourceGenerators generated documents moved from `obj/` to a TEMP directory
+  between runs; sitting outside the repo they dropped `<sources>` from the repo root to
+  `C:/` and broke all 49 previously-resolvable paths at once. The first pattern was
+  fitted to an unstable observation — see PRD Appendix C.
+- PRD R3.2's `new WebHostBuilder().UseTestServer()` is deprecated on .NET 10
+  (ASPDEPR004/008); the suite uses `new HostBuilder().ConfigureWebHost(…)`.
+
+Seven of the 27 read-derived defects did not survive execution (3 were not defects,
+4 had the wrong mechanism or symptom), and 22 new ones were found. All recorded in the
+PRD's corrections and additions sections.
 
 ---
 
@@ -247,40 +269,60 @@ a `Timestamps/` folder.
 Runs *after* the tests exist, so every fix shows up as a test flipping from
 `…_KnownBug` to an assertion of correct behaviour.
 
-- [ ] **Serious first:** D-G1 (wire up the three diagnostics via `IDiagnosticReporter` +
+**Scope decision (owner, after the register grew to ~50):** fix **everything**, breaking
+changes included, with a **major version bump to 11.0.0** across affected packages. The
+alternative — landing coverage plus a documented register and fixing later — was
+considered and declined. The argument for doing it now is that the tests exist and pin
+current behaviour, which is the cheapest moment a fix will ever have.
+
+- [x] **Serious first:** D-G1 (wire up the three diagnostics via `IDiagnosticReporter` +
       `LocationExtensions.FromSymbol`), D-G17 (visited-set + diagnostic), D-S18 (both
       halves of search/suggest), D-S1 and D-S15 (XML namespaces), D-M23 (stop putting the
       plaintext password in a cookie).
-- [ ] **Correctness:** D-G18 (sort emission), D-G4–G16 as listed, D-S6–S8, D-M7, D-M14,
+- [x] **Correctness:** D-G18 (sort emission), D-G4–G16 as listed, D-S6–S8, D-M7, D-M14,
       D-M22, D-M26, D-M36, D-M37, D-M39, D-M18.
-- [ ] **Robustness/consistency:** the grouped list in the PRD — guards, bare `throw new
+- [x] **Robustness/consistency:** the grouped list in the PRD — guards, bare `throw new
       Exception()`, `CanWriteType` subclassing, double registration, escaping,
       `XmlWriterSettings` mutation, logger ergonomics, generator `O(n²)` and metadata
       leakage.
-- [ ] **Docs/metadata:** the two wrong READMEs, the wrong `PackageTags`, the malformed
+- [x] **Docs/metadata:** the two wrong READMEs, the wrong `PackageTags`, the malformed
       `PackageProjectUrl` in every csproj.
-- [ ] Un-skip the D-M14 and D-G17 tests; flip every `…_KnownBug` name.
-- [ ] **Not** the `[decision]` items — those wait on the owner (see PRD).
+- [x] Un-skip the D-M14 and D-G17 tests; flip every `…_KnownBug` name.
+- [x] **Not** the `[decision]` items — those wait on the owner (see PRD).
 
 ---
 
 ## M10 — Measure, tune, verify
 
-- [ ] Full suite: `dotnet restore` → `dotnet build -c Release --no-restore` → the R1.1
+- [x] Full suite: `dotnet restore` → `dotnet build -c Release --no-restore` → the R1.1
       command. Zero failures.
 - [x] **`ExcludeByFile` decided by measurement** — pulled forward into M1, because the
       gate demanded zero unmatched paths. A coverlet glob **does** match virtual paths with
       no file on disk; `**/obj/**` removes 8 files / 19 coverable lines. Measurements in
       PRD Appendix C.
-- [ ] Re-measure it once the full suite exists, in case the shape changed.
-- [ ] Re-verify acceptance criteria 2–5 against the final reports.
-- [ ] R4 audit grep across every new test: `UriKind`, `[A-Z]:\\`, `Environment.NewLine`,
+- [x] Re-measure it once the full suite exists, in case the shape changed.
+- [x] Re-verify acceptance criteria 2–5 against the final reports.
+- [x] R4 audit grep across every new test: `UriKind`, `[A-Z]:\\`, `Environment.NewLine`,
       `ToLower()`/`ToUpper()` without a culture, hard-coded `+01:00`/`+00:00`. The sibling
       recorded that naming a suspect is not the same as auditing the class of problem —
       its predicted hazard passed and an unremarkable `Uri.TryCreate` bit instead. This
       grep comes *before* declaring done.
-- [ ] Record the resulting coverage figures in the PRD (`## Results`).
-- [ ] Open the PR.
+- [x] Record the resulting coverage figures in the PRD (`## Results`).
+- [x] Open the PR.
+
+## M9–M10 outcome
+
+**988 tests, 0 failures, 0 skipped. 98.9% coverage (1393/1408). Zero build warnings, from 206.**
+13 of the 14 instrumented assemblies are at 100%; `MintPlayer.Timestamps` has no executable IL.
+Path gate: 81 matched, 0 ambiguous, 0 unmatched. `dotnet pack` verified, including that the
+Endpoints package still ships `analyzers/dotnet/cs/…Generator.dll` (the 22c9cef/NU5017 area).
+
+Fourteen packages bumped to **11.0.0**; `MintPlayer.Timestamps` stays at 10.0.0 because it has
+literally no changes, and bumping it would make consumers update for nothing.
+
+Fixing disproved four more predictions on top of the seven that executing disproved — including one
+of the register's own prescribed fixes (D-S21) and one defect that turned out not to exist with a
+fix that could not be written (D-G22). All recorded in the PRD's two corrections sections.
 
 ---
 

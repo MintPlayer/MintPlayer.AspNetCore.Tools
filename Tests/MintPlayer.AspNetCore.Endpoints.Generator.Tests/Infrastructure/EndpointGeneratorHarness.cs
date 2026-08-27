@@ -18,11 +18,9 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests.Infrastructure;
 /// Every covered line in the generator assembly comes from this harness.
 /// </para>
 /// <para>
-/// A raw driver is used rather than snapshot testing. The generator's output order is currently
-/// nondeterministic (root groups come from iterating a <c>HashSet&lt;string&gt;</c> and nothing is
-/// sorted), so snapshots would produce red builds that are not bugs. It also makes the single
-/// most valuable assertion — "does the emitted code actually compile" — three lines instead of
-/// impossible.
+/// A raw driver is used rather than snapshot testing. It makes the single most valuable assertion
+/// — "does the emitted code actually compile" — three lines instead of impossible, and the emitted
+/// order is now fully sorted, so the assertions that do care about order can name it exactly.
 /// </para>
 /// </remarks>
 internal static class EndpointGeneratorHarness
@@ -138,16 +136,9 @@ internal static class EndpointGeneratorHarness
     /// <c>ImplicitUsings</c> is enabled.
     /// </summary>
     /// <remarks>
-    /// These are part of the harness rather than of each fixture because the generated code
-    /// <b>depends on them</b>: it fully qualifies types with <c>global::</c> but emits no using
-    /// directives of its own, while calling the extension methods <c>MapMethods</c>,
-    /// <c>MapGroup</c> and <c>Produces</c> — and an extension-method invocation cannot be
-    /// resolved from a <c>global::</c> type name, it needs the namespace in scope.
-    /// <para>
-    /// So the emitted code only compiles inside a project that happens to be
-    /// <c>Microsoft.NET.Sdk.Web</c> with implicit usings on. That is defect D-G25; see
-    /// <c>GeneratedCodeUsingsTests</c>, which pins it by compiling without these.
-    /// </para>
+    /// These model the ordinary consumer, which is a Web SDK project. The generated code no longer
+    /// depends on them — it emits the using directives its own extension-method calls need — and
+    /// <c>GeneratedCodeUsingsTests</c> compiles without them to keep it that way.
     /// </remarks>
     public const string WebSdkImplicitUsings = """
         global using global::System;
@@ -186,9 +177,12 @@ internal static class EndpointGeneratorHarness
             ? sources.Prepend(WebSdkImplicitUsings)
             : sources;
 
+        // Distinct file paths, not decoration: the generator's diagnostics carry a location, and a
+        // location is resolved back to its tree by path. Every tree sharing the default empty path
+        // makes each diagnostic land in whichever tree happens to be first.
         return CSharpCompilation.Create(
             assemblyName,
-            allSources.Select(source => CSharpSyntaxTree.ParseText(source, parseOptions)),
+            allSources.Select((source, index) => CSharpSyntaxTree.ParseText(source, parseOptions, path: $"Source{index}.cs")),
             references.Value,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,

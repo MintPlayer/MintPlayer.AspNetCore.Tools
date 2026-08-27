@@ -16,7 +16,7 @@ namespace MintPlayer.AspNetCore.Tools.Tests.SubDirectoryViews;
 /// These run through a real <see cref="ServiceCollection"/> with MVC registered — but still no
 /// host and no server. The defaults are populated by the framework's own
 /// <c>IConfigureOptions&lt;RazorViewEngineOptions&gt;</c>, and configure callbacks run in
-/// registration order, which is precisely what makes the ordering trap below possible.
+/// registration order — which is precisely why this extension has to post-configure.
 /// </remarks>
 public class ConfigureViewsInSubfolderOrderingTests
 {
@@ -64,24 +64,24 @@ public class ConfigureViewsInSubfolderOrderingTests
     }
 
     /// <summary>
-    /// Called <i>before</i> <c>AddControllersWithViews()</c>, the extension silently does nothing.
+    /// Called <i>before</i> <c>AddControllersWithViews()</c>, the extension works just the same.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// D-M39, and the highest-value test in this library. The extension is an
+    /// D-M39, fixed, and the highest-value test in this library. The extension used to be an
     /// <c>IConfigureOptions</c> callback, and those run in registration order — so registering it
-    /// first means it transforms an <b>empty</b> list, and the framework's own setup then populates
+    /// first meant it transformed an <b>empty</b> list, and the framework's own setup then populated
     /// the defaults afterwards, unprefixed.
     /// </para>
     /// <para>
-    /// There is no error, no warning, and no way to tell from the registration site. The symptom is
-    /// "my views in the subfolder are not found", which reads as a path problem rather than an
-    /// ordering problem. Switching the library to <c>PostConfigure</c> makes it order-independent
-    /// and is the fix; when that lands, this test flips to asserting every format is prefixed.
+    /// There was no error, no warning, and no way to tell from the registration site. The symptom
+    /// was "my views in the subfolder are not found", which reads as a path problem rather than an
+    /// ordering problem. It is now a <c>PostConfigure</c> callback, which runs after every
+    /// <c>Configure</c> callback and so cannot observe a half-populated list.
     /// </para>
     /// </remarks>
     [Fact]
-    public void CalledBeforeAddControllersWithViews_SilentlyDoesNothing_KnownBug()
+    public void CalledBeforeAddControllersWithViews_PrefixesEveryDefaultFormat()
     {
         var formats = ResolveViewLocationFormats(services =>
         {
@@ -90,7 +90,28 @@ public class ConfigureViewsInSubfolderOrderingTests
         });
 
         Assert.NotEmpty(formats);
-        Assert.All(formats, format => Assert.DoesNotContain("/Client/", format));
+        Assert.All(formats, format => Assert.StartsWith("/Client/", format));
+    }
+
+    /// <summary>
+    /// The two registration orders produce identical results, which is the whole promise of the fix.
+    /// </summary>
+    [Fact]
+    public void RegistrationOrder_DoesNotMatter()
+    {
+        var after = ResolveViewLocationFormats(services =>
+        {
+            services.AddControllersWithViews();
+            services.ConfigureViewsInSubfolder("Client");
+        });
+
+        var before = ResolveViewLocationFormats(services =>
+        {
+            services.ConfigureViewsInSubfolder("Client");
+            services.AddControllersWithViews();
+        });
+
+        Assert.Equal(after, before);
     }
 
     /// <summary>Control: the defaults are untouched when the extension is not called.</summary>
@@ -118,5 +139,34 @@ public class ConfigureViewsInSubfolderOrderingTests
 
         Assert.Contains("/Client/Views/{1}/{0}.cshtml", formats);
         Assert.Contains("/Client/Views/Shared/{0}.cshtml", formats);
+    }
+
+    /// <summary>
+    /// Areas and Razor Pages are prefixed against the framework's real defaults too.
+    /// </summary>
+    /// <remarks>
+    /// D-M36. The unit suite seeds one format per list; this one uses all of MVC's. Razor Pages has
+    /// to be registered as well — <c>AddControllersWithViews()</c> alone leaves
+    /// <c>AreaPageViewLocationFormats</c> empty, so without it the assertion would pass vacuously.
+    /// </remarks>
+    [Fact]
+    public void AreaAndPageDefaults_AreAlsoPrefixed()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<IWebHostEnvironment>(new FakeWebHostEnvironment());
+        services.AddControllersWithViews();
+        services.AddRazorPages();
+        services.ConfigureViewsInSubfolder("Client");
+
+        var options = services.BuildServiceProvider()
+            .GetRequiredService<IOptions<RazorViewEngineOptions>>()
+            .Value;
+
+        Assert.NotEmpty(options.AreaViewLocationFormats);
+        Assert.All(options.AreaViewLocationFormats, format => Assert.StartsWith("/Client/", format));
+        Assert.NotEmpty(options.PageViewLocationFormats);
+        Assert.All(options.PageViewLocationFormats, format => Assert.StartsWith("/Client/", format));
+        Assert.NotEmpty(options.AreaPageViewLocationFormats);
+        Assert.All(options.AreaPageViewLocationFormats, format => Assert.StartsWith("/Client/", format));
     }
 }

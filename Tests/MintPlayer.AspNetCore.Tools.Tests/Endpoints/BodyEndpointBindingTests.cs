@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Formatters;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,9 +12,14 @@ namespace MintPlayer.AspNetCore.Tools.Tests.Endpoints;
 /// the JSON fallback, and the interaction between them.
 /// </summary>
 /// <remarks>
-/// This is the densest real logic in the runtime library and where its defects live. Each case
-/// builds a <see cref="DefaultHttpContext"/> with a real <c>RequestServices</c>, a body stream and
-/// a content type — no server needed, since binding reads only the request.
+/// This is the densest real logic in the runtime library. Each case builds a
+/// <see cref="DefaultHttpContext"/> with a real <c>RequestServices</c>, a body stream and a content
+/// type — no server needed, since binding reads only the request.
+/// <para>
+/// Every failure now arrives as one type, <see cref="EndpointBindingException"/>, carrying the status
+/// code the client deserves. Before, three different exception types escaped — <c>JsonException</c>,
+/// <c>InvalidOperationException</c>, and a silent null — and all three became a 500.
+/// </para>
 /// </remarks>
 public class BodyEndpointBindingTests
 {
@@ -48,6 +52,9 @@ public class BodyEndpointBindingTests
         return context;
     }
 
+    private static async Task<EndpointBindingException> BindFailure(HttpContext context)
+        => await Assert.ThrowsAsync<EndpointBindingException>(async () => await new Probe().Bind(context));
+
     // ---------- JSON fallback path (no MVC registered) ----------
 
     [Fact]
@@ -61,78 +68,77 @@ public class BodyEndpointBindingTests
     }
 
     /// <summary>
-    /// An empty body throws <see cref="JsonException"/> — it does <b>not</b> bind to null.
+    /// An empty body is a 400, not a 500.
     /// </summary>
     /// <remarks>
-    /// Measured, and it corrects the obvious guess. <c>ReadFromJsonAsync</c> on a zero-length body
-    /// does not return <c>default</c>; it fails to find a JSON token and throws. So the empty-body
-    /// case is a 500 rather than a 400 (still wrong), but it is <i>not</i> a route to D-G5's
-    /// null-laundering. See <see cref="NoMvcRegistered_LiteralJsonNullBody_BindsToNull_KnownBug"/>
-    /// for the path that actually reaches it.
+    /// <c>ReadFromJsonAsync</c> on a zero-length body does not return <c>default</c> — it fails to
+    /// find a JSON token and throws. Nothing caught that, so an application returned 500 for a
+    /// request that is unambiguously the client's fault.
     /// </remarks>
     [Fact]
-    public async Task NoMvcRegistered_EmptyBody_ThrowsJsonException_KnownBug()
+    public async Task NoMvcRegistered_EmptyBody_IsABadRequest()
     {
-        var context = ContextWith(body: null);
+        var failure = await BindFailure(ContextWith(body: null));
 
-        await Assert.ThrowsAsync<JsonException>(async () => await new Probe().Bind(context));
+        Assert.Equal(StatusCodes.Status400BadRequest, failure.StatusCode);
+    }
+
+    /// <summary>Whitespace-only bodies fail the same way as empty ones.</summary>
+    [Fact]
+    public async Task NoMvcRegistered_WhitespaceBody_IsABadRequest()
+    {
+        var failure = await BindFailure(ContextWith("   "));
+
+        Assert.Equal(StatusCodes.Status400BadRequest, failure.StatusCode);
+    }
+
+    /// <summary>Malformed JSON is a 400.</summary>
+    [Fact]
+    public async Task NoMvcRegistered_MalformedJson_IsABadRequest()
+    {
+        var failure = await BindFailure(ContextWith("{ this is not json"));
+
+        Assert.Equal(StatusCodes.Status400BadRequest, failure.StatusCode);
+        Assert.IsType<System.Text.Json.JsonException>(failure.InnerException);
     }
 
     /// <summary>
-    /// A literal JSON <c>null</c> body binds to null, which is how D-G5 is actually reachable.
+    /// A non-JSON content type is a 415, not a 500.
     /// </summary>
     /// <remarks>
-    /// <c>ReadFromJsonAsync</c> deserializes the token <c>null</c> to <c>default</c> — correctly, by
-    /// JSON semantics. The bridge then launders it through <c>request!</c> into a handler whose
-    /// signature promises non-null. This is a body clients genuinely send, so D-G5 is a real defect
-    /// and not a theoretical one; the empty-body case above just is not how you get there.
+    /// <c>ReadFromJsonAsync</c> reports an unsupported content type as an
+    /// <c>InvalidOperationException</c>, which reads like a bug in the application rather than a
+    /// request the endpoint cannot accept.
     /// </remarks>
     [Fact]
-    public async Task NoMvcRegistered_LiteralJsonNullBody_BindsToNull_KnownBug()
+    public async Task NoMvcRegistered_NonJsonContentType_IsUnsupportedMediaType()
+    {
+        var failure = await BindFailure(
+            ContextWith("id=7&name=seven", contentType: "application/x-www-form-urlencoded"));
+
+        Assert.Equal(StatusCodes.Status415UnsupportedMediaType, failure.StatusCode);
+        Assert.Contains("application/x-www-form-urlencoded", failure.Message);
+    }
+
+    /// <summary>
+    /// A literal JSON <c>null</c> body binds to null, which the bridge — not the binder — turns into
+    /// a 400.
+    /// </summary>
+    /// <remarks>
+    /// <c>ReadFromJsonAsync</c> deserializes the token <c>null</c> to <c>default</c>, correctly by
+    /// JSON semantics, so the binder has nothing to complain about. This is a body clients genuinely
+    /// send; see <c>EndpointBaseTests</c> for the half that stops it reaching a handler whose
+    /// signature promises a non-null request.
+    /// </remarks>
+    [Fact]
+    public async Task NoMvcRegistered_LiteralJsonNullBody_BindsToNull()
     {
         var context = ContextWith("null");
 
         Assert.Null(await new Probe().Bind(context));
     }
 
-    /// <summary>Whitespace-only bodies fail the same way as empty ones.</summary>
-    [Fact]
-    public async Task NoMvcRegistered_WhitespaceBody_ThrowsJsonException_KnownBug()
-    {
-        var context = ContextWith("   ");
-
-        await Assert.ThrowsAsync<JsonException>(async () => await new Probe().Bind(context));
-    }
-
-    /// <summary>
-    /// Malformed JSON escapes as a <see cref="JsonException"/>.
-    /// </summary>
-    /// <remarks>
-    /// D-G5b. Nothing catches this, so an application returns 500 for what is unambiguously a
-    /// client error and should be a 400.
-    /// </remarks>
-    [Fact]
-    public async Task NoMvcRegistered_MalformedJson_ThrowsJsonException_KnownBug()
-    {
-        var context = ContextWith("{ this is not json");
-
-        await Assert.ThrowsAsync<JsonException>(async () => await new Probe().Bind(context));
-    }
-
-    /// <summary>
-    /// A non-JSON content type escapes as an <see cref="InvalidOperationException"/>.
-    /// </summary>
-    /// <remarks>
-    /// D-G5c. Should be a 415 Unsupported Media Type; is a 500.
-    /// </remarks>
-    [Fact]
-    public async Task NoMvcRegistered_NonJsonContentType_ThrowsInvalidOperation_KnownBug()
-    {
-        var context = ContextWith("id=7&name=seven", contentType: "application/x-www-form-urlencoded");
-
-        await Assert.ThrowsAsync<InvalidOperationException>(async () => await new Probe().Bind(context));
-    }
-
+    /// <summary>Cancellation is not a binding failure and must propagate untouched.</summary>
     [Fact]
     public async Task NoMvcRegistered_HonoursRequestAborted()
     {
@@ -230,22 +236,18 @@ public class BodyEndpointBindingTests
     }
 
     /// <summary>
-    /// A formatter returning <c>NoValue</c> lets the loop continue, and the JSON fallback then
-    /// reads a body the formatter may already have consumed.
+    /// A formatter that consumes the body and then returns <c>NoValue</c> does not spoil the JSON
+    /// fallback: the body is rewound and the fallback reads it in full.
     /// </summary>
     /// <remarks>
-    /// D-G7, with the symptom corrected by measurement. The formatter claimed the body
-    /// (<c>CanRead</c> true), consumed the stream, then declined to produce a model. The loop falls
-    /// through to <c>ReadFromJsonAsync</c>, which sees a drained stream and throws
-    /// <see cref="JsonException"/> — not, as first assumed, a silent null.
-    /// <para>
-    /// That makes the observable failure a 500 with a JSON parse error pointing at position 0, for
-    /// a request whose body was perfectly valid JSON. The diagnostic actively misleads: it blames
-    /// the client's payload for what is a double-read inside the library.
-    /// </para>
+    /// The formatter is entitled to do this — it claimed the body with <c>CanRead</c> and then decided
+    /// it had nothing to produce. What used to happen next was that the fallback read a drained
+    /// stream and threw a <c>JsonException</c>, surfacing as a 500 with a parse error at position 0
+    /// for a request whose body was perfectly valid JSON. The diagnostic actively misled: it blamed
+    /// the client's payload for a double-read inside the library.
     /// </remarks>
     [Fact]
-    public async Task WithMvcRegistered_FormatterConsumesBodyThenReturnsNoValue_ThrowsMisleadingJsonException_KnownBug()
+    public async Task WithMvcRegistered_FormatterConsumesBodyThenReturnsNoValue_FallsBackToJsonSuccessfully()
     {
         var draining = new RecordingFormatter(
             canRead: true,
@@ -257,21 +259,49 @@ public class BodyEndpointBindingTests
 
         var context = ContextWithFormatters("""{"id":5,"name":"five"}""", draining);
 
-        await Assert.ThrowsAsync<JsonException>(async () => await new Probe().Bind(context));
-
+        Assert.Equal(new Req(5, "five"), await new Probe().Bind(context));
         Assert.Equal(1, draining.ReadCalls);
     }
 
     /// <summary>
-    /// Formatter validation errors are discarded.
+    /// The next formatter also sees a full body, not the leftovers of the previous one.
+    /// </summary>
+    [Fact]
+    public async Task WithMvcRegistered_BodyIsRewoundBetweenFormatters()
+    {
+        string? secondFormatterSawBody = null;
+
+        var draining = new RecordingFormatter(
+            canRead: true,
+            read: async context =>
+            {
+                await new StreamReader(context.HttpContext.Request.Body).ReadToEndAsync();
+                return InputFormatterResult.NoValue();
+            });
+        var second = new RecordingFormatter(
+            canRead: true,
+            read: async context =>
+            {
+                secondFormatterSawBody = await new StreamReader(context.HttpContext.Request.Body).ReadToEndAsync();
+                return InputFormatterResult.Success(new Req(1, "one"));
+            });
+
+        await new Probe().Bind(ContextWithFormatters("""{"id":1,"name":"one"}""", draining, second));
+
+        Assert.Equal("""{"id":1,"name":"one"}""", secondFormatterSawBody);
+    }
+
+    /// <summary>
+    /// A formatter's validation errors reach the caller instead of being thrown away.
     /// </summary>
     /// <remarks>
-    /// D-G7b. The <c>ModelStateDictionary</c> handed to the formatter is constructed inline and
-    /// never read, so every error a formatter records is thrown away. The caller cannot tell a
-    /// validation failure from an empty body.
+    /// The <c>ModelStateDictionary</c> handed to the formatter was constructed inline and never read,
+    /// so every error a formatter recorded was discarded — and binding then "succeeded" by falling
+    /// through to JSON on a body that happens to parse. The caller could not tell a validation
+    /// failure from an empty body.
     /// </remarks>
     [Fact]
-    public async Task WithMvcRegistered_FormatterFailure_ModelStateErrorsAreDiscarded_KnownBug()
+    public async Task WithMvcRegistered_FormatterFailure_SurfacesTheModelStateErrors()
     {
         var failing = new RecordingFormatter(
             canRead: true,
@@ -281,11 +311,27 @@ public class BodyEndpointBindingTests
                 return Task.FromResult(InputFormatterResult.Failure());
             });
 
-        // Falls through to the JSON fallback on a body that is valid JSON, so the invalid-model
-        // signal is lost entirely and binding "succeeds".
-        var request = await new Probe().Bind(ContextWithFormatters("""{"id":-1,"name":"neg"}""", failing));
+        var failure = await BindFailure(ContextWithFormatters("""{"id":-1,"name":"neg"}""", failing));
 
-        Assert.Equal(new Req(-1, "neg"), request);
+        Assert.Equal(StatusCodes.Status400BadRequest, failure.StatusCode);
+        Assert.Contains("Id", failure.Message);
+        Assert.Contains("must be positive", failure.Message);
+    }
+
+    /// <summary>
+    /// A formatter that declines without recording anything is not an error — the next formatter, and
+    /// then the JSON fallback, still get their turn.
+    /// </summary>
+    [Fact]
+    public async Task WithMvcRegistered_FormatterDeclinesWithNoErrors_IsNotAFailure()
+    {
+        var declining = new RecordingFormatter(
+            canRead: true,
+            read: _ => Task.FromResult(InputFormatterResult.NoValue()));
+
+        Assert.Equal(
+            new Req(4, "four"),
+            await new Probe().Bind(ContextWithFormatters("""{"id":4,"name":"four"}""", declining)));
     }
 
     [Fact]

@@ -63,7 +63,7 @@ public class CoverageShapeTests
         // One representative type per top-level folder that contributes shipped code.
         Type[] representatives =
         [
-            typeof(MintPlayer.AspNetCore.ChangePassword.ApplicationBuilderExtensions), // ChangePassword/
+            typeof(MintPlayer.AspNetCore.ChangePassword.EndpointRouteBuilderExtensions), // ChangePassword/
             typeof(MintPlayer.AspNetCore.Endpoints.EndpointDescriptor),                // Endpoints/
             typeof(MintPlayer.AspNetCore.Hsts.ImprovedHstsMiddlewareExtensions),       // Hsts/
             typeof(MintPlayer.AspNetCore.NoSniff.NoSniffMiddleware),                   // NoSniff/

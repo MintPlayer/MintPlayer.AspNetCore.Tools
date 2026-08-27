@@ -25,7 +25,7 @@ internal static class OpenSearchTestHost
     /// </summary>
     /// <param name="configure">
     /// Options callback, or <c>null</c> to call the parameterless <c>AddOpenSearch</c> overload so
-    /// that <c>OpenSearchOptions</c> is never configured at all (the D-S16 shape).
+    /// that <c>OpenSearchOptions</c> is never configured at all.
     /// </param>
     /// <param name="service">
     /// Singleton instance that overrides the scoped registration, so a test can read back what the

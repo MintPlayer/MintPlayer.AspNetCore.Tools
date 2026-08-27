@@ -14,10 +14,9 @@ namespace MintPlayer.AspNetCore.Tools.Tests.MustChangePassword.Fakes;
 /// reachable through <c>HttpContext.RequestServices</c>.
 /// </summary>
 /// <remarks>
-/// <c>IHttpContextAccessor</c> is registered here <i>by the test</i>, not by the library: the
-/// library's <c>AddMustChangePassword</c> omits it even though the service it registers depends on
-/// it (D-M22, pinned in <c>AddMustChangePasswordServiceRegistrationTests</c>). Every other suite
-/// needs a working service, so the gap is papered over here rather than re-pinned everywhere.
+/// <c>IHttpContextAccessor</c> comes from <c>AddMustChangePassword</c> itself — the library registers
+/// the dependency of the service it registers (D-M22 fixed, asserted in
+/// <c>AddMustChangePasswordServiceRegistrationTests</c>), so no test has to paper over it.
 /// </remarks>
 internal sealed class MustChangePasswordTestHarness : IDisposable
 {
@@ -43,7 +42,6 @@ internal sealed class MustChangePasswordTestHarness : IDisposable
 
         services.AddSingleton<RecordingAuthenticationService>();
         services.AddSingleton<IAuthenticationService>(sp => sp.GetRequiredService<RecordingAuthenticationService>());
-        services.AddHttpContextAccessor();
         services.AddMustChangePassword<TestUser, string>();
 
         root = services.BuildServiceProvider();

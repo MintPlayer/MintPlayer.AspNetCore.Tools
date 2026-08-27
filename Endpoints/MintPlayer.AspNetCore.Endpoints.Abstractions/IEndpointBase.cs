@@ -12,6 +12,12 @@ public interface IEndpointBase
     /// The HTTP methods this endpoint handles (e.g., ["GET"], ["POST"], ["GET", "HEAD"]).
     /// Convenience interfaces (IGetEndpoint, IPostEndpoint, etc.) provide this automatically.
     /// </summary>
+    /// <remarks>
+    /// A class that implements a convenience interface may still declare
+    /// <c>public static IEnumerable&lt;string&gt; Methods</c> of its own; the class member is more
+    /// specific than the interface's, so it wins. A class implementing two convenience interfaces
+    /// <b>must</b> do so — otherwise neither verb is most specific and the compiler reports CS8705.
+    /// </remarks>
     static abstract IEnumerable<string> Methods { get; }
 
     /// <summary>

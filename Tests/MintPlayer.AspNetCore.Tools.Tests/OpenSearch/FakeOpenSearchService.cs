@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using MintPlayer.AspNetCore.OpenSearch.Abstractions;
 
 namespace MintPlayer.AspNetCore.Tools.Tests.OpenSearch;
@@ -8,9 +7,9 @@ namespace MintPlayer.AspNetCore.Tools.Tests.OpenSearch;
 /// library hands it and returns configurable results.
 /// </summary>
 /// <remarks>
-/// The recorded terms are the only way to observe D-S18 from the outside: the endpoints answer
-/// 302/200 whether or not the query ever reached the service, so the assertion has to be made on
-/// what the service *received*, not on the response.
+/// The recorded terms are how the search/suggest plumbing is observed from the outside: the
+/// endpoints answer 302/200 whether or not the query ever reached the service, so the assertion has
+/// to be made on what the service <i>received</i>, not only on the response.
 /// </remarks>
 internal sealed class FakeOpenSearchService : IOpenSearchService
 {
@@ -26,15 +25,20 @@ internal sealed class FakeOpenSearchService : IOpenSearchService
 
     public bool PreserveMethod { get; set; }
 
+    /// <summary>Returns <c>null</c> from <see cref="PerformSearch"/>, which the contract forbids.</summary>
+    public bool ReturnNullRedirect { get; set; }
+
     public Task<IEnumerable<string>> ProvideSuggestions(string? searchTerms)
     {
         ReceivedSuggestTerms.Add(searchTerms);
         return Task.FromResult(Suggestions);
     }
 
-    public Task<RedirectResult> PerformSearch(string? searchTerms)
+    public Task<OpenSearchRedirect> PerformSearch(string? searchTerms)
     {
         ReceivedSearchTerms.Add(searchTerms);
-        return Task.FromResult(new RedirectResult(RedirectUrl, Permanent, PreserveMethod));
+        return Task.FromResult(ReturnNullRedirect
+            ? null!
+            : new OpenSearchRedirect(RedirectUrl, Permanent, PreserveMethod));
     }
 }

@@ -1,5 +1,4 @@
 using System.Net;
-using System.Xml.Linq;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,10 +23,18 @@ public class MapOpenSearchValidationTests
         public IApplicationBuilder CreateApplicationBuilder() => new ApplicationBuilder(ServiceProvider);
     }
 
-    /// <summary>
-    /// The <c>"OpenSearchOptions not initialized"</c> guard fires only when the options
-    /// infrastructure is missing entirely — a service collection with no <c>AddOptions</c> at all.
-    /// </summary>
+    /// <summary>Route builder over a fully registered OpenSearch service collection.</summary>
+    private static BareEndpointRouteBuilder Routes(Action<OpenSearchOptions> configure)
+    {
+        var provider = new ServiceCollection()
+            .AddLogging()
+            .AddRouting()
+            .AddOpenSearch<FakeOpenSearchService>(configure)
+            .BuildServiceProvider();
+
+        return new BareEndpointRouteBuilder(provider);
+    }
+
     [Fact]
     public void MapOpenSearch_WithoutAnyOptionsInfrastructure_Throws()
     {
@@ -40,15 +47,35 @@ public class MapOpenSearchValidationTests
     }
 
     /// <summary>
-    /// Pins D-S16: the guard is unreachable in practice. Once anything has pulled in the options
-    /// infrastructure — which <c>AddOpenSearch</c> itself does via <c>AddControllersWithViews</c> —
-    /// <c>GetService&lt;IOptions&lt;OpenSearchOptions&gt;&gt;()</c> returns a live instance whose
-    /// <c>Value</c> is a default-constructed <c>OpenSearchOptions</c> with every property null. So
-    /// forgetting <c>AddOpenSearch</c>'s options overload produces silent defaults, never the
-    /// diagnostic the message promises.
+    /// D-S16 fixed. The guard used to be a null check on
+    /// <c>IOptions&lt;OpenSearchOptions&gt;</c>, which made it unreachable: once anything has pulled
+    /// in the options infrastructure — and <c>AddControllersWithViews</c> always does — the accessor
+    /// resolves to a live, default-constructed instance. So a full options setup with no
+    /// <c>AddOpenSearch</c> anywhere silently mapped broken routes; now it throws the diagnostic the
+    /// message always promised.
     /// </summary>
     [Fact]
-    public void OptionsAccessor_WithoutConfigure_IsNonNullWithAllNullProperties_KnownBug()
+    public void MapOpenSearch_WithOptionsInfrastructureButWithoutAddOpenSearch_Throws()
+    {
+        var provider = new ServiceCollection()
+            .AddOptions()
+            .AddLogging()
+            .AddRouting()
+            .Configure<OpenSearchOptions>(o => o.ShortName = "X")
+            .BuildServiceProvider();
+        var routes = new BareEndpointRouteBuilder(provider);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => routes.MapOpenSearch());
+
+        Assert.Contains("Did you forget to call AddOpenSearch?", ex.Message);
+    }
+
+    /// <summary>
+    /// The measurement that makes the marker necessary: the options accessor is never null and its
+    /// value is never null, so nothing about it distinguishes "configured" from "never heard of".
+    /// </summary>
+    [Fact]
+    public void OptionsAccessor_WithoutConfigure_IsNonNullWithUnsetProperties()
     {
         var provider = new ServiceCollection().AddOptions().BuildServiceProvider();
 
@@ -66,11 +93,11 @@ public class MapOpenSearchValidationTests
     }
 
     /// <summary>
-    /// The other half of D-S16: <c>AddOpenSearch</c> without the options overload maps the default
-    /// routes rather than throwing.
+    /// <c>AddOpenSearch</c> without the options overload is legitimate: every setting has a usable
+    /// default, so the three routes are mapped at their default paths.
     /// </summary>
     [Fact]
-    public async Task MapOpenSearch_WithoutConfigure_MapsDefaultRoutes_KnownBug()
+    public async Task MapOpenSearch_WithoutConfigure_MapsDefaultRoutes()
     {
         using var server = OpenSearchTestHost.Create(configure: null, service: new FakeOpenSearchService());
         using var client = server.CreateNonRedirectingClient();
@@ -79,83 +106,76 @@ public class MapOpenSearchValidationTests
         var suggest = await client.GetAsync("/suggest");
         var search = await client.GetAsync("/search");
 
-        Assert.NotEqual(HttpStatusCode.NotFound, osdx.StatusCode);
-        Assert.NotEqual(HttpStatusCode.NotFound, suggest.StatusCode);
-        Assert.NotEqual(HttpStatusCode.NotFound, search.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, osdx.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, suggest.StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, search.StatusCode);
     }
 
     [Theory]
     [InlineData("")]
+    [InlineData("   ")]
     [InlineData(null)]
-    public async Task MapOpenSearch_EmptyOrNullOsdxEndpoint_FallsBackToDefault(string? osdxEndpoint)
+    public async Task MapOpenSearch_BlankOsdxEndpoint_FallsBackToDefault(string? osdxEndpoint)
     {
         using var server = OpenSearchTestHost.Create(o => o.OsdxEndpoint = osdxEndpoint!, new FakeOpenSearchService());
         using var client = server.CreateNonRedirectingClient();
 
         var response = await client.GetAsync("/opensearch.xml");
 
-        Assert.NotEqual(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     /// <summary>
-    /// Pins D-S17: the leading-slash check throws the bare base <see cref="Exception"/> type, which
-    /// a caller cannot catch selectively and which no analyzer-clean codebase would accept.
-    /// <c>Assert.Throws&lt;Exception&gt;</c> matches exactly, so this fails the moment the type is
-    /// narrowed.
+    /// D-S17 fixed on both counts: the leading-slash check no longer throws the bare base
+    /// <see cref="Exception"/> type, and it now covers every path-valued option rather than
+    /// <c>OsdxEndpoint</c> alone.
     /// </summary>
-    [Fact]
-    public void MapOpenSearch_OsdxEndpointWithoutLeadingSlash_ThrowsBareException_KnownBug()
+    /// <remarks>
+    /// The check is a plain <c>string.StartsWith('/')</c> on purpose.
+    /// <c>Uri.TryCreate(value, UriKind.Absolute, out _)</c> answers <b>false</b> on Windows and
+    /// <b>true</b> on Linux for a leading-slash string (it parses as <c>file:///x</c>), so a
+    /// validation built on it passes locally and fails only in CI.
+    /// </remarks>
+    [Theory]
+    [InlineData(nameof(OpenSearchOptions.OsdxEndpoint), "opensearch.xml")]
+    [InlineData(nameof(OpenSearchOptions.SearchUrl), "search")]
+    [InlineData(nameof(OpenSearchOptions.SuggestUrl), "suggest")]
+    [InlineData(nameof(OpenSearchOptions.ImageUrl), "favicon.png")]
+    public void MapOpenSearch_PathOptionWithoutLeadingSlash_ThrowsInvalidOperationException(string optionName, string value)
     {
-        var provider = new ServiceCollection()
-            .AddOptions()
-            .Configure<OpenSearchOptions>(o => o.OsdxEndpoint = "opensearch.xml")
-            .BuildServiceProvider();
-        var routes = new BareEndpointRouteBuilder(provider);
+        var routes = Routes(o => typeof(OpenSearchOptions).GetProperty(optionName)!.SetValue(o, value));
 
-        var ex = Assert.Throws<Exception>(() => routes.MapOpenSearch());
+        var ex = Assert.Throws<InvalidOperationException>(() => routes.MapOpenSearch());
 
-        Assert.Equal(@"OpenSearch endpoint must start with ""/""", ex.Message);
+        Assert.Contains($"OpenSearchOptions.{optionName}", ex.Message);
+        Assert.Contains(@"must start with ""/""", ex.Message);
+        Assert.Contains(value, ex.Message);
     }
 
-    /// <summary>
-    /// The other half of D-S17: only <c>OsdxEndpoint</c> is validated. A <c>SearchUrl</c> without a
-    /// leading slash is accepted and concatenated straight into an absolute URL, producing
-    /// <c>http://localhostsearch</c> — a template advertised to every search client. Same for
-    /// <c>SuggestUrl</c>.
-    /// </summary>
     [Fact]
-    public async Task MapOpenSearch_SearchAndSuggestUrlWithoutLeadingSlash_AreNotValidated_KnownBug()
+    public void MapOpenSearch_LeadingSlashValidation_DoesNotThrowTheBareExceptionType()
     {
-        using var server = OpenSearchTestHost.Create(
-            o =>
-            {
-                o.SearchUrl = "search";
-                o.SuggestUrl = "suggest";
-            },
-            new FakeOpenSearchService());
-        using var client = server.CreateNonRedirectingClient();
+        var routes = Routes(o => o.OsdxEndpoint = "opensearch.xml");
 
-        var document = XDocument.Parse(await client.GetStringAsync("/opensearch.xml"));
-        var templates = document.Root!.Elements(OpenSearchTestHost.A9 + "Url")
-            .Select(u => (string?)u.Attribute("template"))
-            .ToList();
+        var ex = Record.Exception(() => routes.MapOpenSearch());
 
-        Assert.Contains("http://localhostsearch", templates);
-        Assert.Contains("http://localhostsuggest", templates);
+        Assert.NotNull(ex);
+        Assert.NotEqual(typeof(Exception), ex.GetType());
     }
 
-    /// <summary>
-    /// And <c>ImageUrl</c> too — it is never validated and never checked for null.
-    /// </summary>
+    /// <summary>A blank path option falls back to its default instead of failing validation.</summary>
     [Fact]
-    public async Task MapOpenSearch_ImageUrlWithoutLeadingSlash_IsNotValidated_KnownBug()
+    public void MapOpenSearch_WhitespaceOnlyPathOptions_FallBackRatherThanThrow()
     {
-        using var server = OpenSearchTestHost.Create(o => o.ImageUrl = "favicon.png", new FakeOpenSearchService());
-        using var client = server.CreateNonRedirectingClient();
+        var routes = Routes(o =>
+        {
+            o.OsdxEndpoint = "   ";
+            o.SearchUrl = "   ";
+            o.SuggestUrl = "   ";
+            o.ImageUrl = "   ";
+        });
 
-        var document = XDocument.Parse(await client.GetStringAsync("/opensearch.xml"));
-
-        Assert.Equal("http://localhostfavicon.png", document.Root!.Element(OpenSearchTestHost.A9 + "Image")!.Value);
+        Assert.Same(routes, routes.MapOpenSearch());
     }
 
     [Fact]
@@ -194,15 +214,20 @@ public class MapOpenSearchValidationTests
     [Fact]
     public void MapOpenSearch_ReturnsSameRouteBuilder()
     {
-        var provider = new ServiceCollection()
-            .AddOptions()
-            .AddLogging()
-            .AddRouting()
-            .BuildServiceProvider();
-        var routes = new BareEndpointRouteBuilder(provider);
+        var routes = Routes(_ => { });
 
         var returned = routes.MapOpenSearch();
 
         Assert.Same(routes, returned);
+    }
+
+    [Fact]
+    public void MapOpenSearch_NullRoutes_ThrowsArgumentNullException()
+    {
+        IEndpointRouteBuilder? routes = null;
+
+        var ex = Assert.Throws<ArgumentNullException>(() => routes!.MapOpenSearch());
+
+        Assert.Equal("routes", ex.ParamName);
     }
 }

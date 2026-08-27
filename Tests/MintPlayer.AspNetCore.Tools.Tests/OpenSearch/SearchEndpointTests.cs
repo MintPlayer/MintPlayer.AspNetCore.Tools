@@ -31,16 +31,19 @@ public class SearchEndpointTests
     }
 
     /// <summary>
-    /// Pins the second half of D-S18 for search — the same literal-route/route-value mismatch as
-    /// suggest. The user's query never reaches <c>PerformSearch</c>, so the service cannot build a
-    /// meaningful redirect target no matter how it is implemented.
+    /// D-S18, second half, fixed for search. The handler used to read
+    /// <c>GetRouteValue("searchTerms")</c> from a route registered as a literal pattern with no
+    /// <c>{searchTerms}</c> token, so the service was handed <c>null</c> on every request — including
+    /// <c>?q=abc</c>. It now reads the configured query-string parameter.
     /// </summary>
     [Theory]
-    [InlineData("/search")]
-    [InlineData("/search?q=abc")]
-    [InlineData("/search?searchTerms=abc")]
-    [InlineData("/search?q=abc&searchTerms=def")]
-    public async Task Search_SearchTermsIsAlwaysNull_KnownBug(string url)
+    [InlineData("/search?q=abc", "abc")]
+    [InlineData("/search?q=abc&q=def", "abc")]
+    [InlineData("/search?q=", "")]
+    [InlineData("/search?q=hello%20world", "hello world")]
+    [InlineData("/search?other=abc", null)]
+    [InlineData("/search", null)]
+    public async Task Search_PassesTheQueryStringParameterToTheService(string url, string? expected)
     {
         var service = new FakeOpenSearchService();
         using var server = OpenSearchTestHost.Create(_ => { }, service);
@@ -48,7 +51,19 @@ public class SearchEndpointTests
 
         await client.GetAsync(url);
 
-        Assert.Null(Assert.Single(service.ReceivedSearchTerms));
+        Assert.Equal(expected, Assert.Single(service.ReceivedSearchTerms));
+    }
+
+    [Fact]
+    public async Task Search_ConfiguredSearchTermsParameter_IsTheOneRead()
+    {
+        var service = new FakeOpenSearchService();
+        using var server = OpenSearchTestHost.Create(o => o.SearchTermsParameter = "query", service);
+        using var client = server.CreateNonRedirectingClient();
+
+        await client.GetAsync("/search?query=abc&q=ignored");
+
+        Assert.Equal("abc", Assert.Single(service.ReceivedSearchTerms));
     }
 
     [Fact]
@@ -64,51 +79,61 @@ public class SearchEndpointTests
     }
 
     /// <summary>
-    /// Pins D-S23. The handler calls <c>context.Response.Redirect(result.Url)</c>, which takes only
-    /// the URL: <see cref="Microsoft.AspNetCore.Mvc.RedirectResult.Permanent"/> is read off the
-    /// result by nobody, so a service that deliberately returns a permanent redirect still gets a
-    /// 302. Search engines and browsers will not cache it, and the service's intent is silently
-    /// discarded.
+    /// D-S23 fixed: the handler used to call <c>Response.Redirect(result.Url)</c>, which takes only
+    /// the URL, so a service that deliberately asked for a permanent or method-preserving redirect
+    /// still got a 302 and its intent was silently discarded.
     /// </summary>
-    [Fact]
-    public async Task Search_PermanentRedirect_IsDowngradedTo302_KnownBug()
+    [Theory]
+    [InlineData(false, false, HttpStatusCode.Redirect)]
+    [InlineData(true, false, HttpStatusCode.MovedPermanently)]
+    [InlineData(false, true, HttpStatusCode.TemporaryRedirect)]
+    [InlineData(true, true, HttpStatusCode.PermanentRedirect)]
+    public async Task Search_HonoursPermanentAndPreserveMethod(bool permanent, bool preserveMethod, HttpStatusCode expected)
     {
-        var service = new FakeOpenSearchService { RedirectUrl = "/results", Permanent = true };
+        var service = new FakeOpenSearchService
+        {
+            RedirectUrl = "/results",
+            Permanent = permanent,
+            PreserveMethod = preserveMethod,
+        };
         using var server = OpenSearchTestHost.Create(_ => { }, service);
         using var client = server.CreateNonRedirectingClient();
 
         var response = await client.GetAsync("/search");
 
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.NotEqual(HttpStatusCode.MovedPermanently, response.StatusCode);
+        Assert.Equal(expected, response.StatusCode);
+        Assert.Equal("/results", response.Headers.Location!.OriginalString);
     }
 
     /// <summary>
-    /// Same defect, <c>PreserveMethod</c> half: a 307/308 is never emitted either.
+    /// A service that breaks the contract fails loudly. <c>Response.Redirect(null)</c> does not
+    /// throw — it produces a 302 with no <c>Location</c> header at all, which a browser silently
+    /// treats as a dead end.
     /// </summary>
     [Fact]
-    public async Task Search_PreserveMethodRedirect_IsDowngradedTo302_KnownBug()
+    public async Task Search_ServiceReturnsNull_Throws()
     {
-        var service = new FakeOpenSearchService { RedirectUrl = "/results", Permanent = true, PreserveMethod = true };
+        var service = new FakeOpenSearchService { ReturnNullRedirect = true };
         using var server = OpenSearchTestHost.Create(_ => { }, service);
         using var client = server.CreateNonRedirectingClient();
 
-        var response = await client.GetAsync("/search");
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetAsync("/search"));
 
-        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
-        Assert.NotEqual(HttpStatusCode.PermanentRedirect, response.StatusCode);
-        Assert.NotEqual(HttpStatusCode.TemporaryRedirect, response.StatusCode);
+        Assert.Contains("PerformSearch", ex.Message);
     }
 
-    /// <summary>
-    /// A null <c>RedirectResult.Url</c> is impossible — the constructor rejects it — so the handler's
-    /// unguarded <c>result.Url</c> dereference is safe. Pinned because the handler relies on it
-    /// without saying so.
-    /// </summary>
-    [Fact]
-    public void RedirectResult_RejectsNullUrl()
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Search_ServiceReturnsRedirectWithoutUrl_Throws(string url)
     {
-        Assert.Throws<ArgumentNullException>(() => new Microsoft.AspNetCore.Mvc.RedirectResult(null!));
+        var service = new FakeOpenSearchService { RedirectUrl = url };
+        using var server = OpenSearchTestHost.Create(_ => { }, service);
+        using var client = server.CreateNonRedirectingClient();
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => client.GetAsync("/search"));
+
+        Assert.Contains("without a URL", ex.Message);
     }
 
     [Fact]
@@ -126,7 +151,7 @@ public class SearchEndpointTests
 
     /// <summary>
     /// The redirect is written directly to the response, so no content negotiation happens and a
-    /// browser Accept header is irrelevant here — unlike the OSDX endpoint (D-S21).
+    /// browser Accept header is irrelevant here.
     /// </summary>
     [Fact]
     public async Task Search_BrowserAcceptHeader_StillRedirects()

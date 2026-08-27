@@ -286,18 +286,21 @@ public class SitemapEndToEndTests
     }
 
     /// <summary>
-    /// The wire-level consequence of D-S4: a <c>UrlSet</c> built from a type that has no
-    /// modification date at all still tells crawlers year 1 and hourly churn.
+    /// The wire-level half of D-S4: a <c>UrlSet</c> built from a type that carries no modification
+    /// date says nothing about one, rather than claiming year 1 and hourly churn. Both elements are
+    /// optional in the spec, and a crawler treats "absent" very differently from "1 January 0001".
     /// </summary>
     [Fact]
-    public async Task UrlSet_WithUnsetLastModAndChangeFreq_ServesYearOneAndHourly_KnownBug()
+    public async Task UrlSet_WithUnsetLastModAndChangeFreq_OmitsBothOnTheWire()
     {
         using var host = CreateHost(new UrlSet([new Url { Loc = "https://example.org/a" }]));
 
         var body = await (await GetAsync(host, "application/xml")).Content.ReadAsStringAsync();
 
-        Assert.Contains("<lastmod>0001-01-01</lastmod>", body);
-        Assert.Contains("<changefreq>hourly</changefreq>", body);
+        Assert.Contains("<loc>https://example.org/a</loc>", body);
+        Assert.DoesNotContain("lastmod", body);
+        Assert.DoesNotContain("changefreq", body);
+        Assert.DoesNotContain("nil=\"true\"", body);
     }
 
     /// <summary>

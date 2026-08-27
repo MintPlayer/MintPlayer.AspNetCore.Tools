@@ -72,13 +72,31 @@ public class SitemapIndexSerializationTests
         Assert.Equal("2024-03-04", sitemap.Element(Ns.Sitemap + "lastmod")!.Value);
     }
 
-    /// <summary>Same D-S4 shape as <c>Url.LastMod</c> — non-nullable, so always emitted.</summary>
+    /// <summary>Same D-S4 fix as <c>Url.LastMod</c>: <c>DateTime?</c>, omitted when unset.</summary>
     [Fact]
-    public void Sitemap_LastModUnset_SerializesAsYearOne_KnownBug()
+    public void Sitemap_LastModUnset_IsOmitted()
     {
         var xml = XmlTestHelpers.SerializeToString(new SitemapIndex([new Sitemap { Loc = "https://example.org/s.xml" }]));
 
-        Assert.Contains("<lastmod>0001-01-01</lastmod>", xml);
+        Assert.DoesNotContain("lastmod", xml);
+        Assert.DoesNotContain("nil=\"true\"", xml);
+    }
+
+    /// <summary>
+    /// <c>Sitemap.Loc</c> carries the same required-member guard as <c>Url.Loc</c> (D-S29): a
+    /// sitemap index entry with no <c>loc</c> is meaningless, so it fails while writing instead of
+    /// reaching a crawler.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Sitemap_LocNullOrBlank_FailsSerialization(string? loc)
+    {
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => XmlTestHelpers.SerializeToString(new SitemapIndex([new Sitemap { Loc = loc }])));
+
+        Assert.Contains("Loc", exception.InnerException!.Message);
     }
 
     /// <summary>

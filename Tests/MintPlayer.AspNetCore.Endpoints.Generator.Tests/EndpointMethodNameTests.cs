@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using MintPlayer.AspNetCore.Endpoints.Generator.Tests.Infrastructure;
 using Xunit;
@@ -10,13 +11,16 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
 /// </summary>
 /// <remarks>
 /// <see cref="AssemblyInfoTests"/> covers the string function; these tests are about what reaches
-/// the generated file and whether it still compiles, which is where the unsanitised inputs actually
-/// hurt.
+/// the generated file, whether it still compiles, and whether the consumer is told when the name
+/// they asked for was not the name they got.
 /// </remarks>
 public class EndpointMethodNameTests
 {
     private static string Generated(GeneratorDriverRunResult result)
         => string.Join("\n", result.GeneratedTrees.Select(tree => tree.ToString()));
+
+    private static Diagnostic[] Errors(IEnumerable<Diagnostic> diagnostics)
+        => [.. diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error)];
 
     [Fact]
     public void AssemblyName_DrivesBothTheMethodAndTheClassName()
@@ -48,109 +52,101 @@ public class EndpointMethodNameTests
             FixtureSources.RawGetEndpoint,
             FixtureSources.MethodNameOverride("MapCustomEndpoints"));
 
-        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
+        Assert.Empty(Errors(diagnostics));
     }
 
     /// <summary>
-    /// Pins D-G12: an assembly name with an empty dot-segment makes the generator produce nothing at
-    /// all, in complete silence.
+    /// An assembly name with an empty dot-segment produces a working method, and MPEP006 says the
+    /// name was adjusted.
     /// </summary>
     /// <remarks>
-    /// <see cref="AssemblyInfoTests.GetMethodName_EmptySegment_Throws_KnownBug"/> shows the
-    /// <see cref="IndexOutOfRangeException"/> that starts this. What is measurable here is where it
-    /// ends up: <b>nowhere</b>. No generated file, no diagnostic, and nothing on the generator's own
-    /// result either — the throw is swallowed inside the <c>ProduceCode</c> pipeline that comes from
-    /// MintPlayer.SourceGenerators.Tools, so not even Roslyn's usual CS8785 "generator failed to
-    /// generate source" is reported.
+    /// This used to produce <b>nothing at all</b>, in complete silence. The
+    /// <see cref="IndexOutOfRangeException"/> from indexing <c>s[0]</c> on an empty segment was
+    /// swallowed inside the <c>ProduceCode</c> pipeline that came from MintPlayer.SourceGenerators.Tools,
+    /// so there was no generated file, no diagnostic, nothing on the generator's result, and not even
+    /// Roslyn's CS8785 "generator failed to generate source". The consumer's build succeeded and the
+    /// only symptom was that <c>app.Map…Endpoints()</c> did not exist.
     /// <para>
-    /// That is worse than a crash: the consumer's build succeeds, and the only symptom is that
-    /// <c>app.Map…Endpoints()</c> does not exist. <c>"My..Api"</c> is unusual but legal, and a
-    /// trailing dot arrives the same way from a mistyped <c>&lt;AssemblyName&gt;</c>.
+    /// The sanitising is what makes it work; the diagnostic is what makes it visible. Either alone
+    /// would still leave the consumer guessing why the method is not called what they expected.
     /// </para>
     /// </remarks>
     [Theory]
-    [InlineData("My..Api")]
-    [InlineData(".MyApi")]
-    [InlineData("MyApi.")]
-    public void AssemblyNameWithAnEmptySegment_SilentlyProducesNothing_KnownBug(string assemblyName)
+    [InlineData("My..Api", "MapMyApiEndpoints")]
+    [InlineData(".MyApi", "MapMyApiEndpoints")]
+    [InlineData("MyApi.", "MapMyApiEndpoints")]
+    public void AssemblyNameWithAnEmptySegment_EmitsASanitisedName_AndWarns(string assemblyName, string expected)
     {
         var result = EndpointGeneratorHarness.Run(assemblyName, FixtureSources.RawGetEndpoint);
 
-        var generatorResult = Assert.Single(result.Results);
-        Assert.Empty(generatorResult.GeneratedSources);
-        Assert.Empty(result.GeneratedTrees);
-        Assert.Empty(result.Diagnostics);
-        Assert.Null(generatorResult.Exception);
+        Assert.Contains($"{expected}(this", Generated(result));
+
+        var diagnostic = Assert.Single(result.Diagnostics);
+        Assert.Equal("MPEP006", diagnostic.Id);
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains(expected, diagnostic.GetMessage());
+
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile(assemblyName, FixtureSources.RawGetEndpoint)));
     }
 
     /// <summary>
-    /// Pins D-G12: characters that are legal in an assembly name but not in an identifier are copied
-    /// into the emitted method name, producing generated code that cannot compile.
+    /// A hyphen in the assembly name is dropped rather than copied into an identifier.
     /// </summary>
     /// <remarks>
-    /// A hyphenated assembly name is entirely ordinary (<c>my-app.csproj</c>), and the consumer has
-    /// no way to see why the build broke — the errors are in a file they never wrote.
+    /// A hyphenated assembly name is entirely ordinary (<c>my-app.csproj</c>), and the consumer had no
+    /// way to see why the build broke: the errors were in a file they never wrote.
     /// </remarks>
     [Fact]
-    public void AssemblyNameWithAHyphen_EmitsAnInvalidIdentifier_KnownBug()
+    public void AssemblyNameWithAHyphen_EmitsAValidIdentifier_AndWarns()
     {
         var result = EndpointGeneratorHarness.Run("My-App", FixtureSources.RawGetEndpoint);
-        Assert.Contains("MapMy-AppEndpoints", Generated(result));
 
-        var errors = EndpointGeneratorHarness
-            .RunAndCompile("My-App", FixtureSources.RawGetEndpoint)
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .ToArray();
+        Assert.Contains("MapMyAppEndpoints(this", Generated(result));
+        Assert.Equal("MPEP006", Assert.Single(result.Diagnostics).Id);
 
-        Assert.NotEmpty(errors);
-        Assert.All(errors, error => Assert.Contains("EndpointMapping.g.cs", error.Location.GetLineSpan().Path));
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("My-App", FixtureSources.RawGetEndpoint)));
     }
 
     /// <summary>
-    /// Pins D-G12: an empty override is taken literally and emits a method with no name.
+    /// An override that sanitises to nothing falls back to the assembly-derived name, rather than
+    /// emitting a method with no name.
     /// </summary>
     [Fact]
-    public void EmptyMethodNameOverride_EmitsANamelessMethod_KnownBug()
+    public void EmptyMethodNameOverride_FallsBackToTheAssemblyName_AndWarns()
     {
-        var result = EndpointGeneratorHarness.Run(
-            "MyApp.Api",
-            FixtureSources.RawGetEndpoint,
-            FixtureSources.MethodNameOverride(""));
+        var sources = new[] { FixtureSources.RawGetEndpoint, FixtureSources.MethodNameOverride("") };
 
-        var generated = Generated(result);
-        Assert.Contains("public static class Extensions", generated);
-        Assert.Contains("IEndpointRouteBuilder (this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app)", generated);
+        var result = EndpointGeneratorHarness.Run("MyApp.Api", sources);
 
-        var errors = EndpointGeneratorHarness
-            .RunAndCompile("MyApp.Api", FixtureSources.RawGetEndpoint, FixtureSources.MethodNameOverride(""))
-            .Where(d => d.Severity == DiagnosticSeverity.Error);
+        Assert.Contains("public static class MyAppApiEndpointsExtensions", Generated(result));
+        Assert.Contains("MapMyAppApiEndpoints(this", Generated(result));
+        Assert.Equal("MPEP006", Assert.Single(result.Diagnostics).Id);
 
-        Assert.NotEmpty(errors);
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("MyApp.Api", sources)));
     }
 
     /// <summary>
-    /// Pins D-G13: the generated class always lands in the library's own namespace, so a method name
-    /// that strips down to a shipped type's name collides with it.
+    /// A method name that strips down to a shipped type's name no longer shadows it, because the
+    /// generated class is emitted into a namespace only the generator writes to.
     /// </summary>
     /// <remarks>
-    /// <c>"MapEndpointRouteBuilder"</c> reads like a perfectly reasonable choice and produces
-    /// <c>MintPlayer.AspNetCore.Endpoints.EndpointRouteBuilderExtensions</c> — which the runtime
-    /// package already defines.
+    /// <c>"MapEndpointRouteBuilder"</c> reads like a perfectly reasonable choice and produces the
+    /// class name <c>EndpointRouteBuilderExtensions</c> — which the runtime package already defines.
+    /// In the library's own namespace the consumer's build stayed <b>silent</b>: source wins over
+    /// metadata for a name, so the generated type shadowed the shipped one and nothing said so. (The
+    /// register predicted CS0101; that only happens for two definitions in one compilation, which
+    /// this is not. Silence is the harder problem, not the easier one.)
     /// <para>
-    /// Measured, the consumer's own build stays <b>silent</b>: source wins over metadata for that
-    /// name, so the generated type shadows the shipped one and even a call to the shipped
-    /// <c>MapEndpoint&lt;T&gt;</c> still resolves. (The register predicts CS0101; that only happens
-    /// for two definitions in the same compilation, which this is not.) Silence is the problem —
-    /// nothing tells the consumer that a public type of the package is now hidden behind a generated
-    /// one, and anything that later references both assemblies inherits the ambiguity. Emitting into
-    /// the consumer's own namespace would define the collision out of existence.
+    /// The call site is unaffected: the generated file emits a <c>global using</c> for its own
+    /// namespace, so <c>app.MapEndpointRouteBuilder()</c> resolves without the consumer importing
+    /// anything new — and the shipped <c>MapEndpoint&lt;T&gt;</c> keeps resolving to the shipped type.
     /// </para>
     /// </remarks>
     [Fact]
-    public void MethodNameOverrideCollidingWithAShippedType_SilentlyShadowsIt_KnownBug()
+    public void MethodNameOverrideMatchingAShippedTypeName_DoesNotShadowIt()
     {
         // A consumer that also registers one endpoint by hand — the shipped MapEndpoint<T> lives on
-        // exactly the type the generated class is about to shadow.
+        // exactly the type whose name the generated class reuses.
         const string consumer = """
             using Microsoft.AspNetCore.Routing;
             using MintPlayer.AspNetCore.Endpoints;
@@ -176,14 +172,17 @@ public class EndpointMethodNameTests
 
         var generated = Generated(EndpointGeneratorHarness.Run("MyApp.Api", sources));
 
-        // Same namespace, same name as the shipped type — asserted against the real type so this
-        // test breaks if either side is ever renamed.
-        Assert.Contains(
-            $"namespace {typeof(EndpointRouteBuilderExtensions).Namespace}",
-            generated);
-        Assert.Contains(
-            $"public static class {typeof(EndpointRouteBuilderExtensions).Name}",
-            generated);
+        // Same class name as the shipped type, deliberately — and a different namespace, which is
+        // what makes that harmless. Asserted against the real type so this breaks if either moves.
+        var shippedNamespace = typeof(EndpointRouteBuilderExtensions).Namespace!;
+
+        Assert.Contains($"public static class {typeof(EndpointRouteBuilderExtensions).Name}", generated);
+        Assert.Contains($"namespace {shippedNamespace}.Generated", generated);
+        Assert.Contains($"global using global::{shippedNamespace}.Generated;", generated);
+
+        // The library's own namespace is never declared — only namespaces below it, and the
+        // consumer's own for the partial base classes.
+        Assert.DoesNotMatch($@"namespace {Regex.Escape(shippedNamespace)}\s*[\r\n{{]", generated);
 
         var diagnostics = EndpointGeneratorHarness.RunAndCompile("MyApp.Api", sources);
 

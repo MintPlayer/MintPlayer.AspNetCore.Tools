@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
@@ -8,13 +8,13 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.SubDirectoryViews</PackageId>
-		<Version>10.0.0</Version>
+		<Version>11.0.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
-		<Description>This package contains Options which let the Razor Views reside in a subfolder.</Description>
+		<Description>This package lets the Razor Views, Razor Pages and their Area equivalents reside in a subfolder of your ASP.NET Core project.</Description>
 		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/SubDirectoryViews/MintPlayer.AspNetCore.SubDirectoryViews</PackageProjectUrl>
-		<PackageTags>ASP.NET Core, Razor views</PackageTags>
+		<PackageProjectUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/tree/master/SubDirectoryViews/MintPlayer.AspNetCore.SubDirectoryViews</PackageProjectUrl>
+		<PackageTags>ASP.NET;ASP.NET Core;Razor;Views;Razor Pages;Subfolder</PackageTags>
 		<RepositoryType>Git</RepositoryType>
 		<RepositoryUrl>https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools</RepositoryUrl>
 		<Authors>Pieterjan De Clippel</Authors>

@@ -154,59 +154,54 @@ public class ChangePasswordEndpointBehaviourTests
     }
 
     /// <summary>
-    /// A null URL produces a 302 with no <c>Location</c> header, silently.
+    /// A null url from the factory fails loudly instead of producing an unfollowable redirect.
     /// </summary>
     /// <remarks>
-    /// D-M19, and measured rather than assumed — the first guess was that
-    /// <c>Response.Redirect(null)</c> throws <see cref="ArgumentNullException"/>. It does not: it
-    /// sets the status code to 302 and never writes the header. That is worse than an exception.
-    /// An exception would surface as a 500 in the logs; this produces a syntactically valid
-    /// response that no browser or password manager can follow, with nothing recorded anywhere.
-    /// Neither overload validates what the factory returned, at map time or per request.
+    /// D-M19, fixed. The measured behaviour was worse than the register predicted:
+    /// <c>Response.Redirect(null)</c> does not throw, it writes a 302 and simply omits the
+    /// <c>Location</c> header — a syntactically valid response that no browser or password manager
+    /// can follow, with nothing recorded anywhere. An empty string differed again, writing the
+    /// header empty. Both are now rejected before the redirect is written, so the failure surfaces
+    /// as a 500 with a message naming the cause.
     /// </remarks>
     [Fact]
-    public async Task FactoryReturnsNull_ProducesRedirectWithNoLocationHeader_KnownBug()
+    public async Task FactoryReturnsNull_ThrowsInvalidOperationException()
     {
         var handler = DelegateOf(app => app.MapChangePassword(() => (string)null!));
         var context = new DefaultHttpContext();
 
-        await handler(context);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => handler(context));
 
-        Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
+        Assert.Contains("null", ex.Message);
         Assert.False(context.Response.Headers.ContainsKey("Location"));
     }
 
     /// <summary>
-    /// An empty URL is equally broken but in a different shape: the header IS written, empty.
+    /// An empty or whitespace url is rejected the same way.
     /// </summary>
     /// <remarks>
-    /// D-M19. Null omits the header entirely; empty string emits <c>Location:</c> with no value.
-    /// Both are unfollowable 302s produced without a word of complaint, and the difference between
-    /// them is only visible on the wire — which is why both are pinned rather than one standing in
-    /// for the other.
+    /// D-M19. Whitespace is included because <c>Location: "   "</c> is exactly as unfollowable as
+    /// an empty one, and <c>IsNullOrEmpty</c> would have let it through.
     /// </remarks>
-    [Fact]
-    public async Task FactoryReturnsEmptyString_ProducesRedirectWithEmptyLocationHeader_KnownBug()
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("	")]
+    public async Task FactoryReturnsEmptyOrWhitespaceUrl_ThrowsInvalidOperationException(string url)
     {
-        var handler = DelegateOf(app => app.MapChangePassword(() => string.Empty));
+        var handler = DelegateOf(app => app.MapChangePassword(() => url));
         var context = new DefaultHttpContext();
 
-        await handler(context);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => handler(context));
 
-        Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
-        Assert.True(context.Response.Headers.ContainsKey("Location"));
-        Assert.Equal(string.Empty, context.Response.Headers.Location.ToString());
+        Assert.False(context.Response.Headers.ContainsKey("Location"));
     }
 
-    /// <summary>
-    /// A null factory is likewise not rejected at map time.
-    /// </summary>
-    /// <remarks>D-M20. The failure is deferred to the first request.</remarks>
     [Fact]
-    public async Task NullFactory_IsAcceptedAtMapTimeAndFailsPerRequest_KnownGap()
+    public async Task AsyncFactoryReturnsNull_ThrowsInvalidOperationException()
     {
-        var handler = DelegateOf(app => app.MapChangePassword((Func<string>)null!));
+        var handler = DelegateOf(app => app.MapChangePassword(() => Task.FromResult<string>(null!)));
 
-        await Assert.ThrowsAnyAsync<Exception>(() => handler(new DefaultHttpContext()));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => handler(new DefaultHttpContext()));
     }
 }

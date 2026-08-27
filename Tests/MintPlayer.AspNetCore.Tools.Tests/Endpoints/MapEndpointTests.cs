@@ -7,16 +7,31 @@ using Xunit;
 namespace MintPlayer.AspNetCore.Tools.Tests.Endpoints;
 
 /// <summary>
+/// Stands in for a compiler-emitted attribute, by living in the namespace the filter recognises.
+/// </summary>
+/// <remarks>
+/// Declared rather than borrowed. Which scope Roslyn stamps a real <c>NullableContextAttribute</c>
+/// onto — module, type, or member — depends on where the nullable context is uniform, and in this
+/// test assembly it lands on the module, so no fixture type here carries one and a test written
+/// against one would pass vacuously. Naming the rule directly is the assertion that keeps working.
+/// </remarks>
+[AttributeUsage(AttributeTargets.Class)]
+[System.Runtime.CompilerServices.CompilerGenerated]
+internal sealed class LooksCompilerEmittedAttribute : Attribute;
+
+/// <summary>
 /// Covers <c>MapEndpoint&lt;TEndpoint&gt;</c>'s registration-time behaviour.
 /// </summary>
 public class MapEndpointTests
 {
-    // Fully qualified deliberately: the library's EndpointNameAttribute collides by simple name
-    // with the framework's Microsoft.AspNetCore.Routing.EndpointNameAttribute, and a Web SDK
-    // project has the latter in scope via implicit usings. So `[EndpointName("x")]` in ordinary
-    // consumer code is a CS0104 ambiguity error. Recorded as D-G26.
-    [MintPlayer.AspNetCore.Endpoints.EndpointNameAttribute("health")]
+    // The short name is usable: the library's attribute is EndpointDescriptorNameAttribute, not
+    // EndpointNameAttribute — the latter would collide by simple name with
+    // Microsoft.AspNetCore.Routing.EndpointNameAttribute, which a Web SDK project has in scope
+    // through implicit usings, making `[EndpointName("x")]` a CS0104 in ordinary consumer code.
+    [EndpointDescriptorName("health")]
     [Obsolete("kept for the attribute-transfer test")]
+    [System.Runtime.CompilerServices.InCompilerServicesNamespace]
+    [LooksCompilerEmitted]
     private sealed class HealthEndpoint : IGetEndpoint
     {
         public static string Path => "/health";
@@ -45,14 +60,32 @@ public class MapEndpointTests
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 
-    private sealed class UsersGroup : IEndpointGroup
+    private sealed class ApiGroup : IEndpointGroup
     {
-        public static string Prefix => "/api/users";
+        public static string Prefix => "/api";
+    }
+
+    private sealed class UsersGroup : IEndpointGroup, IMemberOf<ApiGroup>
+    {
+        public static string Prefix => "/users";
+        public static void Configure(RouteGroupBuilder group) => group.WithTags("Users");
+    }
+
+    private sealed class AdminGroup : IEndpointGroup
+    {
+        public static string Prefix => "/admin";
     }
 
     private sealed class ListUsersEndpoint : IGetEndpoint, IMemberOf<UsersGroup>
     {
         public static string Path => "/";
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    private sealed class AmbiguousEndpoint : IGetEndpoint, IMemberOf<UsersGroup>, IMemberOf<AdminGroup>
+    {
+        public static string Path => "/";
+        public static IEnumerable<string> Methods => ["GET"];
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 
@@ -108,30 +141,51 @@ public class MapEndpointTests
     {
         var endpoint = Assert.Single(Map<HealthEndpoint>());
 
-        Assert.Equal("health", endpoint.Metadata.GetMetadata<MintPlayer.AspNetCore.Endpoints.EndpointNameAttribute>()?.Name);
+        Assert.Equal("health", endpoint.Metadata.GetMetadata<EndpointDescriptorNameAttribute>()?.Name);
         Assert.NotNull(endpoint.Metadata.GetMetadata<ObsoleteAttribute>());
     }
 
     /// <summary>
-    /// Attribute transfer uses <c>GetCustomAttributes(true)</c>, so compiler-generated attributes
-    /// come along too.
+    /// Compiler-generated attributes of the endpoint class are kept out of what is transferred.
     /// </summary>
     /// <remarks>
-    /// D-G8. On a nullable-enabled class, <c>NullableAttribute</c>/<c>NullableContextAttribute</c>
-    /// become endpoint metadata. Harmless in itself, but it pollutes <c>endpoint.Metadata</c> for
-    /// any consumer that enumerates or filters it.
+    /// Transfer used to be a bare <c>GetCustomAttributes(true)</c>, so on a nullable-enabled class
+    /// <c>NullableAttribute</c> and <c>NullableContextAttribute</c> became endpoint metadata. Harmless
+    /// in itself, but it polluted <c>endpoint.Metadata</c> for any consumer that enumerates or filters
+    /// it — and those are artifacts of how the class was compiled, never a routing convention.
+    /// <para>
+    /// Asserted on the selection, not on <c>endpoint.Metadata</c> — and that corrects the register.
+    /// The compiler-generated attributes the original measurement found in <c>endpoint.Metadata</c>
+    /// were never the transfer's: ASP.NET Core also contributes the handler delegate's own
+    /// attributes, and that delegate is a compiler-generated lambda inside this library's extension
+    /// method. They are still there after the fix, and correctly so. What the fix removes is the
+    /// endpoint class's own, which is the only half this library controls.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void MapEndpoint_AlsoTransfersCompilerGeneratedAttributes_KnownGap()
+    public void ForMetadata_ExcludesCompilerEmittedAttributes()
     {
-        var endpoint = Assert.Single(Map<HealthEndpoint>());
+        var declared = typeof(HealthEndpoint).GetCustomAttributes(inherit: true);
+        var transferred = EndpointAttributes.ForMetadata(typeof(HealthEndpoint));
 
-        var hasCompilerGenerated = endpoint.Metadata.Any(metadata =>
-            metadata is not null
-            && metadata.GetType().Namespace == "System.Runtime.CompilerServices");
+        // Both rules, and both really are on the class — otherwise this passes vacuously.
+        Assert.Contains(declared, attribute => attribute is LooksCompilerEmittedAttribute);
+        Assert.Contains(declared, attribute => attribute.GetType().Namespace == "System.Runtime.CompilerServices");
 
-        Assert.True(hasCompilerGenerated,
-            "expected at least one compiler-generated attribute to have leaked into metadata");
+        Assert.DoesNotContain(transferred, attribute => attribute is LooksCompilerEmittedAttribute);
+        Assert.DoesNotContain(
+            transferred,
+            attribute => attribute.GetType().Namespace == "System.Runtime.CompilerServices");
+    }
+
+    /// <summary>Filtering must not take the consumer's own attributes with it.</summary>
+    [Fact]
+    public void ForMetadata_KeepsTheConsumersOwnAttributes()
+    {
+        var transferred = EndpointAttributes.ForMetadata(typeof(HealthEndpoint));
+
+        Assert.Contains(transferred, attribute => attribute is EndpointDescriptorNameAttribute);
+        Assert.Contains(transferred, attribute => attribute is ObsoleteAttribute);
     }
 
     [Fact]
@@ -161,21 +215,52 @@ public class MapEndpointTests
     }
 
     /// <summary>
-    /// Manual registration ignores group membership.
+    /// Manual registration honours group membership, including nesting.
     /// </summary>
     /// <remarks>
-    /// D-G14. <c>MapEndpoint</c> maps at <c>TEndpoint.Path</c> verbatim, so an endpoint declaring
-    /// <c>IMemberOf&lt;UsersGroup&gt;</c> with <c>Path =&gt; "/"</c> lands at <c>/</c> rather than at
-    /// <c>/api/users/</c>. The README advertises manual registration without this caveat, so an
-    /// application mixing generated and manual registration gets two different routes for the same
-    /// endpoint class depending on how it was mapped.
+    /// It used to map at <c>TEndpoint.Path</c> verbatim, so an endpoint declaring
+    /// <c>IMemberOf&lt;UsersGroup&gt;</c> with <c>Path =&gt; "/"</c> landed at <c>/</c> instead of
+    /// <c>/api/users/</c>. The README advertised manual registration with no such caveat, so an
+    /// application mixing generated and manual registration got two different routes for the same
+    /// endpoint class depending on how it was mapped — which is the kind of difference nobody looks
+    /// for.
     /// </remarks>
     [Fact]
-    public void MapEndpoint_IgnoresGroupMembership_KnownBug()
+    public void MapEndpoint_MapsInsideTheDeclaredGroupChain()
     {
         var endpoint = Assert.Single(Map<ListUsersEndpoint>());
 
-        Assert.Equal("/", endpoint.RoutePattern.RawText);
-        Assert.DoesNotContain("api/users", endpoint.RoutePattern.RawText);
+        Assert.Equal("/api/users/", endpoint.RoutePattern.RawText);
+    }
+
+    /// <summary>The group's own <c>Configure</c> hook runs, so its conventions apply too.</summary>
+    [Fact]
+    public void MapEndpoint_RunsTheGroupConfigureHook()
+    {
+        var endpoint = Assert.Single(Map<ListUsersEndpoint>());
+
+        var tags = endpoint.Metadata.GetMetadata<Microsoft.AspNetCore.Http.Metadata.ITagsMetadata>();
+
+        Assert.NotNull(tags);
+        Assert.Contains("Users", tags!.Tags);
+    }
+
+    /// <summary>
+    /// An endpoint in two groups is refused, loudly, at registration time.
+    /// </summary>
+    /// <remarks>
+    /// There is no single prefix to resolve, and the generator reports MPEP003 for exactly this shape.
+    /// Picking one arbitrarily would register the endpoint at a route the author never asked for, and
+    /// silence is what made the whole class of grouping defects hard to find.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_EndpointInTwoGroups_Throws()
+    {
+        var app = WebApplication.CreateBuilder([]).Build();
+
+        var exception = Assert.Throws<InvalidOperationException>(() => app.MapEndpoint<AmbiguousEndpoint>());
+
+        Assert.Contains("IMemberOf", exception.Message);
+        Assert.Contains(nameof(AmbiguousEndpoint), exception.Message);
     }
 }

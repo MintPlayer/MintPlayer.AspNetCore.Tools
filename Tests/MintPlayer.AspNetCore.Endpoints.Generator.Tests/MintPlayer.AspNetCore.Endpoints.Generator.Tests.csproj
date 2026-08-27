@@ -28,10 +28,11 @@
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 
-		<!-- Must match the version the generator itself resolves (verified 4.14.0 in the
-		     generator's project.assets.json, transitively via SourceGenerators.Tools 10.16.0).
-		     A mismatch produces a split-assembly load at driver runtime. -->
-		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+		<!-- Microsoft.CodeAnalysis.CSharp is deliberately NOT referenced here. The
+		     SourceGenerators.Tools package's own build props inject it, and declaring it again
+		     produced NU1504 (duplicate PackageReference). Relying on the injected one also
+		     guarantees the driver loads the same Roslyn version the generator was compiled
+		     against — verified 4.14.0 — which a hand-pinned version could silently drift from. -->
 
 		<!-- The generator references this with PrivateAssets="all", so it does NOT flow
 		     transitively. Without an explicit reference the driver throws FileNotFoundException

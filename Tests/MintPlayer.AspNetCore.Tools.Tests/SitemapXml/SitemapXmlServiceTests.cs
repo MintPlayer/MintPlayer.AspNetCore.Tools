@@ -31,50 +31,55 @@ public class SitemapXmlServiceTests
     }
 
     /// <summary>
-    /// Pins PRD defect D-S6: <c>(0 - 1) / perPage</c> truncates toward zero, so zero items claim
-    /// one page. A caller looping <c>1..PageCount</c> then renders an empty sitemap and a sitemap
-    /// index referencing it.
+    /// Zero items is zero pages. Previously <c>(0 - 1) / perPage</c> truncated toward zero and
+    /// answered <b>one</b> — so a caller looping <c>1..PageCount</c> rendered an empty sitemap and
+    /// a sitemap index pointing at it (PRD defect D-S6).
     /// </summary>
     [Theory]
+    [InlineData(1)]
     [InlineData(2)]
     [InlineData(10)]
     [InlineData(1000)]
-    public void PageCount_ZeroTotal_ReturnsOne_KnownBug(int perPage)
+    public void PageCount_ZeroTotal_IsZeroPages(int perPage)
     {
-        Assert.Equal(1, CreateService().PageCount(0, perPage));
+        Assert.Equal(0, CreateService().PageCount(0, perPage));
     }
 
     /// <summary>
-    /// A wrinkle D-S6 does not mention, found while writing this suite: at <c>perPage == 1</c> the
-    /// same expression yields <c>0</c>, because <c>-1 / 1</c> is <c>-1</c> rather than <c>0</c>. So
-    /// the zero-item answer is not merely wrong, it is inconsistent — one page for every page size
-    /// except the smallest one.
+    /// The answer for zero items no longer depends on the page size. The old expression yielded
+    /// <c>0</c> at <c>perPage == 1</c> and <c>1</c> everywhere else, because <c>-1 / 1</c> is
+    /// <c>-1</c> while <c>-1 / n</c> truncates to <c>0</c> — the inconsistency half of D-S6.
     /// </summary>
     [Fact]
-    public void PageCount_ZeroTotalAndPerPageOne_ReturnsZero_KnownBug()
+    public void PageCount_ZeroTotal_IsIndependentOfThePageSize()
     {
-        Assert.Equal(0, CreateService().PageCount(0, 1));
+        var service = CreateService();
+
+        Assert.Equal(service.PageCount(0, 1), service.PageCount(0, 10));
     }
 
     /// <summary>
-    /// Pins PRD defect D-S7: no argument validation at all, so a misconfigured page size takes the
-    /// request down with a <see cref="DivideByZeroException"/> rather than an
-    /// <see cref="ArgumentOutOfRangeException"/>.
+    /// PRD defect D-S7: a misconfigured page size used to take the request down with a
+    /// <see cref="DivideByZeroException"/>, which names neither the argument nor the caller.
     /// </summary>
     [Fact]
-    public void PageCount_ZeroPerPage_ThrowsDivideByZero_KnownBug()
+    public void PageCount_ZeroPerPage_ThrowsArgumentOutOfRange()
     {
-        Assert.Throws<DivideByZeroException>(() => CreateService().PageCount(100, 0));
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => CreateService().PageCount(100, 0));
+
+        Assert.Equal("perPage", exception.ParamName);
     }
 
-    /// <summary>Second half of D-S7: negative inputs produce nonsense instead of an error.</summary>
+    /// <summary>Second half of D-S7: negative inputs used to return nonsense instead of an error.</summary>
     [Theory]
-    [InlineData(10, -3, -2)]
-    [InlineData(-5, 3, -1)]
-    [InlineData(-5, -5, 2)]
-    public void PageCount_NegativeInputs_ReturnNonsense_KnownBug(int total, int perPage, int expected)
+    [InlineData(10, -3, "perPage")]
+    [InlineData(-5, 3, "total")]
+    [InlineData(-5, -5, "total")]
+    public void PageCount_NegativeInputs_ThrowArgumentOutOfRange(int total, int perPage, string expectedParamName)
     {
-        Assert.Equal(expected, CreateService().PageCount(total, perPage));
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => CreateService().PageCount(total, perPage));
+
+        Assert.Equal(expectedParamName, exception.ParamName);
     }
 
     // ── GetSitemapIndex ───────────────────────────────────────────────────────────────────────
@@ -88,8 +93,9 @@ public class SitemapXmlServiceTests
     }
 
     /// <summary>
-    /// The empty case is the one place the D-S6 <c>PageCount(0, n) == 1</c> bug is masked: the
-    /// <c>items.Any()</c> guard short-circuits before <c>PageCount</c> is ever called.
+    /// The empty case needs no special-casing any more: <c>PageCount(0, n)</c> is <c>0</c> since
+    /// D-S6, so the page loop simply does not run. The old <c>items.Any()</c> guard existed only to
+    /// mask that arithmetic.
     /// </summary>
     [Fact]
     public void GetSitemapIndex_EmptySource_NeverCallsUrlFunc()
@@ -205,21 +211,20 @@ public class SitemapXmlServiceTests
     }
 
     /// <summary>
-    /// The result is a lazy <c>Select</c> over <c>Enumerable.Range</c>, so nothing per-page happens
-    /// until the caller enumerates — but the <c>Any()</c> and <c>Count()</c> probes have ALREADY
-    /// run by then. Half-lazy is the worst of both: the caller cannot predict when the source is
-    /// touched.
+    /// The result is fully computed before the method returns. It used to be a lazy <c>Select</c>
+    /// over <c>Enumerable.Range</c> layered on top of two eager probes — half-lazy, so the caller
+    /// could not predict when the source would be touched, and a lambda that threw did so at some
+    /// unrelated <c>foreach</c>.
     /// </summary>
     [Fact]
-    public void GetSitemapIndex_IsLazyPerPageButEagerOnTheTwoProbes()
+    public void GetSitemapIndex_IsFullyEvaluatedBeforeItReturns()
     {
         var source = new CountingEnumerable<TimestampedItem>(TimestampedItem.Sequence(5));
         var calls = 0;
 
         var result = CreateService().GetSitemapIndex(source, 2, (pp, page) => { calls++; return "/s"; });
 
-        Assert.Equal(2, source.EnumerationCount);
-        Assert.Equal(0, calls);
+        Assert.Equal(3, calls);
 
         result.ToList();
 
@@ -227,58 +232,67 @@ public class SitemapXmlServiceTests
     }
 
     /// <summary>
-    /// Pins PRD defect D-S8: the source is walked <c>2 + pageCount</c> times — <c>Any()</c>,
-    /// <c>Count()</c>, and one <c>Skip/Take/Max</c> per page. On an <c>IQueryable</c> that is
-    /// N+2 database round trips per sitemap index.
+    /// PRD defect D-S8: the source is now materialised once, whatever the page count. It used to be
+    /// walked <c>2 + pageCount</c> times — <c>Any()</c>, <c>Count()</c>, and one
+    /// <c>Skip/Take/Max</c> per page — which on an <c>IQueryable</c> is N+2 database round trips
+    /// per sitemap index.
     /// </summary>
     [Theory]
-    [InlineData(5, 2, 5)]
-    [InlineData(100, 10, 12)]
-    [InlineData(1, 10, 3)]
-    public void GetSitemapIndex_EnumeratesTheSourceTwicePlusOncePerPage_KnownBug(int itemCount, int perPage, int expectedEnumerations)
+    [InlineData(5, 2)]
+    [InlineData(100, 10)]
+    [InlineData(1, 10)]
+    [InlineData(0, 10)]
+    public void GetSitemapIndex_EnumeratesTheSourceExactlyOnce(int itemCount, int perPage)
     {
         var source = new CountingEnumerable<TimestampedItem>(TimestampedItem.Sequence(itemCount));
 
         CreateService().GetSitemapIndex(source, perPage, (pp, page) => "/s").ToList();
 
-        Assert.Equal(expectedEnumerations, source.EnumerationCount);
+        Assert.Equal(1, source.EnumerationCount);
     }
 
     /// <summary>
-    /// Second half of D-S8: because the returned sequence is lazy, every re-enumeration by the
-    /// caller pays the per-page cost again.
+    /// Second half of D-S8: the returned sequence is a materialised snapshot, so re-enumerating it
+    /// costs nothing. It used to be lazy, and every <c>foreach</c> the caller wrote paid the
+    /// per-page cost again.
     /// </summary>
     [Fact]
-    public void GetSitemapIndex_ReEnumeratingTheResult_WalksTheSourceAgain_KnownBug()
+    public void GetSitemapIndex_ReEnumeratingTheResult_DoesNotTouchTheSourceAgain()
     {
         var source = new CountingEnumerable<TimestampedItem>(TimestampedItem.Sequence(5));
 
         var result = CreateService().GetSitemapIndex(source, 2, (pp, page) => "/s");
-        result.ToList();
-        result.ToList();
+        var first = result.ToList();
+        var second = result.ToList();
 
-        Assert.Equal(8, source.EnumerationCount);
+        Assert.Equal(1, source.EnumerationCount);
+        Assert.Equal(first.Select(sitemap => sitemap.LastMod), second.Select(sitemap => sitemap.LastMod));
     }
 
     /// <summary>
-    /// Third half of D-S8, and the one that is a hard failure rather than a cost: a source that can
-    /// only be walked once — a stream, a data reader, an already-consumed iterator — throws before
-    /// the method even returns.
+    /// Third part of D-S8, and the one that was a hard failure rather than a cost: a source that
+    /// can only be walked once — a stream, a data reader, an already-consumed iterator — used to
+    /// throw before the method even returned. It is now a supported input.
     /// </summary>
     [Fact]
-    public void GetSitemapIndex_SingleUseSource_ThrowsAtCallTime_KnownBug()
+    public void GetSitemapIndex_SingleUseSource_IsSupported()
     {
         var source = new SingleUseEnumerable<TimestampedItem>(TimestampedItem.Sequence(5));
 
-        Assert.Throws<InvalidOperationException>(() => CreateService().GetSitemapIndex(source, 2, (pp, page) => "/s"));
+        var result = CreateService().GetSitemapIndex(source, 2, (pp, page) => $"/s/{page}").ToList();
+
+        Assert.Equal(["/s/1", "/s/2", "/s/3"], result.Select(sitemap => sitemap.Loc).ToArray());
+        Assert.Equal(new DateTime(2024, 1, 5), result[2].LastMod);
     }
 
     /// <summary>D-S7 reaching the caller through <c>GetSitemapIndex</c>.</summary>
     [Fact]
-    public void GetSitemapIndex_ZeroPerPage_ThrowsDivideByZero_KnownBug()
+    public void GetSitemapIndex_ZeroPerPage_ThrowsArgumentOutOfRange()
     {
-        Assert.Throws<DivideByZeroException>(
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(
             () => CreateService().GetSitemapIndex(TimestampedItem.Sequence(5), 0, (pp, page) => "/s"));
+
+        Assert.Equal("perPage", exception.ParamName);
     }
 
     [Fact]
@@ -289,16 +303,17 @@ public class SitemapXmlServiceTests
     }
 
     /// <summary>
-    /// A null <c>urlFunc</c> is not guarded either, and because the projection is lazy the
-    /// <see cref="NullReferenceException"/> surfaces at the caller's <c>foreach</c> — far from the
-    /// call that was wrong.
+    /// A null <c>urlFunc</c> is reported at the call that was wrong, and as an
+    /// <see cref="ArgumentNullException"/> naming the parameter. It used to surface as a
+    /// <see cref="NullReferenceException"/> at the caller's <c>foreach</c>, arbitrarily far away.
     /// </summary>
     [Fact]
-    public void GetSitemapIndex_NullUrlFunc_ThrowsOnlyWhenEnumerated_KnownBug()
+    public void GetSitemapIndex_NullUrlFunc_ThrowsAtCallTime()
     {
-        var result = CreateService().GetSitemapIndex(TimestampedItem.Sequence(5), 2, null!);
+        var exception = Assert.Throws<ArgumentNullException>(
+            () => CreateService().GetSitemapIndex(TimestampedItem.Sequence(5), 2, null!));
 
-        Assert.Throws<NullReferenceException>(() => result.ToList());
+        Assert.Equal("urlFunc", exception.ParamName);
     }
 
     [Fact]

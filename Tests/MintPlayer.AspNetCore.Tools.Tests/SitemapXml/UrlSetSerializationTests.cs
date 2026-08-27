@@ -175,46 +175,81 @@ public class UrlSetSerializationTests
     }
 
     /// <summary>
-    /// <c>loc</c> is REQUIRED by the sitemap protocol, but a null <c>Loc</c> silently produces a
-    /// <c>&lt;url&gt;</c> with no <c>&lt;loc&gt;</c> at all rather than failing.
+    /// PRD defect D-S29: <c>loc</c> is REQUIRED by the sitemap protocol, and a null <c>Loc</c> used
+    /// to produce a <c>&lt;url&gt;</c> with no <c>&lt;loc&gt;</c> at all rather than failing —
+    /// <c>XmlSerializer</c> skips any null <c>string</c> member, so the invalid document was written
+    /// with no exception and no warning, and the rejection arrived at the crawler hours later.
     /// </summary>
     /// <remarks>
-    /// Not in the PRD register — reported as a new finding by the M5 milestone. Any
-    /// <c>string</c> member left null is skipped by <c>XmlSerializer</c>, so the invalid document
-    /// is produced with no exception and no warning.
+    /// <c>XmlSerializer</c> wraps anything thrown while writing, so the guard surfaces as the inner
+    /// exception. Blank values are rejected on the same footing as null: a whitespace <c>&lt;loc&gt;</c>
+    /// is no more usable to a crawler.
     /// </remarks>
-    [Fact]
-    public void Loc_Null_EmitsAUrlWithNoLocAtAll_KnownGap()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Loc_NullOrBlank_FailsSerializationInsteadOfEmittingAnInvalidUrl(string? loc)
     {
-        var document = XmlTestHelpers.SerializeToDocument(new UrlSet([new Url()]));
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => XmlTestHelpers.SerializeToString(new UrlSet([new Url { Loc = loc }])));
+
+        Assert.Contains("Loc", exception.InnerException!.Message);
+    }
+
+    /// <summary>The other side of the same guard: a real <c>Loc</c> is unaffected.</summary>
+    [Fact]
+    public void Loc_Present_SerializesWithoutComplaint()
+    {
+        var document = XmlTestHelpers.SerializeToDocument(new UrlSet([new Url { Loc = "https://example.org/a" }]));
 
         var url = document.Root!.Elements().Single();
-        Assert.Null(url.Element(Ns.Sitemap + "loc"));
-        Assert.NotNull(url.Element(Ns.Sitemap + "lastmod"));
+        Assert.Equal("https://example.org/a", url.Element(Ns.Sitemap + "loc")!.Value);
     }
 
     /// <summary>
-    /// Pins PRD defect D-S4: <c>LastMod</c> is a non-nullable <see cref="DateTime"/> with no
-    /// <c>ShouldSerializeLastMod</c>, so a URL nobody set a date on claims it changed in year 1.
+    /// PRD defect D-S4: <c>lastmod</c> is optional in the spec, and <c>LastMod</c> is now a
+    /// <c>DateTime?</c> that is omitted when unset. It used to be a non-nullable
+    /// <see cref="DateTime"/> with no <c>ShouldSerializeLastMod</c>, so a URL nobody set a date on
+    /// told crawlers it changed in year 1.
     /// </summary>
     [Fact]
-    public void LastMod_Unset_SerializesAsYearOne_KnownBug()
+    public void LastMod_Unset_IsOmitted()
     {
-        var xml = XmlTestHelpers.SerializeToString(new UrlSet([new Url { Loc = "https://example.org/a" }]));
+        var document = XmlTestHelpers.SerializeToDocument(new UrlSet([new Url { Loc = "https://example.org/a" }]));
 
-        Assert.Contains("<lastmod>0001-01-01</lastmod>", xml);
+        var url = document.Root!.Elements().Single();
+        Assert.Null(url.Element(Ns.Sitemap + "lastmod"));
+        Assert.DoesNotContain("0001-01-01", document.ToString());
     }
 
     /// <summary>
-    /// Second half of D-S4: <c>default(ChangeFreq)</c> is <c>Hourly</c>, so every URL whose
-    /// author never touched the property tells crawlers to come back every hour.
+    /// Second half of D-S4: <c>changefreq</c> is optional too, and <c>ChangeFreq</c> is now a
+    /// <c>ChangeFreq?</c>. Because <c>default(ChangeFreq)</c> is <c>Hourly</c>, every URL whose
+    /// author never touched the property used to tell crawlers to come back every hour.
     /// </summary>
     [Fact]
-    public void ChangeFreq_Unset_SerializesAsHourly_KnownBug()
+    public void ChangeFreq_Unset_IsOmitted()
+    {
+        var document = XmlTestHelpers.SerializeToDocument(new UrlSet([new Url { Loc = "https://example.org/a" }]));
+
+        var url = document.Root!.Elements().Single();
+        Assert.Null(url.Element(Ns.Sitemap + "changefreq"));
+    }
+
+    /// <summary>
+    /// The two optional members are omitted, not written as <c>xsi:nil</c> — which is what a bare
+    /// nullable property would have produced, and what D-S28 was about on <c>Video</c>. An
+    /// <c>xsi</c> declaration in the response would also defeat the formatter's
+    /// <c>ns.Add(string.Empty, string.Empty)</c>.
+    /// </summary>
+    [Fact]
+    public void UnsetOptionalMembers_AreOmittedRatherThanWrittenAsXsiNil()
     {
         var xml = XmlTestHelpers.SerializeToString(new UrlSet([new Url { Loc = "https://example.org/a" }]));
 
-        Assert.Contains("<changefreq>hourly</changefreq>", xml);
+        Assert.DoesNotContain("nil=\"true\"", xml);
+        Assert.DoesNotContain("XMLSchema-instance", xml);
     }
 
     /// <summary>

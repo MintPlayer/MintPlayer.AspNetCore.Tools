@@ -92,7 +92,7 @@ public class AddOpenSearchTests
     private sealed class SecondService : IOpenSearchService
     {
         public Task<IEnumerable<string>> ProvideSuggestions(string? searchTerms) => Task.FromResult(Enumerable.Empty<string>());
-        public Task<RedirectResult> PerformSearch(string? searchTerms) => Task.FromResult(new RedirectResult("/"));
+        public Task<OpenSearchRedirect> PerformSearch(string? searchTerms) => Task.FromResult(new OpenSearchRedirect("/"));
     }
 
     [Fact]
@@ -138,19 +138,48 @@ public class AddOpenSearchTests
     }
 
     /// <summary>
-    /// Pins D-S26: the formatter type is held in a <c>static Lazy&lt;Type&gt;</c> whose factory is
-    /// a <c>typeof</c> expression — a compile-time constant. The laziness buys nothing and the
-    /// <c>Lazy</c> adds a lock and an allocation to a value the JIT already has.
+    /// D-S26 fixed: the formatter type used to be held in a <c>static Lazy&lt;Type&gt;</c> whose
+    /// factory was a <c>typeof</c> expression — a compile-time constant. The laziness bought nothing
+    /// and the <c>Lazy</c> added a lock and an allocation to a value the JIT already has.
     /// </summary>
     [Fact]
-    public void FormatterType_IsALazyOverACompileTimeConstant_KnownGap()
+    public void OpenSearchExtensions_HoldsNoLazyOverACompileTimeConstant()
     {
-        var field = typeof(OpenSearchExtensions).GetField("formatterType", BindingFlags.NonPublic | BindingFlags.Static);
+        var lazyFields = typeof(OpenSearchExtensions)
+            .GetFields(BindingFlags.NonPublic | BindingFlags.Static)
+            .Where(f => f.FieldType.IsGenericType && f.FieldType.GetGenericTypeDefinition() == typeof(Lazy<>))
+            .ToArray();
 
-        Assert.NotNull(field);
-        Assert.Equal(typeof(Lazy<Type>), field.FieldType);
+        Assert.Empty(lazyFields);
+        Assert.Null(typeof(OpenSearchExtensions).GetField("formatterType", BindingFlags.NonPublic | BindingFlags.Static));
+    }
 
-        var lazy = (Lazy<Type>)field.GetValue(null)!;
-        Assert.Equal(typeof(MintPlayer.AspNetCore.OpenSearch.Formatters.XmlSerializerOutputFormatter), lazy.Value);
+    /// <summary>
+    /// D-S16 fixed: <c>AddOpenSearch</c> registers a marker service, which is the only thing that
+    /// can prove it ran — <c>IOptions&lt;OpenSearchOptions&gt;</c> resolves to a default instance
+    /// whether or not anybody configured it.
+    /// </summary>
+    [Fact]
+    public void AddOpenSearch_RegistersAMarkerService()
+    {
+        var services = new ServiceCollection();
+
+        services.AddOpenSearch<FakeOpenSearchService>();
+
+        var markerType = typeof(OpenSearchExtensions).Assembly.GetType("MintPlayer.AspNetCore.OpenSearch.OpenSearchMarker");
+        Assert.NotNull(markerType);
+        Assert.NotNull(services.BuildServiceProvider().GetService(markerType));
+    }
+
+    [Fact]
+    public void AddOpenSearch_CalledTwice_RegistersTheMarkerOnlyOnce()
+    {
+        var services = new ServiceCollection();
+
+        services.AddOpenSearch<FakeOpenSearchService>();
+        services.AddOpenSearch<FakeOpenSearchService>();
+
+        var markerType = typeof(OpenSearchExtensions).Assembly.GetType("MintPlayer.AspNetCore.OpenSearch.OpenSearchMarker")!;
+        Assert.Single(services, d => d.ServiceType == markerType);
     }
 }

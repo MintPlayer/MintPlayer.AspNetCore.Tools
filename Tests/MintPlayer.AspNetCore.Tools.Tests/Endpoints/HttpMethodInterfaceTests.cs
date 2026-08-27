@@ -125,6 +125,28 @@ public class HttpMethodInterfaceTests
             => Task.FromResult(Results.Ok());
     }
 
+    private sealed class PutTypedWithResponse : PutEndpoint<Req>, IPutEndpoint<Req, Res>
+    {
+        public static string Path => "/";
+        public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
+            => Task.FromResult(Results.Ok());
+    }
+
+    private sealed class PatchTypedWithResponse : PatchEndpoint<Req>, IPatchEndpoint<Req, Res>
+    {
+        public static string Path => "/";
+        public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
+            => Task.FromResult(Results.Ok());
+    }
+
+    private sealed class DeleteTypedWithResponse : DeleteEndpoint<Req>, IDeleteEndpoint<Req, Res>
+    {
+        public static string Path => "/";
+        protected override ValueTask<Req?> BindRequestAsync(HttpContext context) => new(new Req(1));
+        public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
+            => Task.FromResult(Results.Ok());
+    }
+
     [Fact]
     public void GenericArities_ContributeTheSameVerbAsArityZero()
     {
@@ -135,6 +157,13 @@ public class HttpMethodInterfaceTests
         Assert.Equal(["PUT"], MethodsOf<PutTyped>());
         Assert.Equal(["PATCH"], MethodsOf<PatchTyped>());
         Assert.Equal(["DELETE"], MethodsOf<DeleteTyped>());
+
+        // Arity 2. These were the gap: PUT, PATCH and DELETE had no two-parameter fixture, so
+        // their arity-2 Methods implementations were never executed — which is exactly the
+        // per-arity copy-paste slip this class exists to catch.
+        Assert.Equal(["PUT"], MethodsOf<PutTypedWithResponse>());
+        Assert.Equal(["PATCH"], MethodsOf<PatchTypedWithResponse>());
+        Assert.Equal(["DELETE"], MethodsOf<DeleteTypedWithResponse>());
     }
 
     /// <summary>
@@ -160,23 +189,89 @@ public class HttpMethodInterfaceTests
         => Assert.Equal(201, StatusOf<Created, Req, Res>());
 
     /// <summary>
-    /// Each access to <c>Methods</c> allocates a fresh array.
+    /// <c>Methods</c> returns the same cached instance on every access.
     /// </summary>
     /// <remarks>
     /// The collection expression <c>["GET"]</c> in an <c>IEnumerable&lt;string&gt;</c>-returning
-    /// property body creates a new <c>string[]</c> per call. Harmless on its own, but it is the
-    /// reason <see cref="EndpointDescriptor"/> equality does not behave as a record's usually does
-    /// — see <c>EndpointDescriptorTests</c> and D-G16.
+    /// property body allocated a fresh <c>string[]</c> per call, and <c>Methods</c> is read once per
+    /// registration <i>and</i> once per descriptor. It is also what made
+    /// <see cref="EndpointDescriptor"/>'s record equality useless — see
+    /// <see cref="EndpointDescriptorTests"/>.
     /// </remarks>
     [Fact]
-    public void Methods_AllocatesAFreshInstancePerAccess()
+    public void Methods_ReturnsACachedInstance()
     {
         var first = MethodsOf<GetRaw>();
         var second = MethodsOf<GetRaw>();
 
-        Assert.NotSame(first, second);
-        Assert.Equal(first, second);
+        Assert.Same(first, second);
+        Assert.Equal(HttpVerbs.Get, first);
     }
+
+    /// <summary>
+    /// The cached lists are read-only, so a consumer cannot mutate the instance every endpoint of
+    /// that verb shares.
+    /// </summary>
+    [Fact]
+    public void Methods_CachedInstanceIsNotAMutableArray()
+    {
+        Assert.All<IEnumerable<string>>(
+            [HttpVerbs.Get, HttpVerbs.Post, HttpVerbs.Put, HttpVerbs.Patch, HttpVerbs.Delete],
+            verbs => Assert.False(verbs is string[]));
+    }
+
+    /// <summary>
+    /// A class may declare its own <c>Methods</c> while implementing a convenience interface — the
+    /// class member is more specific, so it wins.
+    /// </summary>
+    /// <remarks>
+    /// Recorded in the defect register as unfixable without changing the interface shape. Measured,
+    /// it already works, in every arity: the interfaces' explicit static implementations are default
+    /// implementations, and a class-level implicit implementation beats them. The register entry is
+    /// wrong, and this test is here to keep anyone from "fixing" the interfaces on the strength of it.
+    /// </remarks>
+    private sealed class MultiVerbGet : IGetEndpoint
+    {
+        public static string Path => "/";
+        public static IEnumerable<string> Methods => ["GET", "HEAD"];
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    private sealed class MultiVerbTypedGet : GetEndpoint<Req>, IGetEndpoint<Req>
+    {
+        public static string Path => "/";
+        public static IEnumerable<string> Methods => ["GET", "HEAD"];
+        protected override ValueTask<Req?> BindRequestAsync(HttpContext context) => new(new Req(1));
+        public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
+            => Task.FromResult(Results.Ok());
+    }
+
+    [Fact]
+    public void AClassCanOverrideMethodsWhileImplementingAVerbInterface()
+    {
+        Assert.Equal(["GET", "HEAD"], MethodsOf<MultiVerbGet>());
+        Assert.Equal(["GET", "HEAD"], MethodsOf<MultiVerbTypedGet>());
+    }
+
+    /// <summary>
+    /// A class implementing two verb interfaces resolves the ambiguity by declaring <c>Methods</c>,
+    /// and gets the union it asked for.
+    /// </summary>
+    /// <remarks>
+    /// Without its own <c>Methods</c> the compiler reports CS8705 — neither verb is most specific —
+    /// which is a clear, fixable error rather than the "ambiguity with no way out" the register
+    /// described.
+    /// </remarks>
+    private sealed class GetAndPost : IGetEndpoint, IPostEndpoint
+    {
+        public static string Path => "/";
+        public static IEnumerable<string> Methods => ["GET", "POST"];
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    [Fact]
+    public void AClassImplementingTwoVerbInterfaces_SuppliesTheUnionItself()
+        => Assert.Equal(["GET", "POST"], MethodsOf<GetAndPost>());
 
     /// <summary>The default <c>Configure</c> hook is a no-op and must not throw.</summary>
     [Fact]
@@ -190,4 +285,27 @@ public class HttpMethodInterfaceTests
 
     private static void ConfigureVia<T>(RouteHandlerBuilder builder)
         where T : IEndpointBase => T.Configure(builder);
+
+    /// <summary>
+    /// The assembly-level attribute that overrides the generated mapping method's name.
+    /// </summary>
+    /// <remarks>
+    /// Its usage and multiplicity are part of the contract: the generator reads only the first
+    /// occurrence, and <c>AllowMultiple = false</c> is what makes "the first" unambiguous.
+    /// </remarks>
+    [Fact]
+    public void EndpointsMethodNameAttribute_ExposesTheNameAndTargetsAssembliesOnce()
+    {
+        var attribute = new EndpointsMethodNameAttribute("MapCustomEndpoints");
+
+        Assert.Equal("MapCustomEndpoints", attribute.MethodName);
+
+        var usage = typeof(EndpointsMethodNameAttribute)
+            .GetCustomAttributes(typeof(AttributeUsageAttribute), false)
+            .Cast<AttributeUsageAttribute>()
+            .Single();
+
+        Assert.Equal(AttributeTargets.Assembly, usage.ValidOn);
+        Assert.False(usage.AllowMultiple);
+    }
 }

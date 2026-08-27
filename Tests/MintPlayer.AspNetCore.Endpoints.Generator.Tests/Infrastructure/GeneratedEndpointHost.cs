@@ -47,8 +47,17 @@ internal static class GeneratedEndpointHost
             .GetMethod(Info(assemblyName).GetMethodName(), BindingFlags.Public | BindingFlags.Static)
             ?? throw new InvalidOperationException($"No mapping method in '{assemblyName}'.");
 
+    /// <summary>
+    /// The generated extensions class, in the namespace the generator emits into.
+    /// </summary>
+    /// <remarks>
+    /// Not the library's own namespace: the class name is derived from the assembly name, so emitting
+    /// it there let a reasonable name silently shadow a shipped type. The generated file emits a
+    /// <c>global using</c> for this namespace, which is why the consumer's call site never mentions
+    /// it — but reflection has to.
+    /// </remarks>
     private static Type ExtensionsType(Assembly generated, string assemblyName)
-        => generated.GetType($"MintPlayer.AspNetCore.Endpoints.{Info(assemblyName).GetSafeClassName()}")
+        => generated.GetType($"MintPlayer.AspNetCore.Endpoints.Generated.{Info(assemblyName).GetSafeClassName()}")
             ?? throw new InvalidOperationException($"No generated extensions class in '{assemblyName}'.");
 
     // Reusing the generator's own naming keeps the host from encoding a second, divergent copy of

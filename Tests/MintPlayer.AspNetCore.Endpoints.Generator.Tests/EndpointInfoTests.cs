@@ -21,13 +21,16 @@ public class EndpointInfoTests
         bool isPartial = true,
         bool hasExistingBaseClass = false,
         string? groupTypeFqn = null,
-        bool hasMultipleGroups = false)
+        bool hasMultipleGroups = false,
+        bool baseChainReachesEndpointBase = false,
+        string? descriptorName = null)
         => new(
             "global::Fixtures.MyEndpoint", "Fixtures", "MyEndpoint",
             isPartial, hasExistingBaseClass,
             level, httpMethod,
             requestTypeFqn, responseTypeFqn,
-            groupTypeFqn, hasMultipleGroups);
+            groupTypeFqn, hasMultipleGroups,
+            baseChainReachesEndpointBase, descriptorName);
 
     /// <summary>A raw endpoint needs no base class — it handles <c>HttpContext</c> itself.</summary>
     [Fact]
@@ -82,14 +85,16 @@ public class EndpointInfoTests
         Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, hasExistingBaseClass: true));
         Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, groupTypeFqn: "global::Fixtures.ApiGroup"));
         Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, hasMultipleGroups: true));
+        Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, baseChainReachesEndpointBase: true));
+        Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, descriptorName: "Named"));
         Assert.False(info.Equals(null));
         Assert.False(info.Equals("global::Fixtures.MyEndpoint"));
     }
 
     /// <summary>
     /// Only the fully qualified name feeds the hash code, so two infos for the same class with
-    /// different details collide. That is legal — and it is also what makes the D-G9 duplicate
-    /// partials land in the same <c>GroupBy</c> bucket.
+    /// different details collide. That is legal, and it is what makes the duplicate infos a partial
+    /// class split across files produces land in the same <c>GroupBy</c> bucket.
     /// </summary>
     [Fact]
     public void GetHashCode_IsDerivedFromTheFullyQualifiedNameOnly()
@@ -97,6 +102,17 @@ public class EndpointInfoTests
         Assert.Equal(
             Info(EndpointLevel.Typed, HttpMethodKind.Post).GetHashCode(),
             Info(EndpointLevel.Raw, HttpMethodKind.Delete, hasExistingBaseClass: true).GetHashCode());
+    }
+
+    /// <summary>
+    /// The descriptor name comes from <c>[EndpointDescriptorName]</c>, and falls back to the class
+    /// name — which is what the generator emitted unconditionally before the attribute was read.
+    /// </summary>
+    [Fact]
+    public void EffectiveDescriptorName_PrefersTheAttributeThenTheClassName()
+    {
+        Assert.Equal("MyEndpoint", Info(EndpointLevel.Raw, HttpMethodKind.Get).EffectiveDescriptorName);
+        Assert.Equal("Named", Info(EndpointLevel.Raw, HttpMethodKind.Get, descriptorName: "Named").EffectiveDescriptorName);
     }
 
     [Fact]

@@ -74,14 +74,24 @@ public class OpenSearchOutputFormatterTests
     }
 
     /// <summary>
-    /// Only the exact type matches, not a subclass — the check is <c>type ==</c>, not
-    /// <c>IsAssignableFrom</c>. Relevant because <c>ObjectResult.DeclaredType</c> decides what is
-    /// asked about, so a consumer subclassing the description would silently lose the formatter.
+    /// A subclass matches too: the check is <c>IsAssignableFrom</c>, not <c>type ==</c>. It used to
+    /// be exact equality, so a consumer subclassing the description silently lost the formatter —
+    /// <c>ObjectResult.DeclaredType</c> decides what is asked about.
     /// </summary>
     [Fact]
-    public void CanWriteType_SubclassOfOpenSearchDescription_IsFalse_KnownGap()
+    public void CanWriteType_SubclassOfOpenSearchDescription_IsTrue()
     {
-        Assert.False(new Probe().CanWrite(typeof(DerivedDescription)));
+        Assert.True(new Probe().CanWrite(typeof(DerivedDescription)));
+    }
+
+    /// <summary>
+    /// The counterpart of the above: widening to assignability must not start claiming base types.
+    /// <c>typeof(object)</c> in particular is what an untyped write asks about.
+    /// </summary>
+    [Fact]
+    public void CanWriteType_BaseTypesOfOpenSearchDescription_AreFalse()
+    {
+        Assert.False(new Probe().CanWrite(typeof(object)));
     }
 
     private sealed class DerivedDescription : OpenSearchDescription;

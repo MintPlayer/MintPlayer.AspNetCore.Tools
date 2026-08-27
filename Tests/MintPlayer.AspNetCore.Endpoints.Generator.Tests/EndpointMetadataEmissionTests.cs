@@ -179,50 +179,107 @@ public class EndpointMetadataEmissionTests
     }
 
     /// <summary>
-    /// Pins D-G20: the descriptor's <c>Path</c> is the group-relative one, not the route the request
-    /// has to use.
+    /// The descriptor's <c>Path</c> is the fully resolved route, group prefixes composed in.
     /// </summary>
     /// <remarks>
-    /// <c>Describe&lt;T&gt;</c> passes <c>TEndpoint.Path</c> straight through, so an endpoint in
-    /// <c>/api/users</c> is described as <c>"/{id}"</c>. The descriptor list is public API — the
-    /// obvious use for it is a diagnostics or discovery page — and every grouped entry in it is
-    /// unusable for that. The generator is the only component that knows the resolved route.
+    /// <c>Describe&lt;T&gt;</c> used to pass <c>TEndpoint.Path</c> straight through, so an endpoint in
+    /// <c>/api/users</c> was described as <c>"/{id}"</c>. The descriptor list is public API and its
+    /// obvious use is a diagnostics or discovery page, for which every grouped entry was useless. The
+    /// generator is the only component that knows the chain, so it bakes the chain into the call and
+    /// the prefixes themselves are read at runtime from each group's <c>Prefix</c>.
     /// </remarks>
     [Fact]
-    public void DescriptorPath_IsGroupRelativeNotResolved_KnownBug()
+    public void DescriptorPath_IsTheResolvedRoute()
     {
         const string assemblyName = "Fixtures.DescriptorPaths";
         var generated = EndpointGeneratorHarness.RunAndLoad(assemblyName, FixtureSources.Corpus);
 
         var descriptors = GeneratedEndpointHost.Descriptors(generated, assemblyName);
 
-        var getUser = Assert.Single(descriptors.Where(d => d.Name == "GetUser"));
-        Assert.Equal("/{id}", getUser.Path);
+        Assert.Equal("/api/users/{id}", Assert.Single(descriptors.Where(d => d.Name == "GetUser")).Path);
+        Assert.Equal("/api/users/", Assert.Single(descriptors.Where(d => d.Name == "ListUsers")).Path);
+        Assert.Equal("/api/products/", Assert.Single(descriptors.Where(d => d.Name == "ListProducts")).Path);
 
-        var listUsers = Assert.Single(descriptors.Where(d => d.Name == "ListUsers"));
-        Assert.Equal("/", listUsers.Path);
-
-        // An ungrouped endpoint's path happens to be right, which is what hides this.
-        var health = Assert.Single(descriptors.Where(d => d.Name == "HealthCheck"));
-        Assert.Equal("/health", health.Path);
+        // An ungrouped endpoint's path was always right, which is what hid this.
+        Assert.Equal("/health", Assert.Single(descriptors.Where(d => d.Name == "HealthCheck")).Path);
     }
 
     /// <summary>
-    /// Pins D-G3: <c>EndpointNameAttribute</c> is never read — the descriptor's name is always the
-    /// class name.
+    /// Every descriptor path matches a route the endpoint is actually registered at.
     /// </summary>
     /// <remarks>
-    /// The attribute ships in the Abstractions package and has exactly one plausible purpose, which
-    /// is to supply this name. Nothing in the generator looks at it, so it is dead weight that reads
-    /// like a feature.
+    /// The prefix chain in the descriptor and the <c>MapGroup</c> nesting in the mapping method come
+    /// from the same plan; this is what stops the two drifting apart again.
     /// </remarks>
     [Fact]
-    public void EndpointNameAttribute_IsIgnored_KnownBug()
+    public void DescriptorPaths_MatchTheRegisteredRoutes()
+    {
+        const string assemblyName = "Fixtures.DescriptorRoutes";
+        var generated = EndpointGeneratorHarness.RunAndLoad(assemblyName, FixtureSources.Corpus);
+
+        var routePaths = GeneratedEndpointHost
+            .MapAndCollectRoutes(generated, assemblyName)
+            .Select(route => route.RoutePattern.RawText!)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var descriptors = GeneratedEndpointHost.Descriptors(generated, assemblyName);
+
+        Assert.All(descriptors, descriptor => Assert.Contains(descriptor.Path, routePaths));
+    }
+
+    /// <summary>
+    /// <c>[EndpointDescriptorName]</c> names the descriptor; without it the class name is used.
+    /// </summary>
+    /// <remarks>
+    /// The attribute shipped in the Abstractions package with exactly one plausible purpose — to
+    /// supply this name — and nothing read it, so it was dead weight that read like a feature. It is
+    /// also renamed: its old short name, <c>EndpointName</c>, is taken by
+    /// <c>Microsoft.AspNetCore.Routing.EndpointNameAttribute</c>, whose namespace is an implicit
+    /// global using in every Web SDK project, so writing <c>[EndpointName("x")]</c> alongside
+    /// <c>using MintPlayer.AspNetCore.Endpoints;</c> was a CS0104 ambiguity error.
+    /// </remarks>
+    [Fact]
+    public void EndpointDescriptorNameAttribute_NamesTheDescriptor()
     {
         var source = $$"""
             {{Preamble}}
 
-            [MintPlayer.AspNetCore.Endpoints.EndpointName("Health")]
+            [EndpointDescriptorName("Health")]
+            public class HealthCheckEndpoint : IGetEndpoint
+            {
+                public static string Path => "/health";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+
+            public class UnnamedEndpoint : IGetEndpoint
+            {
+                public static string Path => "/unnamed";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var generated = Generated("Fixtures", source);
+
+        Assert.Contains("""Describe<global::Fixtures.HealthCheckEndpoint>("Health", "")""", generated);
+        Assert.Contains("""Describe<global::Fixtures.UnnamedEndpoint>("UnnamedEndpoint", "")""", generated);
+    }
+
+    /// <summary>
+    /// The attribute's short name is usable next to the library's own namespace import — which is the
+    /// point of the rename.
+    /// </summary>
+    /// <remarks>
+    /// The fixture is written the way a consumer writes it: <c>using MintPlayer.AspNetCore.Endpoints;</c>
+    /// plus the Web SDK's global usings, both supplied by the harness. Under the old name that
+    /// combination did not compile.
+    /// </remarks>
+    [Fact]
+    public void EndpointDescriptorNameAttribute_ShortNameIsNotAmbiguous()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            [EndpointDescriptorName("Health")]
             public class HealthCheckEndpoint : IGetEndpoint
             {
                 public static string Path => "/health";
@@ -230,21 +287,20 @@ public class EndpointMetadataEmissionTests
             }
             """;
 
-        var generated = Generated("Fixtures", source);
+        var diagnostics = EndpointGeneratorHarness.RunAndCompile("Fixtures", source);
 
-        Assert.Contains("Describe<global::Fixtures.HealthCheckEndpoint>(\"HealthCheckEndpoint\")", generated);
-        Assert.DoesNotContain("\"Health\"", generated);
+        Assert.Empty(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error));
     }
 
     /// <summary>
-    /// Pins D-G21: each mapping looks its endpoint up with <c>valid.IndexOf(ep)</c>, which is a
-    /// linear scan per endpoint — quadratic in the number of endpoints, on every keystroke in the
-    /// IDE.
+    /// Each endpoint's factory field index is its position in emission order, and the descriptor list
+    /// uses the same order.
     /// </summary>
     /// <remarks>
-    /// The observable contract is the numbering: field <c>_f{i}</c> belongs to the i-th endpoint in
-    /// emission order, and the descriptor list uses that same order. Replacing the scan with a
-    /// dictionary must keep that mapping intact, which is what this asserts.
+    /// The lookup behind that used to be <c>valid.IndexOf(ep)</c> — a linear scan per endpoint,
+    /// quadratic in the number of endpoints, on every keystroke in the IDE. It is a dictionary now,
+    /// and this is the observable contract the replacement has to keep: field <c>_f{i}</c> belongs to
+    /// the i-th endpoint in emission order, and emission order is the ordinal sort.
     /// </remarks>
     [Fact]
     public void FactoryFieldNumbering_FollowsEmissionOrder()
@@ -261,10 +317,24 @@ public class EndpointMetadataEmissionTests
 
         var generated = Generated("Fixtures", $"{Preamble}\n\n{endpoints}");
 
-        for (var i = 0; i < 12; i++)
+        // Ordinally, Endpoint10 and Endpoint11 sort between Endpoint1 and Endpoint2 — so this is a
+        // real assertion about the order, not a restatement of the source order.
+        var order = Enumerable.Range(0, 12)
+            .Select(i => $"Endpoint{i}")
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        for (var i = 0; i < order.Length; i++)
         {
-            Assert.Contains($"ObjectFactory<global::Fixtures.Endpoint{i}> _f{i} =", generated);
-            Assert.Contains($"Map<global::Fixtures.Endpoint{i}>(app, _f{i});", generated);
+            Assert.Contains($"ObjectFactory<global::Fixtures.{order[i]}> _f{i} =", generated);
+            Assert.Contains($"Map<global::Fixtures.{order[i]}>(app, _f{i});", generated);
         }
+
+        var describePositions = order
+            .Select(name => generated.IndexOf($"Describe<global::Fixtures.{name}>", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.All(describePositions, position => Assert.True(position >= 0));
+        Assert.Equal(describePositions.OrderBy(position => position), describePositions);
     }
 }

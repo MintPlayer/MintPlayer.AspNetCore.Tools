@@ -11,6 +11,16 @@ namespace MintPlayer.AspNetCore.Tools.Tests.SitemapXml;
 
 public class AddSitemapXmlTests
 {
+    private sealed class SubstituteSitemapXml : ISitemapXml
+    {
+        public int PageCount(int total, int perPage) => 0;
+
+        public IEnumerable<MintPlayer.AspNetCore.SitemapXml.Abstractions.Data.Sitemap> GetSitemapIndex<T>(
+            IEnumerable<T> items, int perPage, Func<int, int, string> urlFunc)
+            where T : MintPlayer.Timestamps.IUpdateTimestamp
+            => [];
+    }
+
     private static MvcOptions ResolveMvcOptions(IServiceCollection services)
         => services.BuildServiceProvider().GetRequiredService<IOptions<MvcOptions>>().Value;
 
@@ -65,12 +75,14 @@ public class AddSitemapXmlTests
     }
 
     /// <summary>
-    /// Pins PRD defect D-S10: there is no idempotence guard, so a second <c>AddSitemapXml()</c> —
-    /// two libraries each doing their own setup, say — inserts a second formatter instance. Both
-    /// then run the same negotiation and the response is written by whichever landed at index 0.
+    /// PRD defect D-S10: a second <c>AddSitemapXml()</c> — two libraries each doing their own
+    /// setup, say — used to insert a second formatter instance, leaving two formatters running the
+    /// same negotiation with the response written by whichever landed at index 0. Guarded the same
+    /// way <c>MintPlayer.AspNetCore.OpenSearch</c> guards its own formatter, with
+    /// <c>IsInstanceOfType</c>.
     /// </summary>
     [Fact]
-    public void AddSitemapXml_CalledTwice_InsertsTheFormatterTwice_KnownBug()
+    public void AddSitemapXml_CalledTwice_InsertsTheFormatterOnce()
     {
         var services = new ServiceCollection();
 
@@ -78,22 +90,41 @@ public class AddSitemapXmlTests
         services.AddSitemapXml();
 
         var options = ResolveMvcOptions(services);
-        Assert.Equal(2, options.OutputFormatters.OfType<SitemapFormatter>().Count());
+        Assert.Single(options.OutputFormatters.OfType<SitemapFormatter>());
+        Assert.IsType<SitemapFormatter>(options.OutputFormatters[0]);
     }
 
     /// <summary>
-    /// The service registration half of D-S10. The generated registration is additive too, so the
-    /// last one wins on resolve while both stay in the collection.
+    /// The service-registration half of D-S10. The generated <c>AddSitemapXmlServices()</c> is
+    /// additive, so idempotence has to be enforced at this level.
     /// </summary>
     [Fact]
-    public void AddSitemapXml_CalledTwice_RegistersTheServiceTwice_KnownBug()
+    public void AddSitemapXml_CalledTwice_RegistersTheServiceOnce()
     {
         var services = new ServiceCollection();
 
         services.AddSitemapXml();
         services.AddSitemapXml();
 
-        Assert.Equal(2, services.Count(d => d.ServiceType == typeof(ISitemapXml)));
+        var descriptor = Assert.Single(services, d => d.ServiceType == typeof(ISitemapXml));
+        Assert.Equal(ServiceLifetime.Scoped, descriptor.Lifetime);
+    }
+
+    /// <summary>
+    /// The other side of that guard: an app that registered its own <c>ISitemapXml</c> first keeps
+    /// it. Skipping registration when one is already present is what makes the call idempotent, and
+    /// not clobbering a deliberate substitution is the useful consequence.
+    /// </summary>
+    [Fact]
+    public void AddSitemapXml_DoesNotReplaceAnAlreadyRegisteredService()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ISitemapXml>(new SubstituteSitemapXml());
+
+        services.AddSitemapXml();
+
+        var provider = services.BuildServiceProvider();
+        Assert.IsType<SubstituteSitemapXml>(provider.GetRequiredService<ISitemapXml>());
     }
 
     // ── the configuring overload ──────────────────────────────────────────────────────────────

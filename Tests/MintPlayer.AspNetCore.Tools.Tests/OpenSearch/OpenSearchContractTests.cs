@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using Microsoft.AspNetCore.Mvc;
 using MintPlayer.AspNetCore.OpenSearch;
 using MintPlayer.AspNetCore.OpenSearch.Abstractions;
 using Xunit;
@@ -17,11 +16,24 @@ public class OpenSearchContractTests
     private static readonly Assembly Library = typeof(OpenSearchExtensions).Assembly;
 
     [Fact]
-    public void Abstractions_ExportsOnlyIOpenSearchService()
+    public void Abstractions_ExportsTheServiceAndItsRedirect()
     {
-        var exported = Abstractions.GetExportedTypes();
+        var exported = Abstractions.GetExportedTypes().OrderBy(t => t.Name).ToArray();
 
-        Assert.Equal([typeof(IOpenSearchService)], exported);
+        Assert.Equal([typeof(IOpenSearchService), typeof(OpenSearchRedirect)], exported);
+    }
+
+    /// <summary>
+    /// The contract package must stay framework-free: it is the one a consumer implements, and it
+    /// used to drag in the whole of ASP.NET because <c>PerformSearch</c> returned an MVC
+    /// <c>RedirectResult</c>.
+    /// </summary>
+    [Fact]
+    public void Abstractions_ReferencesNoAspNetCoreAssembly()
+    {
+        var referenced = Abstractions.GetReferencedAssemblies().Select(a => a.Name!).ToArray();
+
+        Assert.DoesNotContain(referenced, name => name!.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -44,19 +56,19 @@ public class OpenSearchContractTests
     }
 
     [Fact]
-    public void PerformSearch_ReturnsTaskOfRedirectResult()
+    public void PerformSearch_ReturnsTaskOfOpenSearchRedirect()
     {
         var method = typeof(IOpenSearchService).GetMethod(nameof(IOpenSearchService.PerformSearch))!;
 
-        Assert.Equal(typeof(Task<RedirectResult>), method.ReturnType);
+        Assert.Equal(typeof(Task<OpenSearchRedirect>), method.ReturnType);
         var parameter = Assert.Single(method.GetParameters());
         Assert.Equal(typeof(string), parameter.ParameterType);
         Assert.Equal("searchTerms", parameter.Name);
     }
 
     /// <summary>
-    /// Both parameters are declared <c>string?</c>, which is honest: D-S18 means the library hands
-    /// the implementation null on every single call.
+    /// Both parameters are declared <c>string?</c> — the query can genuinely be absent, e.g. a bare
+    /// GET of the search endpoint with no query string.
     /// </summary>
     [Theory]
     [InlineData(nameof(IOpenSearchService.ProvideSuggestions))]
@@ -71,31 +83,41 @@ public class OpenSearchContractTests
     }
 
     /// <summary>
-    /// Pins the abstraction leak: <c>PerformSearch</c> returns an MVC <see cref="RedirectResult"/>,
-    /// so a would-be zero-dependency contract package drags in the whole MVC framework reference and
-    /// forces every implementation — including a non-MVC one — to construct an MVC action result.
-    /// A URL plus a permanence flag would say the same thing with no dependency. And the parts of
-    /// <c>RedirectResult</c> that carry meaning (<c>Permanent</c>, <c>PreserveMethod</c>) are
-    /// discarded by the caller anyway (D-S23), so the type is paying its cost for nothing.
+    /// <c>OpenSearchRedirect</c> carries exactly the three things the endpoint needs, and nothing a
+    /// consumer would have to reference a framework to construct.
     /// </summary>
     [Fact]
-    public void IOpenSearchService_LeaksMvcRedirectResult_KnownGap()
+    public void OpenSearchRedirect_IsAValueLikeRecordOfUrlAndTwoFlags()
     {
-        var method = typeof(IOpenSearchService).GetMethod(nameof(IOpenSearchService.PerformSearch))!;
-        var returned = method.ReturnType.GetGenericArguments()[0];
+        Assert.True(typeof(OpenSearchRedirect).IsSealed);
+        Assert.Equal(
+            ["Permanent", "PreserveMethod", "Url"],
+            typeof(OpenSearchRedirect).GetProperties().Select(p => p.Name).OrderBy(n => n).ToArray());
 
-        Assert.Equal("Microsoft.AspNetCore.Mvc", returned.Namespace);
-        Assert.NotNull(returned.GetProperty(nameof(RedirectResult.Permanent)));
-        Assert.NotNull(returned.GetProperty(nameof(RedirectResult.PreserveMethod)));
+        Assert.Equal(new OpenSearchRedirect("/x"), new OpenSearchRedirect("/x"));
+        Assert.NotEqual(new OpenSearchRedirect("/x"), new OpenSearchRedirect("/x", Permanent: true));
+    }
+
+    /// <summary>Both flags default to false, so <c>new OpenSearchRedirect(url)</c> means a 302.</summary>
+    [Fact]
+    public void OpenSearchRedirect_FlagsDefaultToFalse()
+    {
+        var redirect = new OpenSearchRedirect("/x");
+
+        Assert.False(redirect.Permanent);
+        Assert.False(redirect.PreserveMethod);
     }
 
     [Fact]
-    public void OpenSearchOptions_ExposesTheSevenDocumentedSettings()
+    public void OpenSearchOptions_ExposesTheDocumentedSettings()
     {
         var names = typeof(OpenSearchOptions).GetProperties().Select(p => p.Name).OrderBy(n => n).ToArray();
 
         Assert.Equal(
-            ["Contact", "Description", "ImageUrl", "OsdxEndpoint", "SearchUrl", "ShortName", "SuggestUrl"],
+            [
+                "Contact", "Description", "ImageHeight", "ImageType", "ImageUrl", "ImageWidth",
+                "OsdxEndpoint", "SearchTermsParameter", "SearchUrl", "ShortName", "SuggestUrl",
+            ],
             names);
     }
 
@@ -106,31 +128,54 @@ public class OpenSearchContractTests
     }
 
     /// <summary>
-    /// Pins D-S27's premise from the test side: every option is declared non-nullable <c>string</c>
-    /// yet is in fact null on a default instance, which is what makes the null-fallback chains in
-    /// <c>MapOpenSearch</c> necessary.
+    /// D-S27 fixed: the options that are genuinely absent by default are annotated <c>string?</c>,
+    /// so the signature no longer lies to a consumer reading it under <c>Nullable=enable</c>.
     /// </summary>
-    [Fact]
-    public void OpenSearchOptions_PropertiesAreDeclaredNonNullableButDefaultToNull_KnownGap()
+    [Theory]
+    [InlineData(nameof(OpenSearchOptions.OsdxEndpoint))]
+    [InlineData(nameof(OpenSearchOptions.SearchUrl))]
+    [InlineData(nameof(OpenSearchOptions.SuggestUrl))]
+    [InlineData(nameof(OpenSearchOptions.ImageUrl))]
+    [InlineData(nameof(OpenSearchOptions.ShortName))]
+    [InlineData(nameof(OpenSearchOptions.Description))]
+    [InlineData(nameof(OpenSearchOptions.Contact))]
+    public void OpenSearchOptions_UnsetStringProperty_IsNullableAnnotatedAndNull(string propertyName)
     {
-        var options = new OpenSearchOptions();
-        var context = new NullabilityInfoContext();
+        var property = typeof(OpenSearchOptions).GetProperty(propertyName)!;
 
-        foreach (var property in typeof(OpenSearchOptions).GetProperties())
-        {
-            Assert.Equal(typeof(string), property.PropertyType);
-            Assert.Equal(NullabilityState.NotNull, context.Create(property).ReadState);
-            Assert.Null(property.GetValue(options));
-        }
+        Assert.Equal(typeof(string), property.PropertyType);
+        Assert.Equal(NullabilityState.Nullable, new NullabilityInfoContext().Create(property).ReadState);
+        Assert.Null(property.GetValue(new OpenSearchOptions()));
     }
 
     /// <summary>
-    /// The formatter and the <c>HttpContext</c> extensions must stay internal — they are
-    /// implementation detail reachable from tests only through InternalsVisibleTo.
+    /// The other half of D-S27: an option that is non-nullable must actually carry a value. These
+    /// three do, via field initialisers.
+    /// </summary>
+    [Fact]
+    public void OpenSearchOptions_NonNullableProperties_HaveDefaults()
+    {
+        var options = new OpenSearchOptions();
+
+        Assert.Equal("q", options.SearchTermsParameter);
+        Assert.Equal("image/png", options.ImageType);
+        Assert.Equal(16, options.ImageWidth);
+        Assert.Equal(16, options.ImageHeight);
+
+        var context = new NullabilityInfoContext();
+        Assert.Equal(NullabilityState.NotNull, context.Create(typeof(OpenSearchOptions).GetProperty(nameof(OpenSearchOptions.SearchTermsParameter))!).ReadState);
+        Assert.Equal(NullabilityState.NotNull, context.Create(typeof(OpenSearchOptions).GetProperty(nameof(OpenSearchOptions.ImageType))!).ReadState);
+    }
+
+    /// <summary>
+    /// The formatter, the <c>HttpContext</c> extensions and the <c>string</c> extensions must stay
+    /// internal — implementation detail reachable from tests only through InternalsVisibleTo.
     /// </summary>
     [Theory]
     [InlineData("MintPlayer.AspNetCore.OpenSearch.Formatters.XmlSerializerOutputFormatter")]
     [InlineData("MintPlayer.AspNetCore.OpenSearch.Extensions.HttpContextExtensions")]
+    [InlineData("MintPlayer.AspNetCore.OpenSearch.Extensions.StringExtensions")]
+    [InlineData("MintPlayer.AspNetCore.OpenSearch.OpenSearchMarker")]
     public void ImplementationDetail_IsNotExported(string typeName)
     {
         var type = Library.GetType(typeName);
@@ -183,37 +228,34 @@ public class OpenSearchContractTests
     }
 
     /// <summary>
-    /// <c>NullIfEmpty</c> is public on <c>string?</c> in both this package and SitemapXml — the
-    /// ambiguity D-S9 describes. Pinned here so the fix is visible as a signature change.
+    /// D-S9 fixed: <c>NullIfEmpty</c> is internal in both packages now. While it was public on
+    /// <c>string?</c> in this package *and* in SitemapXml, an app installing both with implicit
+    /// usings on got an ambiguous-call error on every use.
     /// </summary>
     [Fact]
-    public void NullIfEmpty_IsPublic_KnownGap()
+    public void NullIfEmpty_IsInternal()
     {
-        var method = typeof(MintPlayer.AspNetCore.OpenSearch.Extensions.StringExtensions)
-            .GetMethod("NullIfEmpty", BindingFlags.Public | BindingFlags.Static);
+        var type = typeof(MintPlayer.AspNetCore.OpenSearch.Extensions.StringExtensions);
 
-        Assert.NotNull(method);
-        Assert.True(method.IsPublic);
-    }
-
-    [Theory]
-    [InlineData(null, null)]
-    [InlineData("", null)]
-    [InlineData("x", "x")]
-    public void NullIfEmpty_MapsOnlyTheEmptyStringToNull(string? input, string? expected)
-    {
-        Assert.Equal(expected, MintPlayer.AspNetCore.OpenSearch.Extensions.StringExtensions.NullIfEmpty(input));
+        Assert.False(type.IsPublic);
+        Assert.Null(type.GetMethod("NullIfEmpty", BindingFlags.Public | BindingFlags.Static));
+        Assert.NotNull(type.GetMethod("NullIfEmpty", BindingFlags.NonPublic | BindingFlags.Static));
     }
 
     /// <summary>
-    /// Whitespace survives <c>NullIfEmpty</c>, so <c>OsdxEndpoint = "   "</c> reaches the
-    /// leading-slash check and throws rather than falling back to the default — the second half of
-    /// D-S9.
+    /// D-S9's second half: whitespace counts as absent, so <c>OsdxEndpoint = "   "</c> falls back to
+    /// the default instead of reaching the leading-slash check and throwing.
     /// </summary>
-    [Fact]
-    public void NullIfEmpty_DoesNotTrimWhitespace_KnownGap()
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("\t\r\n", null)]
+    [InlineData("x", "x")]
+    [InlineData(" x ", " x ")]
+    public void NullIfEmpty_MapsBlankToNullAndPreservesEverythingElse(string? input, string? expected)
     {
-        Assert.Equal("   ", MintPlayer.AspNetCore.OpenSearch.Extensions.StringExtensions.NullIfEmpty("   "));
+        Assert.Equal(expected, MintPlayer.AspNetCore.OpenSearch.Extensions.StringExtensions.NullIfEmpty(input));
     }
 
     [Fact]
@@ -224,5 +266,24 @@ public class OpenSearchContractTests
         Assert.Contains("MintPlayer.AspNetCore.OpenSearch.Data.OpenSearchDescription", exported);
         Assert.Contains("MintPlayer.AspNetCore.OpenSearch.Data.Url", exported);
         Assert.Contains("MintPlayer.AspNetCore.OpenSearch.Data.Image", exported);
+    }
+
+    /// <summary>
+    /// D-S27 for the DTOs: every string member is nullable-annotated, because
+    /// <c>XmlSerializer</c> omits an unset element and the library relies on that (a null
+    /// <c>Contact</c> or <c>Image</c> must disappear rather than serialize empty).
+    /// </summary>
+    [Theory]
+    [InlineData(typeof(MintPlayer.AspNetCore.OpenSearch.Data.OpenSearchDescription))]
+    [InlineData(typeof(MintPlayer.AspNetCore.OpenSearch.Data.Url))]
+    [InlineData(typeof(MintPlayer.AspNetCore.OpenSearch.Data.Image))]
+    public void DataTypes_ReferenceProperties_AreNullableAnnotated(Type type)
+    {
+        var context = new NullabilityInfoContext();
+
+        foreach (var property in type.GetProperties().Where(p => !p.PropertyType.IsValueType))
+        {
+            Assert.Equal(NullabilityState.Nullable, context.Create(property).ReadState);
+        }
     }
 }

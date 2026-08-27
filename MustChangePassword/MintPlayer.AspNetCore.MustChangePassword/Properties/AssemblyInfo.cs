@@ -1,4 +1,4 @@
 using System.Runtime.CompilerServices;
 
-// MustChangePasswordService<,> and MustChangePasswordInfo are internal.
+// MustChangePasswordService<,> is internal.
 [assembly: InternalsVisibleTo("MintPlayer.AspNetCore.Tools.Tests")]

@@ -74,6 +74,41 @@ public class AuthenticationBuilderExtensionsTests
         Assert.Equal(TimeSpan.FromMinutes(5), options.ExpireTimeSpan);
     }
 
+    /// <summary>
+    /// D-M41 fixed: <c>ExpireTimeSpan</c> bounds the server-side ticket only, so the browser was told
+    /// nothing and kept the cookie for the whole browsing session. <c>Cookie.MaxAge</c> puts the same
+    /// five minutes on the wire.
+    /// </summary>
+    [Fact]
+    public void AddMustChangePasswordUserIdCookie_BoundsTheBrowserSideLifetimeToo()
+    {
+        using var provider = BuildProvider();
+
+        var options = GetOptions(provider, Scheme);
+
+        Assert.Equal(options.ExpireTimeSpan, options.Cookie.MaxAge);
+    }
+
+    /// <summary>
+    /// D-M33 fixed: the flow's cookie is explicitly hardened rather than left on the framework
+    /// defaults — <c>SameAsRequest</c> (which would send it over plain HTTP) and <c>Lax</c>.
+    /// </summary>
+    [Fact]
+    public void AddMustChangePasswordUserIdCookie_SetsSafeCookieDefaults()
+    {
+        using var provider = BuildProvider();
+
+        var options = GetOptions(provider, Scheme);
+
+        Assert.Equal(CookieSecurePolicy.Always, options.Cookie.SecurePolicy);
+        Assert.Equal(SameSiteMode.Strict, options.Cookie.SameSite);
+        Assert.True(options.Cookie.HttpOnly);
+
+        var untouched = new CookieAuthenticationOptions();
+        Assert.NotEqual(untouched.Cookie.SecurePolicy, options.Cookie.SecurePolicy);
+        Assert.NotEqual(untouched.Cookie.SameSite, options.Cookie.SameSite);
+    }
+
     [Fact]
     public void AddMustChangePasswordUserIdCookie_ReturnsTheSameBuilderForChaining()
     {
@@ -107,57 +142,61 @@ public class AuthenticationBuilderExtensionsTests
 
         Assert.Equal("App.Auth", appOptions.Cookie.Name);
         Assert.Equal(TimeSpan.FromHours(3), appOptions.ExpireTimeSpan);
+        Assert.Equal(CookieSecurePolicy.SameAsRequest, appOptions.Cookie.SecurePolicy);
         Assert.Equal(Scheme, ownOptions.Cookie.Name);
         Assert.Equal(TimeSpan.FromMinutes(5), ownOptions.ExpireTimeSpan);
         Assert.Equal(2, schemes.Count());
     }
 
     /// <summary>
-    /// D-M33: the extension configures nothing but the name and the expiry, so a cookie that carries
-    /// the user's live credential (D-M23) inherits the framework defaults —
-    /// <c>SameAsRequest</c>, meaning it will be sent over plain HTTP, and <c>Lax</c>. Pinned as the
-    /// current defaults; changing them is a breaking behaviour change and needs the owner's call.
+    /// D-M33 fixed: there is an <c>Action&lt;CookieAuthenticationOptions&gt;</c> overload, and it runs
+    /// after the library's defaults so it can override any of them — which a host served over plain
+    /// HTTP has to do for <c>SecurePolicy</c>.
     /// </summary>
     [Fact]
-    public void AddMustChangePasswordUserIdCookie_SetsNoSecurePolicyOrSameSiteOfItsOwn_KnownGap()
+    public void AddMustChangePasswordUserIdCookie_ConfigureOverload_RunsAfterTheDefaults()
     {
-        using var provider = BuildProvider();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        services.AddAuthentication().AddMustChangePasswordUserIdCookie(o =>
+        {
+            o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+            o.ExpireTimeSpan = TimeSpan.FromMinutes(2);
+        });
 
+        using var provider = services.BuildServiceProvider();
         var options = GetOptions(provider, Scheme);
-        var untouched = new CookieAuthenticationOptions();
 
-        Assert.Equal(untouched.Cookie.SecurePolicy, options.Cookie.SecurePolicy);
-        Assert.Equal(untouched.Cookie.SameSite, options.Cookie.SameSite);
         Assert.Equal(CookieSecurePolicy.SameAsRequest, options.Cookie.SecurePolicy);
-        Assert.True(options.Cookie.HttpOnly, "the framework default, not something the library sets");
+        Assert.Equal(TimeSpan.FromMinutes(2), options.ExpireTimeSpan);
+
+        // Untouched defaults survive.
+        Assert.Equal(Scheme, options.Cookie.Name);
+        Assert.Equal(SameSiteMode.Strict, options.Cookie.SameSite);
     }
 
-    /// <summary>
-    /// D-M33: there is no overload taking an <c>Action&lt;CookieAuthenticationOptions&gt;</c>, so a
-    /// consumer cannot tighten the cookie or shorten the window without re-registering the scheme
-    /// by hand and duplicating the literal name.
-    /// </summary>
     [Fact]
-    public void AddMustChangePasswordUserIdCookie_HasNoConfigureOverload_KnownGap()
+    public void AddMustChangePasswordUserIdCookie_HasAParameterlessAndAConfigureOverload()
     {
         var overloads = typeof(AuthenticationBuilderExtensions)
             .GetMethods(BindingFlags.Public | BindingFlags.Static)
             .Where(m => m.Name == nameof(AuthenticationBuilderExtensions.AddMustChangePasswordUserIdCookie))
+            .Select(m => m.GetParameters().Select(p => p.ParameterType).ToArray())
             .ToArray();
 
-        var single = Assert.Single(overloads);
-        var parameter = Assert.Single(single.GetParameters());
-        Assert.Equal(typeof(AuthenticationBuilder), parameter.ParameterType);
+        Assert.Equal(2, overloads.Length);
+        Assert.Contains(overloads, p => p.Length == 1 && p[0] == typeof(AuthenticationBuilder));
+        Assert.Contains(overloads, p => p.Length == 2 && p[1] == typeof(Action<CookieAuthenticationOptions>));
     }
 
     /// <summary>
-    /// Calling the extension twice throws, because <c>AddCookie</c> ultimately calls
-    /// <c>AddScheme</c> and the scheme name is fixed. Worth pinning: the failure surfaces at
-    /// <i>startup</i> with a message about a duplicate scheme, not at the call site, and an app that
-    /// also registers <c>"Identity.ChangePassword"</c> itself hits the same wall.
+    /// D-M40 fixed: the extension is idempotent. It used to end in <c>AddScheme</c> twice, which threw
+    /// on a duplicate scheme name — and threw when the scheme provider was first resolved, nowhere near
+    /// the call site.
     /// </summary>
     [Fact]
-    public void AddMustChangePasswordUserIdCookie_CalledTwice_ThrowsOnDuplicateScheme()
+    public async Task AddMustChangePasswordUserIdCookie_CalledTwice_RegistersTheSchemeOnce()
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -167,8 +206,43 @@ public class AuthenticationBuilderExtensionsTests
         builder.AddMustChangePasswordUserIdCookie();
 
         using var provider = services.BuildServiceProvider();
+        var schemeProvider = provider.GetRequiredService<IAuthenticationSchemeProvider>();
 
-        Assert.ThrowsAny<Exception>(() =>
-            provider.GetRequiredService<IAuthenticationSchemeProvider>().GetSchemeAsync(Scheme).GetAwaiter().GetResult());
+        var scheme = await schemeProvider.GetSchemeAsync(Scheme);
+        Assert.NotNull(scheme);
+        Assert.Single(await schemeProvider.GetAllSchemesAsync());
+        Assert.Equal(TimeSpan.FromMinutes(5), GetOptions(provider, Scheme).ExpireTimeSpan);
+    }
+
+    /// <summary>
+    /// A second call is not silently discarded either: its configuration is still applied, so an app
+    /// can harden or relax a cookie a library already registered.
+    /// </summary>
+    [Fact]
+    public async Task AddMustChangePasswordUserIdCookie_CalledTwice_AppliesTheSecondCallsConfiguration()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        var builder = services.AddAuthentication();
+        builder.AddMustChangePasswordUserIdCookie();
+        builder.AddMustChangePasswordUserIdCookie(o => o.ExpireTimeSpan = TimeSpan.FromMinutes(1));
+
+        using var provider = services.BuildServiceProvider();
+
+        Assert.Single(await provider.GetRequiredService<IAuthenticationSchemeProvider>().GetAllSchemesAsync());
+        Assert.Equal(TimeSpan.FromMinutes(1), GetOptions(provider, Scheme).ExpireTimeSpan);
+    }
+
+    [Fact]
+    public void AddMustChangePasswordUserIdCookie_ThrowsOnNullArguments()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions();
+        var builder = services.AddAuthentication();
+
+        Assert.Throws<ArgumentNullException>(() => ((AuthenticationBuilder)null!).AddMustChangePasswordUserIdCookie());
+        Assert.Throws<ArgumentNullException>(() => builder.AddMustChangePasswordUserIdCookie(null!));
     }
 }

@@ -86,20 +86,20 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// A non-numeric route value produces a 500, because the sample binds with <c>int.Parse</c> and
-    /// the library gives it no binding-failure story.
+    /// A non-numeric route value is a 400, because the sample's own binder now says so.
     /// </summary>
     /// <remarks>
-    /// Related to D-G5: there is no hook for "binding failed", so the natural implementation throws
-    /// and the framework turns that into a 500 where a 400 is correct. Pinned as an observation
-    /// about the library's design rather than a defect in the sample.
+    /// The library cannot translate this for the endpoint: a <c>FormatException</c> out of a
+    /// hand-written binder could equally be a bug, and guessing 400 would swallow real ones. What it
+    /// provides is the way to say it — <c>EndpointBindingException</c> — and the sample uses it, which
+    /// is the point of demonstrating it here. Left unsaid, this is still a 500.
     /// </remarks>
     [Fact]
-    public async Task GetTypedEndpoint_NonNumericRouteValue_Returns500_KnownGap()
+    public async Task GetTypedEndpoint_NonNumericRouteValue_Returns400()
     {
         var response = await Client.GetAsync("/api/users/not-a-number");
 
-        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
@@ -112,32 +112,63 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// An empty POST body reaches the handler as null and faults inside user code.
+    /// An empty POST body is a 400.
     /// </summary>
     /// <remarks>
-    /// D-G5 observed end to end: <c>ReadFromJsonAsync</c> returns null for a zero-length body, the
-    /// bridge launders it through <c>request!</c>, and the handler dereferences it. The client sees
-    /// a 500 for what is a malformed request.
+    /// It used to be a 500: <c>ReadFromJsonAsync</c> throws on a zero-length body, nothing caught it,
+    /// and the client was told the server had failed.
     /// </remarks>
     [Fact]
-    public async Task PostTypedEndpoint_EmptyBody_Returns500_KnownBug()
+    public async Task PostTypedEndpoint_EmptyBody_Returns400()
     {
         using var content = new StringContent(string.Empty, System.Text.Encoding.UTF8, "application/json");
 
         var response = await Client.PostAsync("/api/users/", content);
 
-        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
-    /// <summary>Malformed JSON is likewise a 500 rather than a 400. D-G5b.</summary>
+    /// <summary>Malformed JSON is likewise a 400 rather than a 500.</summary>
     [Fact]
-    public async Task PostTypedEndpoint_MalformedJson_Returns500_KnownBug()
+    public async Task PostTypedEndpoint_MalformedJson_Returns400()
     {
         using var content = new StringContent("{ not json", System.Text.Encoding.UTF8, "application/json");
 
         var response = await Client.PostAsync("/api/users/", content);
 
-        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    /// <summary>
+    /// A literal JSON <c>null</c> body is a 400 — the body clients genuinely send that used to be
+    /// laundered into user code as a null.
+    /// </summary>
+    [Fact]
+    public async Task PostTypedEndpoint_LiteralJsonNullBody_Returns400()
+    {
+        using var content = new StringContent("null", System.Text.Encoding.UTF8, "application/json");
+
+        var response = await Client.PostAsync("/api/users/", content);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    /// <summary>
+    /// A body the endpoint cannot read is a 415, not a 500.
+    /// </summary>
+    /// <remarks>
+    /// The sample registers no MVC formatters, so the JSON fallback is the only reader, and it reports
+    /// an unsupported content type as an <c>InvalidOperationException</c> — which reads like an
+    /// application bug rather than a request the endpoint will not accept.
+    /// </remarks>
+    [Fact]
+    public async Task PostTypedEndpoint_UnsupportedContentType_Returns415()
+    {
+        using var content = new StringContent("name=Carol", System.Text.Encoding.UTF8, "text/plain");
+
+        var response = await Client.PostAsync("/api/users/", content);
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
     }
 
     [Fact]

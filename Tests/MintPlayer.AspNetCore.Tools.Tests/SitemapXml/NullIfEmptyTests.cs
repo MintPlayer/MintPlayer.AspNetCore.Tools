@@ -5,9 +5,9 @@ using Xunit;
 namespace MintPlayer.AspNetCore.Tools.Tests.SitemapXml;
 
 /// <summary>
-/// <c>StringExtensions.NullIfEmpty</c> exists for exactly one caller —
-/// <c>MapDefaultSitemapXmlStylesheet</c>'s <c>?? "/sitemap.xsl"</c> fallback — but it is
-/// <c>public</c>, so it is part of the package's surface.
+/// <c>StringExtensions.NullIfEmpty</c> is the single owner of "a blank stylesheet URL means not
+/// configured". It is <c>internal</c> (see D-S9 below) and reached here through
+/// <c>InternalsVisibleTo</c>.
 /// </summary>
 public class NullIfEmptyTests
 {
@@ -33,34 +33,38 @@ public class NullIfEmptyTests
     }
 
     /// <summary>
-    /// Pins PRD defect D-S9: the comparison is against <c>string.Empty</c> only, so whitespace
-    /// survives and becomes a route pattern. The consequence is asserted end-to-end in
-    /// <see cref="MapDefaultSitemapXmlStylesheetTests"/>.
+    /// PRD defect D-S9: the comparison used to be against <c>string.Empty</c> only, so whitespace
+    /// survived and became a route pattern nobody could type. The consequence is asserted
+    /// end-to-end in <see cref="MapDefaultSitemapXmlStylesheetTests"/>.
     /// </summary>
     [Theory]
     [InlineData(" ")]
     [InlineData("   ")]
     [InlineData("\t")]
-    public void NullIfEmpty_WhitespaceOnly_SurvivesAsANonNullValue_KnownBug(string value)
+    [InlineData("\r\n")]
+    public void NullIfEmpty_WhitespaceOnly_ReturnsNull(string value)
     {
-        Assert.Equal(value, value.NullIfEmpty());
+        Assert.Null(value.NullIfEmpty());
     }
 
     /// <summary>
-    /// Second half of D-S9: the extension is <c>public</c>, and
+    /// Second half of D-S9: the extension is no longer part of the package's public surface.
     /// <c>MintPlayer.AspNetCore.OpenSearch</c> exports an identically named extension on the same
-    /// receiver type — an app installing both packages with <c>ImplicitUsings</c> gets an
-    /// ambiguous-call error. Pinned by reflection so making either one <c>internal</c> shows up
-    /// here as an intentional change.
+    /// receiver type, so while both were <c>public</c> an app installing both packages with
+    /// <c>ImplicitUsings</c> on got an ambiguous-call error on <c>value.NullIfEmpty()</c>.
     /// </summary>
+    /// <remarks>
+    /// Asserted by reflection rather than by a compile-time reference, because the thing being
+    /// pinned is the visibility itself — a future "make this public again, it's handy" would
+    /// silently re-break every consumer of both packages.
+    /// </remarks>
     [Fact]
-    public void NullIfEmpty_IsPublicOnBothPackages_KnownBug()
+    public void NullIfEmpty_IsNotPartOfThePublicSurface()
     {
-        var sitemapExtension = typeof(StringExtensions)
-            .GetMethod(nameof(StringExtensions.NullIfEmpty), BindingFlags.Public | BindingFlags.Static);
-
-        Assert.NotNull(sitemapExtension);
-        Assert.True(typeof(StringExtensions).IsPublic);
-        Assert.Equal("MintPlayer.AspNetCore.SitemapXml.Extensions", typeof(StringExtensions).Namespace);
+        Assert.False(typeof(StringExtensions).IsPublic);
+        Assert.False(typeof(StringExtensions).IsVisible);
+        Assert.Empty(typeof(StringExtensions).GetMethods(BindingFlags.Public | BindingFlags.Static | BindingFlags.DeclaredOnly));
+        Assert.NotNull(typeof(StringExtensions)
+            .GetMethod(nameof(StringExtensions.NullIfEmpty), BindingFlags.NonPublic | BindingFlags.Static));
     }
 }

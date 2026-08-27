@@ -570,6 +570,79 @@ would take the whole test host down — so the test stays skipped and the questi
 is right, the defect changes from "crashes the compiler" to "silently discards endpoints", which is
 quieter and arguably worse.
 
+### A second round of corrections, from fixing (M9)
+
+Executing the code disproved seven predictions. *Fixing* it disproved four more, including one
+of my own prescriptions.
+
+**D-G22 — NOT a defect, and the proposed fix was impossible.** Claimed: verb interfaces implement
+`Methods` as explicit non-virtual statics, so a class cannot override it while implementing
+`IGetEndpoint`, and implementing two verb interfaces is an error rather than the union. Measured in
+every arity: a class **can** declare `public static IEnumerable<string> Methods` and it **wins** — a
+class member beats an interface's default implementation. Two verb interfaces give `CS8705` ("no
+most specific implementation"), which the class resolves by declaring `Methods`, yielding exactly
+the union. And the fix I suggested cannot be written: an implicit `static virtual Methods` in a
+derived interface does not implement the base member, it **hides** it (`CS0108` plus `CS0535` on
+every implementer). The interface shape is unchanged; all three behaviours are now pinned and
+documented in the README.
+
+**D-G8 — misattributed.** The compiler-generated attributes originally observed in
+`endpoint.Metadata` did not come from the attribute transfer at all: ASP.NET Core also contributes
+the handler *delegate's* attributes, and that delegate is a compiler-generated lambda inside the
+library. They are still present after the fix, correctly. Whether an endpoint *class* even carries
+a type-level `NullableContextAttribute` depends on where Roslyn puts the uniform nullable context —
+in the test assembly it lands on the **module**, so no fixture type carried one, meaning the
+original test passed for the wrong reason. It now uses purpose-built fixture attributes.
+
+**D-S21 — my prescribed fix does not work.** The register said to set `ObjectResult.ContentTypes`
+"so the formatter is forced regardless of `Accept`". It is not forced:
+`DefaultOutputFormatterSelector` **intersects** the declared content types with the sorted `Accept`
+header, and an empty intersection under `ReturnHttpNotAcceptable = true` is precisely the path that
+yields no formatter and therefore the 406. Declaring the content type makes the strict case no
+better. Fixed instead by writing the description through the OSDX formatter directly (preset
+`ContentType`, `ContentTypeIsServerDefined = true`), bypassing negotiation for byte-identical
+output.
+
+**The XSLT premise — wrong.** The register implied `XslCompiledTransform` cannot run the shipped
+`version="2.0"` stylesheet. Measured: it loads and transforms it, producing byte-identical output,
+because a version above the processor triggers *forwards-compatible processing* rather than a
+failure. The downgrade to `1.0` is still correct, but for a different reason: in that mode an
+unrecognised XSLT element is silently ignored instead of reported, so a future authoring mistake
+would produce a quietly wrong page. The test now loads and transforms rather than reading the
+attribute.
+
+**D-G17 — unreachable, as suspected, and quieter than feared.** Confirmed while fixing: every
+member of a cycle has a parent, so `rootGroups` came out empty and the cyclic groups *and their
+endpoints* were silently **dropped** rather than overflowing the stack. Now reported as a new
+MPEP005, with a visited set in `EmitGroupTree` regardless. The skipped test runs.
+
+**D-G27 — root cause found, and it was not in this repo's code.**
+`GeneratorExtensions.ProduceCode` in `MintPlayer.SourceGenerators.Tools` registers the source output
+on `CompilationProvider.Combine(producer)`. A `Compilation` has no value equality — `Clone()`
+*guarantees* inequality — and the `Producer` was a fresh object too, so the output could never cache
+however well `Models.cs` compared. The `IEquatable` implementations were correct all along and
+simply could not matter. Fixed by registering on a value-equal model with `WithTrackingName`
+throughout.
+
+Smaller ones: **D-M27** is three bare-`throw` sites covering three modes (the other two surfaced as
+`UnauthorizedAccessException`), not "three sites, five modes" — five modes, five types now, so the
+outcome matched but the mapping did not. **D-M33**'s "no `SameSite`" is accurate but the *effective*
+default was already `Lax`, so the change is `Lax` → `Strict`, not "none → something". **D-M22**'s
+blast radius is narrower than stated: it only bit `AddIdentityCore`-without-MVC hosts, since
+ASP.NET Core registers the accessor itself. **D-M3** is unreachable (`HstsOptions.ExcludedHosts` is
+get-only and framework-populated). **The `<PackageTags>` claim was wrong** for the middleware folder
+— only one of those four projects had the copy-pasted value, and the real defect there was the
+comma separator (NuGet expects `;`).
+
+**Naming collisions are systemic, not incidental.** D-G26 turned out to be one instance of a habit:
+`EndpointNameAttribute` vs `Microsoft.AspNetCore.Routing.EndpointNameAttribute`, `LoggerExtensions`
+vs `Microsoft.Extensions.Logging.LoggerExtensions`, and — introduced by D-M21's own rename —
+`ChangePassword.EndpointRouteBuilderExtensions` vs
+`Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions`. All three shadow a type that is an
+implicit global using in a Web SDK project, making the library's type unnamable from consumer code
+without full qualification. Extension-method call sites are unaffected, which is why it went
+unnoticed. Worth a naming rule rather than three separate fixes.
+
 **The common thread.** Seven predictions were wrong: three outright (D-S1 latent, D-S15 and D-G19
 not defects) and four in their mechanism or symptom (D-G5, D-G7, D-M19, D-S21). Every one was a
 claim about framework behaviour — `XmlSerializer` namespace resolution, MVC content negotiation,
@@ -654,6 +727,61 @@ Not implemented. Each changes a published package's public surface.
    has a test pinning current behaviour plus a note saying why it was not fixed.
 8. No test hard-codes a UTC offset, a drive letter, `Environment.NewLine`, or a
    culture-sensitive format (R4, verified by grep).
+
+## Results
+
+**988 tests, 0 failures, 0 skipped. 98.9% line coverage (1393/1408).** Zero build warnings, down
+from 206.
+
+| Assembly | Lines | Rate |
+|---|---:|---:|
+| MintPlayer.AspNetCore.ChangePassword | 23/23 | 100.0% |
+| MintPlayer.AspNetCore.Endpoints | 126/129 | 97.7% |
+| MintPlayer.AspNetCore.Endpoints.Abstractions | 40/40 | 100.0% |
+| MintPlayer.AspNetCore.Endpoints.Generator | 596/608 | 98.0% |
+| MintPlayer.AspNetCore.Hsts | 35/35 | 100.0% |
+| MintPlayer.AspNetCore.LoggerProviders | 105/105 | 100.0% |
+| MintPlayer.AspNetCore.MustChangePassword | 82/82 | 100.0% |
+| MintPlayer.AspNetCore.MustChangePassword.Abstractions | 30/30 | 100.0% |
+| MintPlayer.AspNetCore.NoSniff | 14/14 | 100.0% |
+| MintPlayer.AspNetCore.OpenSearch | 165/165 | 100.0% |
+| MintPlayer.AspNetCore.OpenSearch.Abstractions | 1/1 | 100.0% |
+| MintPlayer.AspNetCore.SitemapXml | 82/82 | 100.0% |
+| MintPlayer.AspNetCore.SitemapXml.Abstractions | 65/65 | 100.0% |
+| MintPlayer.AspNetCore.SubDirectoryViews | 29/29 | 100.0% |
+| MintPlayer.Timestamps | 0/0 | n/a — four interfaces, no executable IL |
+| **Total** | **1393/1408** | **98.9%** |
+
+Path resolution against `git ls-files`: **81 matched, 0 ambiguous, 0 unmatched.**
+
+### How this number was measured, and a correction to an earlier one
+
+The figure is **normalized then max-merged**, which is what the coverage server does: each report
+path is first resolved to its repo-relative form by suffix-matching against `git ls-files`, and only
+then are the two reports merged with "covered by any session = covered".
+
+An earlier pass of this document reported **88.7%**, computed by max-merging on the *raw* report
+paths. That was wrong, and understated the result: the two reports express the same files under
+different prefixes (`Endpoints/…` from the repo root vs `MintPlayer.AspNetCore.Endpoints/…` from the
+`Endpoints/` prefix), so keying on the raw filename treats one file as two and defeats the merge
+entirely for any library instrumented by both test projects. `MintPlayer.AspNetCore.Endpoints`
+appeared as 50.8% and is actually 97.7%.
+
+The lesson generalises past this document: **a coverage number is only meaningful together with the
+merge rule that produced it**, and the merge rule has to be the server's.
+
+### What is deliberately not covered
+
+- **`MintPlayer.Timestamps`** — four interface declarations, no executable IL. Nothing to cover;
+  its real contract (`T : IUpdateTimestamp` as consumed by `GetSitemapIndex`) is exercised by the
+  SitemapXml service tests, plus two reflection shape-guards.
+- **`MintPlayer.AspNetCore.Endpoints`, 3 lines** and **`.Generator`, 12 lines** — defensive branches
+  unreachable without reflection, and generator paths that require a malformed compilation the
+  driver cannot construct. Each is commented where it sits.
+
+Note the earlier prediction that `MustChangePassword.Abstractions` could *never* appear in a report
+for lack of instrumentable IL was wrong twice over: it appeared from the first run, and it is now at
+100%.
 
 ## Risks
 

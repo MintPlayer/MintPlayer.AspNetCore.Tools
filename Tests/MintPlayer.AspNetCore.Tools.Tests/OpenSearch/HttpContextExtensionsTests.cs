@@ -163,13 +163,13 @@ public class HttpContextExtensionsTests
     }
 
     /// <summary>
-    /// Pins that the <c>?? new RouteData()</c> fallback in <c>ExecuteResultAsync</c> is dead code:
-    /// <c>HttpContext.GetRouteData()</c> never returns null — with no routing feature at all it
-    /// still hands back an empty <see cref="RouteData"/>. Reported as a new finding for M9; the
-    /// line cannot be covered.
+    /// D-S32 fixed: the <c>?? new RouteData()</c> fallback in <c>ExecuteResultAsync</c> was dead
+    /// code and is gone. <c>HttpContext.GetRouteData()</c> never returns null — with no routing
+    /// feature at all it still hands back an empty <see cref="RouteData"/>, which is exactly what
+    /// reaches the executor.
     /// </summary>
     [Fact]
-    public async Task WriteModelAsync_NoRoutingFeature_GetRouteDataIsAlreadyNonNull_KnownGap()
+    public async Task WriteModelAsync_NoRoutingFeature_ForwardsTheEmptyRouteData()
     {
         var (context, executor) = CreateContext();
 
@@ -177,6 +177,32 @@ public class HttpContextExtensionsTests
 
         await context.WriteModelAsync(new OpenSearchDescription());
 
-        Assert.Empty(executor.Context!.RouteData.Values);
+        Assert.NotNull(executor.Context!.RouteData);
+        Assert.Empty(executor.Context.RouteData.Values);
+    }
+
+    [Fact]
+    public async Task WriteModelAsync_WithoutContentType_LeavesContentTypesEmpty()
+    {
+        var (context, executor) = CreateContext();
+
+        await context.WriteModelAsync(new OpenSearchDescription());
+
+        Assert.Empty(executor.Result!.ContentTypes);
+    }
+
+    /// <summary>
+    /// The suggest endpoint uses this to pin its response to
+    /// <c>application/x-suggestions+json</c> (D-S22) rather than assigning the header by hand and
+    /// letting the JSON formatter overwrite it.
+    /// </summary>
+    [Fact]
+    public async Task WriteModelAsync_WithContentType_DeclaresItOnTheObjectResult()
+    {
+        var (context, executor) = CreateContext();
+
+        await context.WriteModelAsync(new object?[] { "a" }, "application/x-suggestions+json");
+
+        Assert.Equal(["application/x-suggestions+json"], executor.Result!.ContentTypes.ToArray());
     }
 }

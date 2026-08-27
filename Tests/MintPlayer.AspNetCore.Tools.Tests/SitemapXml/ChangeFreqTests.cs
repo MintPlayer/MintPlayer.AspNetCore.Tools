@@ -21,6 +21,9 @@ public class ChangeFreqTests
     [InlineData(ChangeFreq.Daily, "daily")]
     [InlineData(ChangeFreq.Monthly, "monthly")]
     [InlineData(ChangeFreq.Yearly, "yearly")]
+    [InlineData(ChangeFreq.Always, "always")]
+    [InlineData(ChangeFreq.Weekly, "weekly")]
+    [InlineData(ChangeFreq.Never, "never")]
     public void EveryMember_CarriesItsLowercaseSpecValue(ChangeFreq value, string expected)
     {
         Assert.Equal(expected, XmlNameOf(value));
@@ -31,6 +34,9 @@ public class ChangeFreqTests
     [InlineData(ChangeFreq.Daily, "daily")]
     [InlineData(ChangeFreq.Monthly, "monthly")]
     [InlineData(ChangeFreq.Yearly, "yearly")]
+    [InlineData(ChangeFreq.Always, "always")]
+    [InlineData(ChangeFreq.Weekly, "weekly")]
+    [InlineData(ChangeFreq.Never, "never")]
     public void EveryMember_SerializesToItsSpecValue(ChangeFreq value, string expected)
     {
         var document = XmlTestHelpers.SerializeToDocument(new UrlSet(
@@ -44,53 +50,54 @@ public class ChangeFreqTests
     }
 
     /// <summary>
-    /// Pins PRD defect D-S3: the sitemap protocol defines seven values and the enum ships four.
-    /// <c>weekly</c> is the most-used value in real sitemaps and cannot be expressed at all.
+    /// PRD defect D-S3: the enum now covers all seven <c>changefreq</c> values the sitemap protocol
+    /// defines. <c>weekly</c> — the most-used value in real sitemaps — could not be expressed at
+    /// all before.
     /// </summary>
+    /// <remarks>
+    /// The three additions are APPENDED, not inserted in spec order, so the underlying integers of
+    /// the original four are untouched for anyone who persisted them. That is what makes the
+    /// declaration order asserted here load-bearing rather than cosmetic.
+    /// </remarks>
     [Fact]
-    public void ChangeFreq_IsMissingTheAlwaysWeeklyAndNeverSpecValues_KnownGap()
+    public void ChangeFreq_CoversEverySpecValue()
     {
         var declared = Enum.GetValues<ChangeFreq>().Select(XmlNameOf).ToArray();
 
-        Assert.Equal(["hourly", "daily", "monthly", "yearly"], declared);
-        Assert.DoesNotContain("weekly", declared);
-        Assert.DoesNotContain("always", declared);
-        Assert.DoesNotContain("never", declared);
+        Assert.Equal(["hourly", "daily", "monthly", "yearly", "always", "weekly", "never"], declared);
     }
 
     /// <summary>
-    /// Second half of D-S3 — the practical consequence: an existing sitemap using <c>weekly</c>
-    /// cannot be read back at all, it throws rather than falling back.
+    /// Second half of D-S3, and PRD defect D-S30: reading back a real-world sitemap containing
+    /// <c>weekly</c> used to throw rather than fall back — the gap ran in both directions.
     /// </summary>
     [Fact]
-    public void Deserializing_AWeeklyChangeFreq_Throws_KnownGap()
+    public void Deserializing_AWeeklyChangeFreq_Succeeds()
     {
         const string xml = """
             <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>a</loc><changefreq>weekly</changefreq></url></urlset>
             """;
 
-        var exception = Assert.Throws<InvalidOperationException>(() => XmlTestHelpers.Deserialize<UrlSet>(xml));
-
-        Assert.Contains("weekly", exception.InnerException!.Message);
+        Assert.Equal(ChangeFreq.Weekly, XmlTestHelpers.Deserialize<UrlSet>(xml).Urls[0].ChangeFreq);
     }
 
     /// <summary>
-    /// Pins the first half of PRD defect D-S4: <c>Hourly</c> is member zero, so it is what every
-    /// unset <c>Url.ChangeFreq</c> reports. The fix is a nullable property or a
-    /// <c>ShouldSerializeChangeFreq</c>, not a reordering — reordering silently changes the
-    /// meaning of persisted ints.
+    /// First half of PRD defect D-S4. <c>Hourly</c> is still member zero — renumbering would break
+    /// every persisted value — but <c>Url.ChangeFreq</c> is a <c>ChangeFreq?</c>, so an unset
+    /// property is <see langword="null"/> and no longer silently claims hourly churn.
     /// </summary>
     [Fact]
-    public void DefaultChangeFreq_IsHourly_KnownBug()
+    public void AnUnsetChangeFreq_IsNullRatherThanHourly()
     {
+        Assert.Null(new Url { Loc = "https://example.org/a" }.ChangeFreq);
         Assert.Equal(ChangeFreq.Hourly, default(ChangeFreq));
         Assert.Equal(0, (int)ChangeFreq.Hourly);
     }
 
     /// <summary>
     /// The underlying numeric values are part of the wire format for anyone who persisted them,
-    /// which is exactly why D-S3 is marked <c>[decision]</c>: appending is safe, inserting in spec
-    /// order is not.
+    /// which is exactly why the D-S3 additions were appended: appending is safe, inserting in spec
+    /// order is not. The original four ordinals must never move.
     /// </summary>
     [Fact]
     public void MemberOrdinals_ArePinnedBecausePersistedValuesDependOnThem()
@@ -99,6 +106,9 @@ public class ChangeFreqTests
         Assert.Equal(1, (int)ChangeFreq.Daily);
         Assert.Equal(2, (int)ChangeFreq.Monthly);
         Assert.Equal(3, (int)ChangeFreq.Yearly);
+        Assert.Equal(4, (int)ChangeFreq.Always);
+        Assert.Equal(5, (int)ChangeFreq.Weekly);
+        Assert.Equal(6, (int)ChangeFreq.Never);
     }
 
     /// <summary>
@@ -120,6 +130,9 @@ public class ChangeFreqTests
     [InlineData("daily", ChangeFreq.Daily)]
     [InlineData("monthly", ChangeFreq.Monthly)]
     [InlineData("yearly", ChangeFreq.Yearly)]
+    [InlineData("always", ChangeFreq.Always)]
+    [InlineData("weekly", ChangeFreq.Weekly)]
+    [InlineData("never", ChangeFreq.Never)]
     public void EveryMember_RoundTrips(string wire, ChangeFreq expected)
     {
         var xml = $"""
