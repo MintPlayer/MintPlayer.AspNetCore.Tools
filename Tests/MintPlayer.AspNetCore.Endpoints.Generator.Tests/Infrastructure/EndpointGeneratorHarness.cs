@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Reflection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using MintPlayer.AspNetCore.Endpoints.Generator;
@@ -80,6 +81,57 @@ internal static class EndpointGeneratorHarness
 
         return [.. driverDiagnostics, .. updated.GetDiagnostics()];
     }
+
+    /// <summary>
+    /// Runs the generator, compiles the result and loads the emitted assembly into this process.
+    /// </summary>
+    /// <remarks>
+    /// Some of the generator's contract is only observable by executing what it emitted: the
+    /// resolved route of a grouped endpoint, the status code that reaches
+    /// <c>Produces&lt;TResponse&gt;</c>, the contents of the descriptor list. All three go through
+    /// static abstract interface members, which no amount of text matching can resolve.
+    /// <para>
+    /// Each caller must pass a distinct <paramref name="assemblyName"/>: loading two different
+    /// images under the same simple name leaves two unrelated <see cref="Type"/> identities in the
+    /// process, which produces cast failures that look nothing like their cause.
+    /// </para>
+    /// </remarks>
+    public static Assembly RunAndLoad(string assemblyName, params string[] sources)
+    {
+        CSharpGeneratorDriver
+            .Create(new EndpointGenerator())
+            .RunGeneratorsAndUpdateCompilation(CreateCompilation(assemblyName, sources), out var updated, out _);
+
+        using var stream = new MemoryStream();
+        var emitResult = updated.Emit(stream);
+
+        if (!emitResult.Success)
+        {
+            var errors = emitResult.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error);
+            throw new InvalidOperationException(
+                $"Fixture assembly '{assemblyName}' did not emit: {string.Join("; ", errors)}");
+        }
+
+        // RS1035 bans Assembly.Load for analyzers. This project is a test host, not an analyzer —
+        // the ban rides in with the Microsoft.CodeAnalysis package reference and does not apply.
+#pragma warning disable RS1035
+        return Assembly.Load(stream.ToArray());
+#pragma warning restore RS1035
+    }
+
+    /// <summary>
+    /// A driver that records incremental step reasons, for the caching tests.
+    /// </summary>
+    /// <remarks>
+    /// <c>IncrementalGeneratorOutputKind.None</c> disables nothing — the source output still has to
+    /// run, otherwise there are no output steps left to assert about.
+    /// </remarks>
+    public static GeneratorDriver CreateTrackingDriver()
+        => CSharpGeneratorDriver.Create(
+            [new EndpointGenerator().AsSourceGenerator()],
+            driverOptions: new GeneratorDriverOptions(
+                IncrementalGeneratorOutputKind.None,
+                trackIncrementalGeneratorSteps: true));
 
     /// <summary>
     /// The global usings that <c>Microsoft.NET.Sdk.Web</c> injects into every file when

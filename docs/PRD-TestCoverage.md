@@ -54,7 +54,8 @@ positive assertion in CI, not by trusting a green check.
 | SubDirectoryViews | 21 | Razor view-location expander |
 
 Reading this code to plan the tests turned up **27 defects**, several of which make a
-shipped feature non-functional. They are registered below. The coverage number is the
+shipped feature non-functional. Executing it then added **21 more** and disproved **3** — see
+"Corrections to this register" below. They are all registered there. The coverage number is the
 means; finding these is the actual value.
 
 ### P3 — Two structural traps that fail silently
@@ -259,11 +260,15 @@ Callback *ordering* must **not** be asserted against the fake. Real servers fire
 trustworthy against a real server loop, so it is asserted in the `TestServer` group.
 
 **R3.2 — `Microsoft.AspNetCore.TestHost`, not `WebApplicationFactory`, for the library
-integration tests.** Inline `new WebHostBuilder().UseTestServer()` pipelines need no
-entry-point assembly and no content-root probing — the latter being a genuine
+integration tests.** Inline `new HostBuilder().ConfigureWebHost(w => w.UseTestServer())`
+pipelines need no entry-point assembly and no content-root probing — the latter being a genuine
 Windows-vs-Linux hazard (`UseContentRoot(@"..\..\..\App")` fails outright on Linux).
 `WebApplicationFactory` is used in exactly one place, the TestApp end-to-end tests, where
 a real entry point is the thing under test.
+
+Note the builder shape: the older `new WebHostBuilder().UseTestServer()` is **deprecated on
+.NET 10** (ASPDEPR004/ASPDEPR008) and emits warnings on every use, so the `HostBuilder` +
+`ConfigureWebHost` form above is the one to copy.
 
 **R3.3 — `InternalsVisibleTo` on four assemblies.** Hsts, LoggerProviders,
 MustChangePassword and the Endpoints Generator expose their interesting types as
@@ -416,8 +421,6 @@ call.
 |---|---|
 | D-G1 | **The generator's three declared diagnostics are never reported.** `DiagnosticDescriptors` is `internal static` and referenced from nowhere; `<NoWarn>RS2008</NoWarn>` hid it. `README.md` documents MPEP001/002/003 as emitted. All three conditions *are* computed (`IsPartial`, `HasExistingBaseClass`, `HasMultipleGroups`) and used only to silently skip emission, leaving the user a raw `CS0115`/`CS0263`. The Tools package already provides `IDiagnosticReporter` + `ReportDiagnostics` and `LocationExtensions.FromSymbol`, so this is wiring, not new machinery. |
 | D-S18 | **OpenSearch search and suggest are non-functional, both halves.** The OSDX templates are emitted with no `{searchTerms}` macro, so a client has nowhere to put the query; *and* the handlers read `context.GetRouteValue("searchTerms")` on routes registered as literal patterns with no `{searchTerms}` token, so it is `null` on every request — including `?q=abc`. Fix together: emit `?q={{searchTerms}}` and read `Request.Query["q"]`. |
-| D-S1 | **`Url`'s child elements serialize into the empty namespace.** `Data/Url.cs` is `[XmlRoot("url")]` with no namespace, and its `loc`/`lastmod`/`changefreq` declare none either, so output is `<url xmlns="…/0.9"><loc xmlns="">…`. Not a valid sitemap — Google requires `loc` in the sitemap namespace. `Sitemap.cs` does it correctly, which is the asymmetry that hid it. |
-| D-S15 | `OpenSearchDescription.SearchForm` has the same empty-namespace defect. |
 | D-G17 | **Cyclic groups stack-overflow `csc`.** `EmitGroupTree` recurses through `childGroups` with no visited set. `A : IMemberOf<B>` + `B : IMemberOf<A>` ⇒ unbounded recursion ⇒ uncatchable `StackOverflowException` that kills the process. Must be fixed *before* it can be tested. |
 | D-M23 | **The user's plaintext current password is stored as an `"OldPassword"` claim in a client-side cookie.** Data-protection-encrypted, but the live credential round-trips to the browser and sits in the cookie jar for 5 minutes. Prefer holding the state server-side, or requiring re-entry. |
 | D-G25 | **The generated code only compiles in a `Microsoft.NET.Sdk.Web` project with implicit usings on.** It fully qualifies every *type* with `global::` — correctly immune to the consumer's imports — and then calls the *extension methods* `MapMethods`, `MapGroup` and `Produces`, which cannot be resolved from a `global::` type name; the declaring namespace has to be in scope. The emitted file contains no using directives at all. A consumer on plain `Microsoft.NET.Sdk` + `FrameworkReference Microsoft.AspNetCore.App`, or with `<ImplicitUsings>disable</ImplicitUsings>`, gets three `CS1061` errors pointing at generated source they cannot edit. Invisible until now because the sample TestApp is a Web SDK project. Fix: emit the usings, or call the extensions as static invocations. **Found by the "does the emitted code compile" test on its first run** — see R3.5 reason 2. |
@@ -476,6 +479,148 @@ Docs/metadata: `MustChangePassword/README.md` describes **HSTS**;
 `SubDirectoryViews/README.md` describes **SitemapXml**; three packages carry
 `<PackageTags>ASP.NET Core, Razor views</PackageTags>` wrongly; every
 `<PackageProjectUrl>` is a malformed 404.
+
+### Corrections to this register, from the empirical pass (M2–M8)
+
+The register above was written from **reading** the code. Writing the tests executed it, and
+three entries did not survive. They are corrected here rather than quietly edited, because the
+reasoning that produced them was wrong in a way worth remembering.
+
+**D-S1 — WRONG as stated. Latent, not a shipped-output defect.**
+Claimed: `Url`'s `loc`/`lastmod`/`changefreq` serialize as `<loc xmlns="">`, producing an invalid
+sitemap. Measured: nested inside a `UrlSet` they land correctly in the sitemap namespace. An
+`[XmlElement]` with no namespace **inherits the namespace of the mapping it is reached through**,
+and `UrlSet.Urls` supplies it. The empty namespace appears only with
+`XmlSerializer(typeof(Url))` as a document root — which `CanWriteType` makes unreachable. Both
+facts are now asserted, the valid nested shape as a regression guard and the root case as a
+`_KnownBug`, so a blind "fix" breaks a test.
+
+**D-S15 — WRONG. Does not reproduce. Struck.**
+Claimed: `OpenSearchDescription.SearchForm` has the same empty-namespace defect. Measured: it
+serializes as `<SearchForm xmlns="http://a9.com/-/spec/opensearch/1.1/">`. Same resolution rule as
+above — `OpenSearchDescription` carries `[XmlRoot(Namespace = …a9…)]`, so its unqualified members
+inherit it. Adding an explicit `Namespace` would be a no-op. The tests assert the correct
+namespace with remarks saying so.
+
+**D-S21 — WRONG as stated. The predicted 406 does not happen.**
+Claimed: a browser fetching the OSDX gets 406, because `RespectBrowserAcceptHeader = true` and the
+only capable formatter is registered for one media type. Measured against a live `TestServer`:
+**200 OK** with the correct content type and body. Two independent reasons, both verified — a
+browser's `Accept` ends in `*/*;q=0.8`, which matches the OSDX media type, and
+`MvcOptions.ReturnHttpNotAcceptable` **defaults to false**, so negotiation failure falls back to
+the first capable formatter instead of answering 406. `RespectBrowserAcceptHeader` only makes MVC
+*try* to honour the header; it is not the same switch.
+
+What survives is narrower and still worth fixing: the handler's manual `Response.ContentType` is
+dead code (negotiation sets it, and coincidentally picks the same value), and the endpoint works
+only because `ReturnHttpNotAcceptable` sits at its default. Setting that option — the documented
+way to make negotiation strict — gives a wildcard-free client a 406 with an empty body and no way
+to opt out. That coupling is what is now pinned.
+
+**D-G19 — WRONG. Not a defect. Struck.**
+Claimed: a group prefix plus `Path => "/"` composes to `/api/users/`, which does not match
+`/api/users`. Measured: **both match, 200 OK.** The composed pattern really is `/api/users/`, but
+ASP.NET Core routing treats the trailing empty segment as equivalent. Nothing to fix, and a test
+now exists to stop someone "normalising" the pattern on the strength of reading it.
+
+**D-G5 — right defect, wrong trigger.**
+Claimed: an empty request body binds to null, which the bridge launders through `request!`.
+Measured: `ReadFromJsonAsync` on a zero-length body **throws `JsonException`** — it does not return
+`default`. The null path is real and reachable, but via a **literal JSON `null` body**, which
+clients genuinely send. So D-G5 stands; the empty-body case is a separate 500-instead-of-400
+problem, not a route into it. Whitespace-only bodies behave like empty ones.
+
+**D-G7 — right defect, wrong symptom.**
+Claimed: a formatter that consumes the body then returns `NoValue` leaves the JSON fallback reading
+a drained stream and silently yielding null. Measured: the fallback **throws `JsonException`**. That
+is arguably worse than a silent null, because the error blames the client — a JSON parse failure at
+position 0 for a request whose body was valid JSON — for what is a double-read inside the library.
+
+**D-M19 — right defect, wrong (and milder) symptom.**
+Claimed: a null change-password URL throws `ArgumentNullException` from `Response.Redirect`.
+Measured: it does **not** throw. It sets 302 and never writes the `Location` header. An exception
+would at least surface as a 500 in the logs; this produces a syntactically valid response that no
+browser or password manager can follow, with nothing recorded anywhere. An empty string differs
+again — the header is written, empty. Both shapes are now pinned.
+
+**D-G13 — right defect, wrong symptom.** Claimed: `CS0101` from a duplicate type name. Measured:
+the shipped type lives in *metadata*, not the same compilation, so source silently wins. The
+generated `EndpointRouteBuilderExtensions` **shadows** the real one with zero errors and zero
+warnings, and calls to the shipped `MapEndpoint<T>()` still resolve. Silent shadowing is harder to
+diagnose than a compile error, not easier.
+
+**D-G12 — worse than recorded, and untestable as specified.** The register said to assert the
+`IndexOutOfRangeException` via `runResult.Results[0].Exception`. It never gets there: the throw is
+swallowed inside `MintPlayer.SourceGenerators.Tools`' `ProduceCode`, so there is **no generated
+file, no diagnostic, no exception on the result, and not even `CS8785`**. A malformed assembly name
+produces total silence, and the user meets it as `CS1061` at their own call site. The test asserts
+the silence.
+
+**D-G18 — unrefuted but not reproducible from a test.** Written as a determinism assertion, which
+passes: `HashSet<string>` enumerates identically for identical insertions *within one process*, and
+string hash randomization is per-process. So single-host tests structurally cannot catch the
+cross-process instability. The defect stands on code inspection; the route assertions sort before
+comparing so they are order-insensitive by construction.
+
+**D-G17 — possibly unreachable, deliberately not confirmed.** Reading the producer suggests every
+member of a cycle has a non-null parent, so none qualifies as a root group, `rootGroups` comes out
+empty, and the cyclic groups and their endpoints are silently **dropped** rather than overflowing
+the stack. Confirming that means running the recursion, and an uncatchable `StackOverflowException`
+would take the whole test host down — so the test stays skipped and the question stays open. If it
+is right, the defect changes from "crashes the compiler" to "silently discards endpoints", which is
+quieter and arguably worse.
+
+**The common thread.** Seven predictions were wrong: three outright (D-S1 latent, D-S15 and D-G19
+not defects) and four in their mechanism or symptom (D-G5, D-G7, D-M19, D-S21). Every one was a
+claim about framework behaviour — `XmlSerializer` namespace resolution, MVC content negotiation,
+routing's trailing-segment handling, `ReadFromJsonAsync`'s empty-input contract,
+`Response.Redirect`'s null handling — inferred from reading library code without executing the
+framework underneath it.
+
+Three lessons kept:
+
+1. *A defect found by reading is a hypothesis until it is executed.* The ratio here was roughly
+   one in four wrong, and the wrong ones were disproportionately the dramatic-sounding ones.
+2. *Assert the measured behaviour, with the reasoning in a remark.* Several of these tests now
+   exist specifically to stop a future reader "fixing" correct code — which is the failure mode a
+   plain deletion would have left open.
+3. *Being wrong about the symptom does not make the defect unreal.* Four of the seven were real
+   problems with a different mechanism, and in two cases (D-G7, D-M19) the measured behaviour was
+   **worse** than predicted. Downgrading a finding on the first contradicted detail would have
+   dropped them.
+
+### Additions to this register, from the empirical pass
+
+Found while writing the tests. Numbered continuing the existing scheme.
+
+| ID | Defect |
+|---|---|
+| D-S28 | **Every `Video` emits two `xsi:nil="true"` elements.** `FamilyFriendly` and `Live` lack the `ShouldSerialize*` methods every other optional member has (this is D-S5's consequence, and it is worse than "inconsistent"): the output is invalid against the video sitemap schema, *and* it drags the `xsi` namespace declaration back into responses that the formatter's `ns.Add("", "")` exists to keep clean. |
+| D-S29 | **A null `Url.Loc` emits a `<url>` with no `<loc>`**, and a null `Image.Location` emits an empty `<image:image>`. `loc` is required by both protocols, and the invalid document is produced with no exception. |
+| D-S30 | `ChangeFreq` is missing `weekly` in **both directions** — beyond D-S3's "cannot be written", deserializing a real-world sitemap containing `weekly` **throws**. |
+| D-S31 | The stylesheet guard is `IsNullOrEmpty`, so a whitespace `StylesheetUrl` still emits `href="   "` — D-S9's blind spot, in the formatter. |
+| D-S32 | `HttpContextExtensions.ExecuteResultAsync`'s `?? new RouteData()` is dead code: `GetRouteData()` returns an empty `RouteData` rather than null even with no routing feature. Uncoverable; delete it. |
+| D-S33 | The `"Website"` fallback in the OSDX `ShortName` chain is unreachable — a loaded assembly always has a `FullName`, so the chain can only yield the library's own name (D-S19). |
+| D-S34 | The OSDX `<Image>` dimensions are hard-coded 16×16 with no option, so a configured `/logo-512.png` is still advertised as 16×16. |
+| D-M40 | `AddMustChangePasswordUserIdCookie` is not idempotent: two calls (or an app that registers a scheme of the same name) fail with a duplicate-scheme error surfacing when `IAuthenticationSchemeProvider` is first resolved, not at the call site. |
+| D-M41 | **The credential-bearing cookie is a *session* cookie.** `ExpireTimeSpan = 5 min` bounds only the server-side ticket; no `expires`/`max-age` reaches the browser, so the cookie holding the plaintext password persists in the jar for the whole browser session, long after the ticket is dead. Distinct from D-M33. |
+| D-M42 | **D-M23 × D-M26 compound:** because the success path never signs out, the plaintext *former* password stays decryptable on the client after rotation. Neither defect alone implies this. |
+| D-M43 | `ChangePasswordSignInAsync` never verifies the supplied `oldPassword`. Verification is deferred a full request, so a garbage value still gets a ticket and the failure lands one request later as a bare `Exception`. |
+| D-M44 | `MustChangePasswordInfo.Email` is dead — read out of the ticket and never used, so the address is carried in the cookie for nothing. |
+| D-M45 | Identity's `IdentityError`s are discarded: a weak new password reports "unauthorized" instead of "needs a digit". |
+| D-M46 | `FileLoggerOptions.FileName` is declared non-nullable under `Nullable=enable` with no initialiser and is null by default — the same lie as D-S27, in a package D-S27's scope does not cover. |
+| D-M47 | The `Log.txt` fallback is a **relative** path, so an unconfigured host writes into whatever `Directory.GetCurrentDirectory()` happens to be. With D-M46, forgetting to configure produces logs in an unpredictable location instead of an error. |
+| D-M48 | `LoggerFileProvider.Dispose()` is empty, giving no flush or completion guarantee. Harmless only while `FileLogger` opens and closes the stream per call — so it is a **constraint on the D-M14 fix**, not just an observation: serialising writes by holding a stream open makes this a real leak. |
+| D-G25 | See the serious table above. |
+| D-G27 | **The generator's incremental pipeline never caches.** Over `Compilation.Clone()` — byte-identical content — `SourceOutput` comes back `Modified`, and so does a pure handler-body edit. The `IEquatable` implementations in `Models.cs` are correct (asserted directly) and buy nothing: something upstream of `ProduceCode` compares unequal on every compilation. Since only `Compilation` and `SourceOutput` are tracked (no `WithTrackingName` anywhere), a test cannot localise the cause further. This defeats the entire purpose of the equality ceremony in `Models.cs`, and means every keystroke in a consuming project re-runs the whole generator. |
+| D-G26 | **The library's `EndpointNameAttribute` collides by simple name with `Microsoft.AspNetCore.Routing.EndpointNameAttribute`.** That namespace is an implicit global using in a Web SDK project, so once a consumer adds `using MintPlayer.AspNetCore.Endpoints;`, writing `[EndpointName("x")]` is a `CS0104` ambiguity error. The attribute is unusable by its short name — and since D-G3 means the generator never reads it anyway, the two together say the type earns nothing. |
+
+Corrections to severity of existing entries, also from measurement:
+
+- **D-S6 is inconsistent, not merely wrong:** `PageCount(0, 1)` returns **0** while `PageCount(0, n>1)` returns **1**, because `-1/1` is `-1` but `-1/n` truncates to `0`.
+- **D-S12's `?>` case is defused** by `XmlWriter`, which rewrites it to `? >`; the document stays well-formed with a corrupted href. The bare-quote injection is the severe half.
+- **D-S27 (`throw new Exception()`) is three sites but five distinct outcomes**, collapsed onto two exception types. The first site conflates "no ticket at all" with "ticket present but malformed".
+- **`MapDefaultSitemapXmlStylesheet` does not require `AddSitemapXml()`** — `AddRouting()` alone supplies the options infrastructure, so it maps and serves. The intuitive expectation of a startup failure is wrong, and is now pinned.
 
 ### Requires a decision — breaking API changes **[decision]**
 

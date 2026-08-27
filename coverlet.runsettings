@@ -67,17 +67,32 @@
           <SkipAutoProps>false</SkipAutoProps>
 
           <!--
-          MEASURED, not copied. See the long note below for why the sibling repo's pattern
-          did not transfer.
+          MEASURED, and then re-measured after the first pattern proved to be fitted to an
+          unstable observation. Read this before changing it.
 
-          The four libraries consuming MintPlayer.SourceGenerators report 8 generated
-          documents under obj/. They do NOT exist on disk and are NOT git-tracked: they are
-          virtual PDB paths for source the generator only ever held in memory. The coverage
-          server therefore cannot resolve them against `git ls-files` and drops them
-          silently, so leaving them in makes the local denominator disagree with the
-          server's. Excluding them here makes the two agree.
+          The four libraries consuming MintPlayer.SourceGenerators report generated documents that
+          do NOT exist on disk and are NOT git-tracked: they are virtual paths for source the
+          generator only ever held in memory. The coverage server cannot resolve them against
+          `git ls-files` and drops them silently, so leaving them in makes the local denominator
+          disagree with the server.
+
+          The first attempt was **/obj/** alone, because that is where those paths pointed at the
+          time: obj/Release/net10.0/MintPlayer.SourceGenerators/.../Inject.g.cs. On a later run the
+          very same generator reported them under a TEMP directory instead
+          (.../AppData/Local/Temp/.../gen/MintPlayer.SourceGenerators/.../Inject.g.cs). Those two
+          files then sat OUTSIDE the repository root, which dropped coverlet's longest-common-prefix
+          <sources> from the repo root to "C:/" and re-prefixed every path in the report with
+          "Repos/MintPlayer.AspNetCore.Tools/" — turning 49 previously-resolvable files into
+          unmatched ones in a single stroke.
+
+          So the exclusion is by FILENAME, which is a property of the generated document, rather
+          than by location, which is not. **/obj/** is kept as a second line of defence for anything
+          else under obj that is not named *.g.cs.
+
+          Note **/*.g.cs also matches the SDK's own *.GlobalUsings.g.cs. That is harmless: those
+          files carry no coverable lines and never appeared in a report.
           -->
-          <ExcludeByFile>**/obj/**</ExcludeByFile>
+          <ExcludeByFile>**/*.g.cs,**/obj/**</ExcludeByFile>
 
           <!--
           ExcludeByFile is deliberately NOT SET YET. It must be decided by measurement
