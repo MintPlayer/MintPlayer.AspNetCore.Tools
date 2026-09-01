@@ -72,7 +72,7 @@ jobs:
       # hashFiles guard: a run that produced no report is a no-op rather than an upload of
       # nothing.
       if: always() && hashFiles('coverage/**/coverage.cobertura.xml') != ''
-      uses: MintPlayer/CodeCoverage/action@master
+      uses: MintPlayer/MintPlayer.Spark/apps/CodeCoverage/action@coverage-upload-v1
       with:
         # Must be exactly this value, not a "normalised" variant: it doubles as the OIDC
         # audience server-side.
