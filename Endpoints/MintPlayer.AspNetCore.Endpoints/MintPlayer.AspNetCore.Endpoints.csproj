@@ -1,14 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFrameworks>net10.0;net11.0</TargetFrameworks>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<OutputType>Library</OutputType>
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints</PackageId>
-		<Version>11.0.0</Version>
+		<Version>11.0.1-rc.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>Class-per-endpoint mapping library for ASP.NET Core with constructor injection, content negotiation, and source-generated endpoint discovery.</Description>
@@ -55,10 +55,27 @@
 	than only in Release.
 	-->
 	<PropertyGroup>
+		<!--
+		The analyzer is not TFM-specific, but the only mechanism that reliably packs it is a
+		TFM-specific one, and that runs once per inner build. Emitting from every inner build adds the
+		same file to the same package path N times: NuGet de-duplicates and the package is still
+		correct, but it warns (NU5118) once per extra TFM, which breaks the warning-clean build.
+
+		So: emit from the first inner build only. The first TFM is derived from TargetFrameworks
+		rather than written out, because a hardcoded 'net10.0' here becomes a silent defect the day
+		that TFM is dropped or reordered — the condition would simply never match and the package
+		would ship with no analyzer and no error, which is the same class of failure the comment
+		below describes.
+
+		Do not be tempted to hoist this onto BeforeTargets="GenerateNuspec" with <None Pack="true">
+		so it runs once for the outer build. That was measured: it packs with zero warnings and
+		produces a nupkg containing no analyzer at all.
+		-->
+		<_AnalyzerPackTfm>$(TargetFrameworks.Split(';')[0])</_AnalyzerPackTfm>
 		<TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackEndpointsGenerator</TargetsForTfmSpecificContentInPackage>
 	</PropertyGroup>
 
-	<Target Name="PackEndpointsGenerator">
+	<Target Name="PackEndpointsGenerator" Condition="'$(TargetFramework)' == '$(_AnalyzerPackTfm)'">
 		<MSBuild Projects="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
 		         Targets="GetTargetPath"
 		         Properties="Configuration=$(Configuration)"

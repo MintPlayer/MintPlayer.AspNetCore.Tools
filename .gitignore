@@ -365,3 +365,6 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Playwright MCP session artifacts (page snapshots, console logs)
+.playwright-mcp/
