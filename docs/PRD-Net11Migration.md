@@ -279,11 +279,18 @@ packages ship `lib/net10.0` and `lib/net11.0` at `11.0.1-rc.0`. Every acceptance
 | 7 — `global.json` matches what CI installs | Met. `dotnet --version` reports `11.0.100-rc.1.26425.128`. |
 | 8 — coverage collected for both TFMs, paths resolve | Met. 4 cobertura reports (2 projects × 2 TFMs), matched pairs. |
 
-**Coverage is unchanged: 1413/1577 on `master`, 1413/1577 on the branch.** Verified by re-running the
-full suite on `master` in a worktree and union-merging with the same script, rather than by comparing
-against a remembered number. Note this local union does **not** reproduce the 98.9% (1393/1408) in
-`docs/PRD-TestCoverage.md`; that figure is the coverage server's own merge. The two answer different
-questions and neither moved. Recorded so the gap is not mistaken for a regression later.
+**Coverage is unchanged and matches the recorded figure exactly: 1393/1408 = 98.9%, on `net10.0` and
+on `net11.0` alike.** Verified by re-running the full suite on `master` in a worktree and union-merging
+with the same script, rather than by comparing against a remembered number.
+
+Merging cobertura reports must key on the **resolved absolute path** (`<source>` + `filename`), not on
+`filename` alone. The two reports here are written with different source roots — the Tools.Tests report
+uses the repo root, the Generator.Tests report uses `<repo>/Endpoints/` — so the five
+`MintPlayer.AspNetCore.Endpoints*` files that appear in both are spelled differently. Keying on
+`filename` double-counts them, and because the Generator.Tests copies are largely uncovered (3.9% and
+37.5%) the error is one-sided: it inflates the denominator by 169 lines and reports 1413/1577 = 89.6%.
+That is a measurement artefact, not a coverage change. Recorded because it is an easy mistake to repeat,
+and because 89.6% looks exactly like a regression.
 
 ### Corrections to this document, from the empirical pass
 

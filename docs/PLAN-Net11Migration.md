@@ -296,21 +296,37 @@ milestone, and M0's spike answers held up under the real code.
 | Failures / skips | 0 / 0 | 0 / 0 on **each** TFM |
 | Build warnings | 36 × CS1591 | 72 × CS1591 (2 × 36, one per inner build) |
 | Pack warnings | 2 × NU5128 | 2 × NU5128 |
-| Merged coverage | 1413/1577 = 89.6% | 1413/1577 = 89.6% |
+| Merged coverage | 1393/1408 = 98.9% | 1393/1408 = 98.9% on **each** TFM |
 | Shippable packages | 15 @ `net10.0` | 15 @ `net10.0` + `net11.0` |
 
 **The test count is identical per TFM, which is the point.** 988 on `net11.0` matching 988 on
 `net10.0` means no test silently stopped being discovered when the TFM changed — the failure mode
 M5's gate was written to catch.
 
-**Coverage is unchanged, and the PRD's 98.9% figure needs a footnote.** Acceptance criterion 8 was
-checked by re-running the full suite on `master` in a worktree and union-merging its cobertura
-reports with the same script used on the branch. Both produce **exactly 1413/1577**. So the migration
-is coverage-neutral. The 98.9% (1393/1408) recorded in `docs/PRD-TestCoverage.md` is a *different
-measurement* — the coverage server's own merge — not a number this local union reproduces, because
-the `Endpoints`/`Endpoints.Abstractions` entries that appear at 3.9% and 37.5% in the
-Generator.Tests report are counted differently. Nothing regressed; the two numbers answer different
-questions, and this is recorded so the discrepancy is not re-investigated later.
+**Coverage is unchanged and reproduces the recorded figure exactly: 1393/1408 = 98.9%**, on `master`
+and on both TFMs of the branch. Acceptance criterion 8 was checked by re-running the full suite on
+`master` in a worktree and union-merging its cobertura reports with the same script used on the
+branch.
+
+**A merge trap worth recording, because it manufactures a convincing false regression.** Cobertura
+reports must be merged on the **resolved absolute path** — `<source>` joined to `filename` — not on
+`filename` alone. The two reports here carry different source roots: Tools.Tests writes
+`C:/Repos/MintPlayer.AspNetCore.Tools/`, Generator.Tests writes
+`C:/Repos/MintPlayer.AspNetCore.Tools/Endpoints/`. The five `MintPlayer.AspNetCore.Endpoints*` files
+present in both are therefore spelled differently and do not deduplicate. Because the Generator.Tests
+copies of those files are largely uncovered (`Endpoints` 3.9%, `Endpoints.Abstractions` 37.5%), the
+double-count is one-sided: it adds 169 lines to the denominator and only 20 to the numerator, turning
+98.9% into 1413/1577 = 89.6%. This was measured, not hypothesised — the first pass of this milestone
+reported 89.6% and treated it as a real difference from the recorded 98.9%, which it was not. The
+coverage server's number was correct throughout.
+
+This is also a concrete instance of the `<UseSourceLink>false</UseSourceLink>` reasoning in
+`coverlet.runsettings`: the five duplicated basenames really do need unambiguous paths, and anything
+consuming these reports has to resolve them before comparing.
+
+Cross-checked against the coverage server itself, which reports **98.9%, 1393/1408 lines, 584/698
+branches, 64 files** for `f231192` on `master` — the same numbers the resolved-path merge produces
+locally. The upload pipeline is behaving correctly and needs no change for this migration.
 
 **Two pre-existing warning populations, neither caused by this work, neither fixed here.** Both were
 confirmed against `master` rather than assumed:
