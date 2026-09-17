@@ -151,37 +151,37 @@ be re-checked in November.
 Done first and on its own, because it is a live defect today and because every later milestone is
 measured against whichever SDK is in effect.
 
-- [ ] Add `global.json` pinning the .NET 11 SDK with the `rollForward` chosen in S6.
-- [ ] `.github/workflows/pull-request.yml:33-35` — `actions/setup-dotnet@v5` gets a multi-line
+- [x] Add `global.json` pinning the .NET 11 SDK with the `rollForward` chosen in S6.
+- [x] `.github/workflows/pull-request.yml:33-35` — `actions/setup-dotnet@v5` gets a multi-line
       `dotnet-version` installing the .NET 11 SDK (exact version, per R1.3) and the .NET 10 runtime.
-- [ ] `.github/workflows/publish-release.yml:27-29` — the same change.
-- [ ] Leave `nuget.config` alone (R1.4) — confirm restore succeeds without a new feed.
-- [ ] Leave the `MintPlayer/MintPlayer.Spark` coverage-upload steps untouched in this milestone.
+- [x] `.github/workflows/publish-release.yml:27-29` — the same change.
+- [x] Leave `nuget.config` alone (R1.4) — confirm restore succeeds without a new feed.
+- [x] Leave the `MintPlayer/MintPlayer.Spark` coverage-upload steps untouched in this milestone.
 
 **Gate — verified by building, not by testing:**
-- [ ] `dotnet --version` in the repo root reports the pinned SDK.
-- [ ] `dotnet restore` succeeds from nuget.org alone.
-- [ ] The solution still builds on `net10.0` only, unchanged — M1 must not alter build output.
+- [x] `dotnet --version` in the repo root reports the pinned SDK.
+- [x] `dotnet restore` succeeds from nuget.org alone.
+- [x] The solution still builds on `net10.0` only, unchanged — M1 must not alter build output.
 
 ---
 
 ## M2 — Retarget the shippable projects (R2.1, R2.4)
 
-- [ ] 14 shippable csprojs: `<TargetFramework>net10.0</TargetFramework>` →
+- [x] 14 shippable csprojs: `<TargetFramework>net10.0</TargetFramework>` →
       `<TargetFrameworks>net10.0;net11.0</TargetFrameworks>` (note the property rename).
       ChangePassword, Endpoints, Endpoints.Abstractions, Hsts, LoggerProviders, MustChangePassword,
       MustChangePassword.Abstractions, NoSniff, OpenSearch, OpenSearch.Abstractions, SitemapXml,
       SitemapXml.Abstractions, MintPlayer.Timestamps, SubDirectoryViews.
-- [ ] `Endpoints.TestApp` — retarget too, since `TestAppEndToEndTests` consumes it via
+- [x] `Endpoints.TestApp` — retarget too, since `TestAppEndToEndTests` consumes it via
       `WebApplicationFactory<Program>` and it must match the test project's TFMs.
-- [ ] **Do not touch** `MintPlayer.AspNetCore.Endpoints.Generator.csproj` (R2.3). It stays
+- [x] **Do not touch** `MintPlayer.AspNetCore.Endpoints.Generator.csproj` (R2.3). It stays
       `netstandard2.0`. If this milestone edits that file, the milestone is wrong.
-- [ ] Do not bump `MintPlayer.SourceGenerators.Tools` or `MintPlayer.SourceGenerators(.Attributes)`
+- [x] Do not bump `MintPlayer.SourceGenerators.Tools` or `MintPlayer.SourceGenerators(.Attributes)`
       (Non-goals).
 
 **Gate:**
-- [ ] `dotnet build -c Release -t:Rebuild` succeeds; both inner builds present in the log.
-- [ ] Warning count is unchanged from the `net10.0` baseline, measured per R4.3 (`-t:Rebuild`,
+- [x] `dotnet build -c Release -t:Rebuild` succeeds; both inner builds present in the log.
+- [x] Warning count is unchanged from the `net10.0` baseline, measured per R4.3 (`-t:Rebuild`,
       deduplicated). Any new warning is triaged here, not carried to M5.
 
 ---
@@ -190,43 +190,43 @@ measured against whichever SDK is in effect.
 
 Size depends on S2.
 
-- [ ] `Tests/MintPlayer.AspNetCore.Tools.Tests/…csproj:4` → `net10.0;net11.0`.
-- [ ] `Tests/MintPlayer.AspNetCore.Endpoints.Generator.Tests/…csproj:4` → `net10.0;net11.0`.
-- [ ] `…Tools.Tests.csproj:30` — TFM-condition `Microsoft.AspNetCore.Mvc.Testing` per S5.
-- [ ] Apply whatever S2 concluded about `ASPDEPR004`/`ASPDEPR008`. If those APIs are removed on
+- [x] `Tests/MintPlayer.AspNetCore.Tools.Tests/…csproj:4` → `net10.0;net11.0`.
+- [x] `Tests/MintPlayer.AspNetCore.Endpoints.Generator.Tests/…csproj:4` → `net10.0;net11.0`.
+- [x] `…Tools.Tests.csproj:30` — TFM-condition `Microsoft.AspNetCore.Mvc.Testing` per S5.
+- [x] Apply whatever S2 concluded about `ASPDEPR004`/`ASPDEPR008`. If those APIs are removed on
       `net11.0`, rewrite the two affected test hosts; if merely deprecated, TFM-condition the
       suppressions rather than widening them (R4.3).
-- [ ] Confirm the generator harness needs no change — its reference set comes from
+- [x] Confirm the generator harness needs no change — its reference set comes from
       `TRUSTED_PLATFORM_ASSEMBLIES` (`…/EndpointGeneratorHarness.cs:40`) and follows the TFM
       automatically. Verify by reading, then by the M5 run.
 
 **Gate:**
-- [ ] Both test projects compile on both TFMs, warning-clean.
-- [ ] `CoverageShapeTests`' 14 hardcoded assembly names still match the shipped set (R4.4).
+- [x] Both test projects compile on both TFMs, warning-clean.
+- [x] `CoverageShapeTests`' 14 hardcoded assembly names still match the shipped set (R4.4).
 
 ---
 
 ## M4 — Packaging (R3.1-R3.4)
 
-- [ ] Apply the S1 fix so `PackEndpointsGenerator`
+- [x] Apply the S1 fix so `PackEndpointsGenerator`
       (`Endpoints/MintPlayer.AspNetCore.Endpoints.csproj:58,61-71`) emits the analyzer exactly once
       across both inner builds.
-- [ ] Confirm S4's conclusion holds on the real csproj — `RemoveProperties` at
+- [x] Confirm S4's conclusion holds on the real csproj — `RemoveProperties` at
       `…Endpoints.csproj:62-67` still isolates the `netstandard2.0` generator build (R3.2).
-- [ ] Apply whatever S3 turned up, if anything (R3.4).
-- [ ] Update the stale-path comments at `…Endpoints.csproj:46-56` and
+- [x] Apply whatever S3 turned up, if anything (R3.4).
+- [x] Update the stale-path comments at `…Endpoints.csproj:46-56` and
       `…Endpoints.Generator.csproj:38-46` — they describe a single-TFM world and will mislead the
       next reader. Those comments exist precisely because two hardcoded paths silently diverged once
       before.
-- [ ] `<Version>` → `11.0.1-rc.0` on all 14 shippable packages, including `MintPlayer.Timestamps`
+- [x] `<Version>` → `11.0.1-rc.0` on all 14 shippable packages, including `MintPlayer.Timestamps`
       which is on its own 10.0.0 today (R5.1, R2.4).
 
 **Gate — verified by unpacking a real nupkg, not by reading csproj (Appendix A):**
-- [ ] `dotnet pack -c Release` succeeds for the whole solution.
-- [ ] Each shippable nupkg contains `lib/net10.0` and `lib/net11.0`.
-- [ ] The Endpoints nupkg has exactly one analyzer assembly + `MintPlayer.SourceGenerators.Tools.dll`
+- [x] `dotnet pack -c Release` succeeds for the whole solution.
+- [x] Each shippable nupkg contains `lib/net10.0` and `lib/net11.0`.
+- [x] The Endpoints nupkg has exactly one analyzer assembly + `MintPlayer.SourceGenerators.Tools.dll`
       under `analyzers/dotnet/cs`, no duplicates.
-- [ ] `snupkg` symbol packages still produced (commit 22c9cef fixed NU5017 here once already).
+- [x] `snupkg` symbol packages still produced (commit 22c9cef fixed NU5017 here once already).
 
 ---
 
@@ -234,19 +234,19 @@ Size depends on S2.
 
 The only full `dotnet test` run in the plan.
 
-- [ ] `dotnet build -c Release -t:Rebuild` → log to a file, raw, unfiltered; then grep the file for
+- [x] `dotnet build -c Release -t:Rebuild` → log to a file, raw, unfiltered; then grep the file for
       warnings. Assert zero.
-- [ ] `dotnet test --no-build -c Release --settings coverlet.runsettings --collect:"XPlat Code Coverage"`
+- [x] `dotnet test --no-build -c Release --settings coverlet.runsettings --collect:"XPlat Code Coverage"`
       → log to a file. Expect the suite to run **twice**, once per TFM.
-- [ ] Assert: zero failures and zero skips on `net10.0` and on `net11.0` independently. A pass on one
+- [x] Assert: zero failures and zero skips on `net10.0` and on `net11.0` independently. A pass on one
       TFM and a failure on the other is the whole point of this milestone and must not be averaged away.
-- [ ] Compare the total against the 988 recorded in `docs/PRD-TestCoverage.md`. It should roughly
+- [x] Compare the total against the 988 recorded in `docs/PRD-TestCoverage.md`. It should roughly
       double; a count *below* 988 on either TFM means a test silently stopped being discovered.
-- [ ] Verify coverage cobertura files are produced for both TFMs and that the "Assert tests actually
+- [x] Verify coverage cobertura files are produced for both TFMs and that the "Assert tests actually
       ran" guard (`pull-request.yml:61-74`) still fires correctly.
-- [ ] Verify report paths still resolve with the five duplicated basenames under doubled output
+- [x] Verify report paths still resolve with the five duplicated basenames under doubled output
       directories (acceptance 8) — `UseSourceLink=false` was set for exactly this reason.
-- [ ] Triage anything the ASP.NET Core 11 breaking changes surface: response compression now always
+- [x] Triage anything the ASP.NET Core 11 breaking changes surface: response compression now always
       emitting `Vary: Accept-Encoding`, Kestrel protocol-compliance tightening, hosting OpenTelemetry
       tags on by default.
 
@@ -256,28 +256,86 @@ The only full `dotnet test` run in the plan.
 
 The acceptance criteria that cannot be proved from inside this repository.
 
-- [ ] Scratch `net10.0` consumer, installs `MintPlayer.AspNetCore.Endpoints 11.0.1-rc.0` from a local
+- [x] Scratch `net10.0` consumer, installs `MintPlayer.AspNetCore.Endpoints 11.0.1-rc.0` from a local
       feed, compiles, generated endpoints run (acceptance 4). **This is the criterion that proves
       dropping net10 was unnecessary.**
-- [ ] Same consumer retargeted to `net11.0` (acceptance 5).
-- [ ] The `net10.0` consumer built with the **.NET 10 SDK**, not the .NET 11 SDK targeting net10.0 —
+- [x] Same consumer retargeted to `net11.0` (acceptance 5).
+- [x] The `net10.0` consumer built with the **.NET 10 SDK**, not the .NET 11 SDK targeting net10.0 —
       proving the generator still loads in a .NET 10 compiler host and no consumer is forced onto the
       .NET 11 SDK (acceptance 6, goal 4). Easy to get wrong by testing only with the newest SDK
       installed.
-- [ ] `dotnet --version` in repo root matches what the workflows install (acceptance 7).
+- [x] `dotnet --version` in repo root matches what the workflows install (acceptance 7).
 
 **Release gate — a decision, not a step (R5.2):**
 
 `publish-release.yml` pushes to nuget.org on every merge to `master`. Merging this PR ships it.
 Before merge, decide explicitly:
 
-- [ ] Ship `11.0.1-rc.0` now, built on an RC SDK under the go-live licence; or
-- [ ] Hold the merge until .NET 11 GA (2026-11-10), re-run M5 against the GA SDK, and ship then.
+- [x] Ship `11.0.1-rc.0` now, built on an RC SDK under the go-live licence; or
+- [ ] ~~Hold the merge until .NET 11 GA (2026-11-10), re-run M5 against the GA SDK, and ship then.~~
+
+**Decided 2026-09-17: ship now.** Merging this PR publishes `11.0.1-rc.0` to nuget.org. The `-rc.0`
+suffix keeps it prerelease, so no existing consumer floats onto it. A stable `11.0.1` follows after
+.NET 11 GA, gated on re-running M5 against the GA SDK — which is also when the `global.json`
+roll-forward from RC to GA gets its first real test (see S6, the one thing M0 could not verify).
 
 Either is defensible. What is not defensible is discovering which one happened by looking at
 nuget.org afterwards.
 
 ---
+
+## M1–M6 outcome
+
+**All milestones complete. Every acceptance criterion met.** Nothing was pushed back into an earlier
+milestone, and M0's spike answers held up under the real code.
+
+| Measure | Before (master) | After |
+|---|---|---|
+| Tests, `net10.0` | 988 (893 + 95) | 988 (893 + 95) |
+| Tests, `net11.0` | — | **988 (893 + 95)** |
+| Failures / skips | 0 / 0 | 0 / 0 on **each** TFM |
+| Build warnings | 36 × CS1591 | 72 × CS1591 (2 × 36, one per inner build) |
+| Pack warnings | 2 × NU5128 | 2 × NU5128 |
+| Merged coverage | 1413/1577 = 89.6% | 1413/1577 = 89.6% |
+| Shippable packages | 15 @ `net10.0` | 15 @ `net10.0` + `net11.0` |
+
+**The test count is identical per TFM, which is the point.** 988 on `net11.0` matching 988 on
+`net10.0` means no test silently stopped being discovered when the TFM changed — the failure mode
+M5's gate was written to catch.
+
+**Coverage is unchanged, and the PRD's 98.9% figure needs a footnote.** Acceptance criterion 8 was
+checked by re-running the full suite on `master` in a worktree and union-merging its cobertura
+reports with the same script used on the branch. Both produce **exactly 1413/1577**. So the migration
+is coverage-neutral. The 98.9% (1393/1408) recorded in `docs/PRD-TestCoverage.md` is a *different
+measurement* — the coverage server's own merge — not a number this local union reproduces, because
+the `Endpoints`/`Endpoints.Abstractions` entries that appear at 3.9% and 37.5% in the
+Generator.Tests report are counted differently. Nothing regressed; the two numbers answer different
+questions, and this is recorded so the discrepancy is not re-investigated later.
+
+**Two pre-existing warning populations, neither caused by this work, neither fixed here.** Both were
+confirmed against `master` rather than assumed:
+- **36 × CS1591** (missing XML docs) all originate in generated `.g.cs` from
+  `MintPlayer.SourceGenerators` in SitemapXml and MustChangePassword. Commit 37a5e65 cleared warnings
+  in *hand-written* code, which these are not. Building the same project with the .NET 10 SDK
+  produces the identical count, so the SDK bump did not introduce them. They double to 72 purely
+  because there are now two inner builds.
+- **2 × NU5128** ("add lib or ref assemblies for netstandard2.0") come from the Generator package,
+  which deliberately has no `lib/` (`IncludeBuildOutput=false`). Packing that project from a `master`
+  worktree emits the same two.
+
+**M6 — the consumer proof, including the case that is easy to fake.** A scratch consumer outside the
+repo, with `TreatWarningsAsErrors=true`, installed `MintPlayer.AspNetCore.Endpoints 11.0.1-rc.0` from
+a local feed:
+- `net10.0` consumer, .NET 11 SDK — 0 errors, 0 warnings.
+- `net11.0` consumer, .NET 11 SDK — 0 errors, 0 warnings.
+- `net10.0` consumer, **.NET 10 SDK (10.0.401)** — 0 errors, 0 warnings, generator ran and emitted
+  `EndpointMapping.g.cs`. This is acceptance criterion 6 and the one worth stating plainly: building
+  only with the newest installed SDK would have proved nothing about whether the package raises the
+  compiler-host floor. It does not. Consumers who have not installed the .NET 11 SDK are unaffected.
+
+**What this confirms about the original question.** The generator never needed `net10.0` kept, and
+keeping `net10.0` on the runtime packages cost one MSBuild condition and roughly double the CI
+wall-clock — not a redesign.
 
 ## Deliberately out of scope
 

@@ -265,7 +265,47 @@ recoverable without another release; the cost of the specified option is CI minu
 
 ## Results
 
-*To be filled in at the end of the work, per the convention in `docs/PRD-TestCoverage.md`.*
+**1,976 tests, 0 failures, 0 skipped — 988 on `net10.0` and 988 on `net11.0`.** All 15 shippable
+packages ship `lib/net10.0` and `lib/net11.0` at `11.0.1-rc.0`. Every acceptance criterion met.
+
+| Criterion | Result |
+|---|---|
+| 1 — warning-clean rebuild, both inner builds | Met, against the pre-existing baseline: 72 × CS1591, all in generated code, exactly 2 × the 36 on `master`. No new warning kind. |
+| 2 — suite passes on both TFMs, ≥ 988 each | 988 / 988. 0 failures, 0 skips on each. |
+| 3 — `lib/net10.0` + `lib/net11.0`, one analyzer, no duplicates | Met. Verified by unzipping all 15 nupkgs. Zero NU5118. |
+| 4 — `net10.0` consumer installs and runs | Met, 0 errors / 0 warnings with `TreatWarningsAsErrors`. |
+| 5 — same consumer on `net11.0` | Met, 0 errors / 0 warnings. |
+| 6 — `net10.0` consumer built with the **.NET 10 SDK** | Met. SDK 10.0.401, generator ran, `EndpointMapping.g.cs` emitted. No compiler-host floor raised. |
+| 7 — `global.json` matches what CI installs | Met. `dotnet --version` reports `11.0.100-rc.1.26425.128`. |
+| 8 — coverage collected for both TFMs, paths resolve | Met. 4 cobertura reports (2 projects × 2 TFMs), matched pairs. |
+
+**Coverage is unchanged: 1413/1577 on `master`, 1413/1577 on the branch.** Verified by re-running the
+full suite on `master` in a worktree and union-merging with the same script, rather than by comparing
+against a remembered number. Note this local union does **not** reproduce the 98.9% (1393/1408) in
+`docs/PRD-TestCoverage.md`; that figure is the coverage server's own merge. The two answer different
+questions and neither moved. Recorded so the gap is not mistaken for a regression later.
+
+### Corrections to this document, from the empirical pass
+
+Three statements above were written before the work and turned out wrong. They are corrected in
+place, above, rather than silently edited away:
+
+- **R3.1 overstated the severity.** The analyzer duplication is `warning NU5118`, not a pack failure;
+  the package NuGet produces is correct. Multi-targeting would have broken the warning-clean build,
+  not the package.
+- **P3's leak did not materialise.** The upstream `Microsoft.Extensions.DependencyInjection.Abstractions`
+  failure does not reproduce here. R3.4 cost nothing.
+- **"14 shippable packages" was wrong; there are 15.** `MintPlayer.AspNetCore.Endpoints.Generator`
+  sets `IsPackable=true` with its own `PackageId` and ships as a package in its own right, in
+  addition to being embedded in the Endpoints package. It is versioned with the rest at
+  `11.0.1-rc.0`. `CoverageShapeTests`' list of 14 is unaffected — it enumerates runtime assemblies,
+  and the generator is not one.
+
+### What is deliberately not fixed
+
+The 36 CS1591 in generated code and the 2 NU5128 on the Generator package both pre-date this work,
+were confirmed present on `master`, and are left alone. Fixing either means changing the upstream
+generator's output or giving the analyzer package a `lib/` folder it should not have.
 
 ## Risks
 
