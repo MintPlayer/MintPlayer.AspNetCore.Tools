@@ -26,7 +26,14 @@ jobs:
     - name: Setup .NET Core
       uses: actions/setup-dotnet@v5
       with:
-        dotnet-version: 10.0.100
+        # The .NET 11 SDK builds everything (global.json pins it). The .NET 10 SDK is installed for
+        # its runtime, which is what actually executes the net10.0 half of the test suite; without it
+        # `dotnet test` has no net10.0 host to run on.
+        # Pinned exactly rather than 11.0.x: while .NET 11 is RC, a floating version would let an RC2
+        # change CI behaviour without a commit.
+        dotnet-version: |
+          10.0.x
+          11.0.100-rc.1.26425.128
         # Authenticates packages to push to GPR
         source-url: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
       env:

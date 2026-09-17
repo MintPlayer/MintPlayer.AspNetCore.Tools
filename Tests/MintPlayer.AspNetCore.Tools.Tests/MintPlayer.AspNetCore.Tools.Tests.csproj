@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFramework>net10.0</TargetFramework>
+		<TargetFrameworks>net10.0;net11.0</TargetFrameworks>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<IsPackable>false</IsPackable>
@@ -26,8 +26,14 @@
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 		<!-- TestServer for the middleware/endpoint integration groups, and
-		     WebApplicationFactory<Program> for the TestApp end-to-end group. -->
-		<PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
+		     WebApplicationFactory<Program> for the TestApp end-to-end group.
+
+		     This is the only NuGet package in the repo whose version tracks the target framework, so
+		     it is the only one that has to be conditioned per TFM. An unconditioned 10.0.x reference
+		     restores onto net11.0 too, but then the net11.0 test host runs against the .NET 10 test
+		     harness — the suite would pass while testing the wrong thing. -->
+		<PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" Condition="'$(TargetFramework)' == 'net10.0'" />
+		<PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="11.0.0-rc.1.26425.128" Condition="'$(TargetFramework)' == 'net11.0'" />
 	</ItemGroup>
 
 	<!--
