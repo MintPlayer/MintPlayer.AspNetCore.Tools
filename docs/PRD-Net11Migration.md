@@ -59,6 +59,14 @@ This repository uses the same MSBuild pattern that caused it —
 into `analyzers/dotnet/cs`. Whether this repo leaks anything harmful is unverified and is the subject
 of spike S3.
 
+> **Resolved by spike S3: this repo does not leak.** A scratch consumer built at `net10.0` and at
+> `net11.0` against the packed package compiles with zero errors and zero warnings; nothing from
+> `analyzers/dotnet/cs` becomes a compile reference, `Microsoft.Extensions.DependencyInjection.Abstractions`
+> does not leak, and the generator emits byte-identical output on both. P3 is therefore a risk that
+> was checked and did not materialise, not a defect to fix. R3.4 costs nothing. The structural reason
+> is that the dependency is carried with `IncludeRuntimeDependency="false"` and the project sets
+> `IncludeBuildOutput=false`, so there is no `lib/` asset available to leak.
+
 ### P4 — "Drop .NET 10" would shorten the supported life of these packages, not extend it
 
 As of 2026-09-17:
@@ -154,9 +162,17 @@ must not be overlooked because its version differs.
 **R3.1 — The analyzer is packed exactly once.** `TargetsForTfmSpecificContentInPackage` runs once per
 inner build. Both `PackEndpointsGenerator` (`Endpoints/MintPlayer.AspNetCore.Endpoints.csproj:58,61-71`)
 and `PackAnalyzerAssemblies` (`…Endpoints.Generator.csproj:47-55`) push files to the version-agnostic
-`analyzers/dotnet/cs` path, so under two TFMs the same file is added to the same package path twice —
-an NU5118-class duplicate-file pack failure. The Endpoints target must become TFM-idempotent. The
-generator's own target is unaffected because that project stays single-TFM.
+`analyzers/dotnet/cs` path, so under two TFMs the same file is added to the same package path twice.
+The Endpoints target must become TFM-idempotent. The generator's own target is unaffected because
+that project stays single-TFM.
+
+> **Corrected by spike S1.** This requirement originally called the duplication "an NU5118-class
+> duplicate-file pack failure". It is not a failure: `dotnet pack` exits 0, NuGet de-duplicates, and
+> the resulting package is correct. What it actually produces is two `warning NU5118`, which violates
+> R4.3 rather than breaking the package. The requirement stands; its severity was overstated. S1 also
+> found that the intuitive fix — hoisting the analyzer to a non-TFM-specific pack target — silently
+> produces a package with **no analyzer at all**, so the fix must be verified by unpacking the nupkg.
+> See the M0 outcome in the plan.
 
 **R3.2 — The cross-project `GetTargetPath` call keeps working under an outer/inner build.** The
 `<MSBuild … RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier">` at
@@ -207,6 +223,13 @@ R2.4.
 on every merge to `master`. Merging this work therefore *publishes* it. Whether to ship an RC-built
 package now or hold until .NET 11 GA on 2026-11-10 is a release decision that must be made
 consciously before merge, not discovered afterward. See M6 in the plan.
+
+> **Decided 2026-09-17: ship `11.0.1-rc.0` on merge**, under the .NET 11 RC1 go-live licence. The
+> `-rc.0` suffix marks it prerelease, so NuGet will not float existing consumers onto it. A stable
+> `11.0.1` follows after .NET 11 GA, gated on re-running M5 against the GA SDK.
+>
+> Also decided: `MintPlayer.Timestamps` joins the shared version line at `11.0.1-rc.0` rather than
+> keeping an independent 10.x track, so all 14 packages version together.
 
 ### Requires a decision — TFM strategy **[decision]**
 
