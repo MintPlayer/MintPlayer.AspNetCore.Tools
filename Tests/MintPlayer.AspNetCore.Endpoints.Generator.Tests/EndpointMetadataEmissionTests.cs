@@ -25,6 +25,9 @@ public class EndpointMetadataEmissionTests
         public record UserResponse(int Id, string Name);
         """;
 
+    private static IProducesResponseTypeMetadata[] Successes(RouteEndpoint route)
+        => [.. route.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>().Where(m => m.StatusCode is >= 200 and < 300)];
+
     private static string Generated(string assemblyName, params string[] sources)
         => string.Join(
             "\n",
@@ -160,13 +163,14 @@ public class EndpointMetadataEmissionTests
 
         var created = Assert.Single(routes, route =>
             route.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Contains("POST"));
-        var produces = Assert.Single(created.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>());
+        // Since M5 a body endpoint also declares its 400/415 problems, so only the success is compared.
+        var produces = Assert.Single(Successes(created));
         Assert.Equal(201, produces.StatusCode);
 
         // The default is 200, and it must survive the presence of an override elsewhere.
         var patched = Assert.Single(routes, route =>
             route.Metadata.GetMetadata<HttpMethodMetadata>()!.HttpMethods.Contains("PATCH"));
-        Assert.Equal(200, Assert.Single(patched.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>()).StatusCode);
+        Assert.Equal(200, Assert.Single(Successes(patched)).StatusCode);
 
         // A raw endpoint declares no response type, so it gets no Produces metadata at all.
         var health = Assert.Single(routes, route => route.RoutePattern.RawText == "/health");

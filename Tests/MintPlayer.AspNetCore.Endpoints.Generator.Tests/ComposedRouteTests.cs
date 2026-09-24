@@ -91,4 +91,28 @@ public class ComposedRouteTests
     {
         Assert.NotEqual(ComposedRoute.Normalise(left), ComposedRoute.Normalise(right));
     }
+
+    /// <summary>
+    /// Route parameter names, as the OpenAPI path key spells them: constraint, default, optional
+    /// marker and catch-all stars removed, template case kept, escaped braces skipped.
+    /// </summary>
+    /// <remarks>
+    /// These names become shadow members and must match the document's <c>{token}</c> exactly; a
+    /// name carrying <c>:int</c> or a leading <c>**</c> would produce a parameter matching no token,
+    /// which is the invalid document M5 exists to fix.
+    /// </remarks>
+    [Theory]
+    [InlineData("/api/users/{id}", "id")]
+    [InlineData("/api/users/{Id:int}/orders/{orderId?}", "Id|orderId")]
+    [InlineData("/api/{**path}", "path")]
+    [InlineData("/files/{*rest}", "rest")]
+    [InlineData("/page/{n=1}", "n")]
+    [InlineData("/lit/{{notaparam}}/{real}", "real")]
+    [InlineData("/health", "")]
+    public void Parameters_ReturnsTheTokenNamesInTemplateOrder(string route, string expected)
+    {
+        Assert.Equal(
+            expected.Length == 0 ? [] : expected.Split('|'),
+            ComposedRoute.Parameters(route).ToArray());
+    }
 }

@@ -62,7 +62,14 @@ public partial class EndpointGenerator : IncrementalGenerator
         // compilation — so the source output could never be cached however well the models compared.
         // Registering on the value-equal model instead is what makes the equality in Models.cs pay.
         context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
-            EndpointMappingProducer.Emit(productionContext, model));
+            new EndpointMappingProducer(model).Emit(productionContext));
+
+        // The second file exists only for a consumer that references Microsoft.AspNetCore.OpenApi.
+        // The producer writes nothing otherwise, and Emit adds no source for an empty buffer, so the
+        // absent case is no file at all rather than an empty one. (An IncrementalValueProvider has
+        // no Where to filter on; only the plural IncrementalValuesProvider does.)
+        context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
+            new EndpointOpenApiProducer(model).Emit(productionContext));
 
         // Diagnostics do go through the Tools pipeline, because turning a LocationKey back into a
         // Location needs the Compilation. They are recomputed per compilation; they are cheap, and
@@ -303,6 +310,24 @@ public partial class EndpointGenerator : IncrementalGenerator
             }
         }
 
-        return new AssemblyInfo(assemblyName, methodNameOverride);
+        return new AssemblyInfo(assemblyName, methodNameOverride, HasOpenApiTransformers(compilation));
     }
+
+    /// <summary>
+    /// Whether the emitted schema transformer would compile against this consumer's references.
+    /// </summary>
+    /// <remarks>
+    /// Three probes, because the context type on its own is not enough. It also exists in
+    /// <c>Microsoft.AspNetCore.OpenApi</c> 9.x, which a net10.0 project can still reference, but
+    /// that version builds on <c>Microsoft.OpenApi</c> 1.x — schemas in
+    /// <c>Microsoft.OpenApi.Models</c>, no <c>JsonSchemaType</c> — and has no endpoint-level
+    /// <c>AddOpenApiOperationTransformer</c>. Emitting against it would put compile errors in a
+    /// file the consumer cannot edit. <c>JsonSchemaType</c> exists from 2.x on, and the extension
+    /// is looked up on the type the call is emitted against, so a moved method fails closed.
+    /// </remarks>
+    private static bool HasOpenApiTransformers(Compilation compilation) =>
+        compilation.GetTypeByMetadataName("Microsoft.AspNetCore.OpenApi.OpenApiOperationTransformerContext") is not null &&
+        compilation.GetTypeByMetadataName("Microsoft.OpenApi.JsonSchemaType") is not null &&
+        compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Builder.OpenApiEndpointConventionBuilderExtensions") is { } extensions &&
+        !extensions.GetMembers("AddOpenApiOperationTransformer").IsEmpty;
 }

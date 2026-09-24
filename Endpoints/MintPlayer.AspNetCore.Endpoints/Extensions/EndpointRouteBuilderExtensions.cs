@@ -21,6 +21,19 @@ public static class EndpointRouteBuilderExtensions
     /// so an application that mixes generated and manual registration gets the same route either
     /// way. Each call creates its own <c>RouteGroupBuilder</c> chain, so the group's
     /// <c>Configure</c> hook runs once per call.
+    /// <para>
+    /// <b>OpenAPI: this path documents less than the generated one, deliberately.</b> It declares
+    /// the same request body, 400 and 415 (through the same <see cref="EndpointDocumentation"/>
+    /// helper), but it cannot declare route or query <i>parameters</i>. ApiExplorer only sees
+    /// parameters of the request delegate, and the generator gets them there by passing a
+    /// compile-time <c>string?</c> shadow type as an <c>[AsParameters]</c> argument; a
+    /// reflection-based registration has no such type to pass, short of emitting one at run time.
+    /// So an endpoint mapped here with a templated route is documented without its path
+    /// parameters — which OpenAPI treats as an invalid document — and without the typed schemas
+    /// the generated <c>EndpointOpenApi.g.cs</c> restores. Nor does it declare the
+    /// <c>Produces&lt;TResponse&gt;</c> success response the generated mapping does. Use the
+    /// generated <c>Map…Endpoints()</c> for anything that is documented.
+    /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// The group nesting is cyclic. A cycle has no outermost group and so no prefix, and guessing
@@ -28,7 +41,11 @@ public static class EndpointRouteBuilderExtensions
     /// no longer possible to express: it is <c>CS0579</c>.)
     /// </exception>
     public static IEndpointRouteBuilder MapEndpoint<
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TEndpoint>(
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes.PublicConstructors |
+            DynamicallyAccessedMemberTypes.Interfaces |
+            DynamicallyAccessedMemberTypes.PublicProperties |
+            DynamicallyAccessedMemberTypes.NonPublicProperties)] TEndpoint>(
         this IEndpointRouteBuilder app)
         where TEndpoint : class, IEndpoint
     {
@@ -72,7 +89,49 @@ public static class EndpointRouteBuilderExtensions
         // Call the optional Configure hook
         TEndpoint.Configure(builder);
 
+        // The request-side metadata the generated mapping declares, through the same helper, after
+        // Configure as there. See <remarks> for what this path cannot match.
+        if (RequestTypeOf(typeof(TEndpoint)) is { } requestType)
+            EndpointDocumentation.DeclareRequestBody(builder, requestType);
+        else if (HasBoundProperties(typeof(TEndpoint)))
+            EndpointDocumentation.DeclareBindingFailure(builder);
+
         return app;
+    }
+
+    /// <summary>
+    /// The request body type of a typed endpoint — the <c>TRequest</c> of the
+    /// <c>IEndpoint&lt;TRequest&gt;</c> it implements — or <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// The same rule the generator applies: <c>IEndpoint&lt;TRequest, TResponse&gt;</c> derives from
+    /// <c>IEndpoint&lt;TRequest&gt;</c>, and the response-only <c>IResponseEndpoint&lt;T&gt;</c> does
+    /// not, so its type argument is never mistaken for a body.
+    /// </remarks>
+    private static Type? RequestTypeOf(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.Interfaces)] Type endpointType)
+    {
+        foreach (var candidate in endpointType.GetInterfaces())
+        {
+            if (candidate.IsGenericType && candidate.GetGenericTypeDefinition() == typeof(IEndpoint<>))
+                return candidate.GetGenericArguments()[0];
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// True when the endpoint, or a base class of it, declares a <c>[RouteParam]</c> or
+    /// <c>[QueryParam]</c> property — anything whose conversion can fail with a 400.
+    /// </summary>
+    private static bool HasBoundProperties(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.NonPublicProperties)] Type endpointType)
+    {
+        const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        return endpointType.GetProperties(Declared).Any(property =>
+            property.IsDefined(typeof(RouteParamAttribute), inherit: true) ||
+            property.IsDefined(typeof(QueryParamAttribute), inherit: true));
     }
 
     /// <summary>

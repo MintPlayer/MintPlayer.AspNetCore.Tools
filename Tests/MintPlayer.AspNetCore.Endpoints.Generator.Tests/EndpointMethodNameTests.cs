@@ -27,7 +27,7 @@ public class EndpointMethodNameTests
     {
         var generated = Generated(EndpointGeneratorHarness.Run("MyApp.Api", FixtureSources.RawGetEndpoint));
 
-        Assert.Contains("public static class MyAppApiEndpointsExtensions", generated);
+        Assert.Contains("public static partial class MyAppApiEndpointsExtensions", generated);
         Assert.Contains("MapMyAppApiEndpoints(this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app)", generated);
     }
 
@@ -39,7 +39,7 @@ public class EndpointMethodNameTests
             FixtureSources.RawGetEndpoint,
             FixtureSources.MethodNameOverride("MapCustomEndpoints")));
 
-        Assert.Contains("public static class CustomEndpointsExtensions", generated);
+        Assert.Contains("public static partial class CustomEndpointsExtensions", generated);
         Assert.Contains("MapCustomEndpoints(this", generated);
         Assert.DoesNotContain("MapMyAppApiEndpoints", generated);
     }
@@ -118,7 +118,7 @@ public class EndpointMethodNameTests
 
         var result = EndpointGeneratorHarness.Run("MyApp.Api", sources);
 
-        Assert.Contains("public static class MyAppApiEndpointsExtensions", Generated(result));
+        Assert.Contains("public static partial class MyAppApiEndpointsExtensions", Generated(result));
         Assert.Contains("MapMyAppApiEndpoints(this", Generated(result));
         Assert.Equal("MPEP006", Assert.Single(result.Diagnostics).Id);
 
@@ -176,7 +176,7 @@ public class EndpointMethodNameTests
         // what makes that harmless. Asserted against the real type so this breaks if either moves.
         var shippedNamespace = typeof(EndpointRouteBuilderExtensions).Namespace!;
 
-        Assert.Contains($"public static class {typeof(EndpointRouteBuilderExtensions).Name}", generated);
+        Assert.Contains($"public static partial class {typeof(EndpointRouteBuilderExtensions).Name}", generated);
         Assert.Contains($"namespace {shippedNamespace}.Generated", generated);
         Assert.Contains($"global using global::{shippedNamespace}.Generated;", generated);
 

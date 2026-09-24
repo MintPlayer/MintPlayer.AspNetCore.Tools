@@ -36,12 +36,26 @@ internal static class EndpointGeneratorHarness
     /// <c>FrameworkReference Microsoft.AspNetCore.App</c> plus project references to the endpoint
     /// libraries, the host's own reference set already contains everything a fixture can name.
     /// </remarks>
-    private static readonly Lazy<ImmutableArray<MetadataReference>> references = new(() =>
+    private static readonly Lazy<ImmutableArray<MetadataReference>> allReferences = new(() =>
         ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
             .Split(Path.PathSeparator)
             .Where(path => path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
             .Select(path => (MetadataReference)MetadataReference.CreateFromFile(path))
             .ToImmutableArray());
+
+    /// <summary>
+    /// The host's references minus the OpenAPI assemblies — the default consumer.
+    /// </summary>
+    /// <remarks>
+    /// This test host references <c>Microsoft.AspNetCore.OpenApi</c> so the OpenAPI emission tests
+    /// can compile against it. Handing it to every fixture would switch <c>EndpointOpenApi.g.cs</c>
+    /// on everywhere and leave the no-package consumer — the default — untested, so it is opt-in.
+    /// </remarks>
+    private static readonly Lazy<ImmutableArray<MetadataReference>> references = new(() =>
+        [.. allReferences.Value.Where(reference => !IsOpenApiAssembly(reference))]);
+
+    private static bool IsOpenApiAssembly(MetadataReference reference) =>
+        Path.GetFileName(reference.Display) is "Microsoft.AspNetCore.OpenApi.dll" or "Microsoft.OpenApi.dll";
 
     /// <summary>
     /// Compiles <paramref name="sources"/> and runs the generator over the result.
@@ -95,10 +109,15 @@ internal static class EndpointGeneratorHarness
     /// </para>
     /// </remarks>
     public static Assembly RunAndLoad(string assemblyName, params string[] sources)
+        => RunAndLoad(CreateCompilation(assemblyName, sources));
+
+    /// <inheritdoc cref="RunAndLoad(string, string[])"/>
+    public static Assembly RunAndLoad(CSharpCompilation compilation)
     {
+        var assemblyName = compilation.AssemblyName;
         CSharpGeneratorDriver
             .Create(new EndpointGenerator())
-            .RunGeneratorsAndUpdateCompilation(CreateCompilation(assemblyName, sources), out var updated, out _);
+            .RunGeneratorsAndUpdateCompilation(compilation, out var updated, out _);
 
         using var stream = new MemoryStream();
         var emitResult = updated.Emit(stream);
@@ -164,10 +183,16 @@ internal static class EndpointGeneratorHarness
     /// Pass <see langword="false"/> to model a plain <c>Microsoft.NET.Sdk</c> consumer, or one with
     /// implicit usings disabled. Only D-G25's pinning test needs that.
     /// </param>
+    /// <param name="includeOpenApi">
+    /// Pass <see langword="true"/> to model a consumer that references
+    /// <c>Microsoft.AspNetCore.OpenApi</c>, which is what makes the generator emit
+    /// <c>EndpointOpenApi.g.cs</c>.
+    /// </param>
     public static CSharpCompilation CreateCompilation(
         string assemblyName,
         string[] sources,
-        bool includeImplicitUsings = true)
+        bool includeImplicitUsings = true,
+        bool includeOpenApi = false)
     {
         // LanguageVersion.Latest is required, not cosmetic: the fixtures use collection
         // expressions (C# 12) and static abstract interface members (C# 11).
@@ -183,7 +208,7 @@ internal static class EndpointGeneratorHarness
         return CSharpCompilation.Create(
             assemblyName,
             allSources.Select((source, index) => CSharpSyntaxTree.ParseText(source, parseOptions, path: $"Source{index}.cs")),
-            references.Value,
+            includeOpenApi ? allReferences.Value : references.Value,
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: NullableContextOptions.Enable));

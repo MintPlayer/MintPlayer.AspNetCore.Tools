@@ -20,6 +20,8 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator;
 /// </remarks>
 internal static class ComposedRoute
 {
+    private static readonly char[] ParameterNameTerminators = [':', '=', '?'];
+
     /// <summary>
     /// Joins the group prefixes (outermost first) with the endpoint's own path.
     /// </summary>
@@ -37,6 +39,45 @@ internal static class ComposedRoute
 
         builder.Append(path);
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// The names of the route parameters in <paramref name="route"/>, in template order, spelled
+    /// exactly as the template spells them.
+    /// </summary>
+    /// <remarks>
+    /// The name is what precedes any constraint (<c>:</c>), default (<c>=</c>) or optional marker
+    /// (<c>?</c>), with a catch-all's leading <c>*</c> or <c>**</c> removed — the same name
+    /// ASP.NET Core puts in <c>RouteValues</c> and in the OpenAPI path key. A doubled brace is an
+    /// escaped literal, not a parameter. The spelling is kept because the documented parameter
+    /// name has to match the path key's <c>{token}</c> exactly for the document to be valid.
+    /// </remarks>
+    public static List<string> Parameters(string route)
+    {
+        var names = new List<string>();
+
+        for (var i = 0; i < route.Length; i++)
+        {
+            if (route[i] != '{') continue;
+
+            if (i + 1 < route.Length && route[i + 1] == '{')
+            {
+                i++;                                    // "{{" is a literal brace
+                continue;
+            }
+
+            var close = route.IndexOf('}', i + 1);
+            if (close < 0) break;
+
+            var body = route.Substring(i + 1, close - i - 1).TrimStart('*');
+            var end = body.IndexOfAny(ParameterNameTerminators);
+            var name = end < 0 ? body : body.Substring(0, end);
+            if (name.Length > 0) names.Add(name);
+
+            i = close;
+        }
+
+        return names;
     }
 
     /// <summary>

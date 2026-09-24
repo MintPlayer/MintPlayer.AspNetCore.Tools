@@ -8,42 +8,30 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator;
 
 partial class EndpointGenerator
 {
-    internal static class EndpointMappingProducer
+    /// <summary>
+    /// Emits <c>EndpointMapping.g.cs</c>: the endpoints' partial declarations, the
+    /// <c>Map…Endpoints()</c> extension, the shadow parameter types and the descriptor list.
+    /// </summary>
+    /// <remarks>
+    /// Compiles identically whether or not the consumer references
+    /// <c>Microsoft.AspNetCore.OpenApi</c>; everything that needs that package is in
+    /// <see cref="EndpointOpenApiProducer"/>, reached through erasable partial-method hooks.
+    /// </remarks>
+    internal sealed class EndpointMappingProducer : EndpointsProducer
     {
         public const string FileName = "EndpointMapping.g.cs";
 
-        /// <summary>
-        /// The namespace the mapping extensions class is emitted into.
-        /// </summary>
-        /// <remarks>
-        /// Not the library's own namespace. The class name is derived from the assembly name or from
-        /// <c>[assembly: EndpointsMethodName]</c>, so emitting into
-        /// <c>MintPlayer.AspNetCore.Endpoints</c> lets a perfectly reasonable choice — say
-        /// <c>MapEndpointRouteBuilder</c> — collide with a type the runtime package ships. Source
-        /// beats metadata for a name, so the collision is not even an error: the generated class
-        /// silently shadows the shipped one. A namespace only this generator writes to defines that
-        /// away, and the emitted <c>global using</c> keeps the call site unchanged.
-        /// </remarks>
-        private const string GeneratedNamespace = "MintPlayer.AspNetCore.Endpoints.Generated";
+        public EndpointMappingProducer(EndpointModel model) : base(model, FileName) { }
 
-        public static void Emit(SourceProductionContext context, EndpointModel model)
-        {
-            var plan = EndpointMappingPlan.From(model);
-
-            using var buffer = new StringWriter();
-            using var writer = new IndentedTextWriter(buffer);
-
-            Write(writer, plan, model.Assembly, context.CancellationToken);
-
-            context.AddSource(FileName, SourceText.From(buffer.ToString(), Encoding.UTF8));
-        }
+        protected override void ProduceSource(IndentedTextWriter writer, CancellationToken cancellationToken)
+            => Write(writer, EndpointMappingPlan.From(Model), Model.Assembly, cancellationToken);
 
         private static void Write(IndentedTextWriter writer, EndpointMappingPlan plan, AssemblyInfo assembly, CancellationToken cancellationToken)
         {
             var methodName = assembly.GetMethodName();
             var className = assembly.GetSafeClassName();
 
-            writer.WriteLine(Producer.Header);
+            writer.WriteLine(Header);
 
             // The call site keeps working without the consumer importing anything new.
             writer.WriteLine($"global using global::{GeneratedNamespace};");
@@ -79,9 +67,17 @@ partial class EndpointGenerator
                 EmitPartial(writer, endpoint);
             }
 
+            var shadows = plan.MappableEndpoints.ToDictionary(
+                endpoint => endpoint.FullyQualifiedName,
+                endpoint => ShadowParameters.For(endpoint, plan.ComposedRoutes[endpoint.FullyQualifiedName]),
+                StringComparer.Ordinal);
+
             // --- Task B: Mapping extension ---
+            // Partial so the OpenAPI producer can add to it (EndpointOpenApi.g.cs). This file must
+            // not name a single Microsoft.AspNetCore.OpenApi or Microsoft.OpenApi type: it has to
+            // compile identically whether or not the consumer references that package.
             using (writer.OpenBlock($"namespace {GeneratedNamespace}"))
-            using (writer.OpenBlock($"public static class {className}"))
+            using (writer.OpenBlock($"public static partial class {className}"))
             {
                 for (var i = 0; i < plan.MappableEndpoints.Count; i++)
                 {
@@ -94,18 +90,20 @@ partial class EndpointGenerator
                 using (writer.OpenBlock($"public static global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder {methodName}(this global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder app)"))
                 {
                     foreach (var endpoint in plan.MappableEndpoints.Where(e => e.GroupTypeFqn is null))
-                        EmitEndpointMapping(writer, endpoint, plan, "app");
+                        EmitEndpointMapping(writer, endpoint, plan, shadows, "app");
 
                     var groupCounter = 0;
                     var emitted = new HashSet<string>(StringComparer.Ordinal);
                     foreach (var rootGroupFqn in plan.RootGroups)
-                        EmitGroupTree(writer, rootGroupFqn, "app", ref groupCounter, plan, emitted);
+                        EmitGroupTree(writer, rootGroupFqn, "app", ref groupCounter, plan, shadows, emitted);
 
                     writer.WriteLine("return app;");
                 }
 
                 writer.WriteLine();
                 EmitHelpers(writer);
+                EmitHooks(writer, plan, shadows);
+                EmitShadowTypes(writer, plan, shadows);
 
                 writer.WriteLine("public static global::System.Collections.Generic.IReadOnlyList<global::MintPlayer.AspNetCore.Endpoints.EndpointDescriptor> Endpoints { get; } =");
                 writer.WriteLine("[");
@@ -140,6 +138,7 @@ partial class EndpointGenerator
             string parentVar,
             ref int groupCounter,
             EndpointMappingPlan plan,
+            Dictionary<string, List<ShadowMember>> shadows,
             HashSet<string> emitted)
         {
             if (!emitted.Add(groupFqn))
@@ -154,13 +153,13 @@ partial class EndpointGenerator
                 if (plan.EndpointsByGroup.TryGetValue(groupFqn, out var endpoints))
                 {
                     foreach (var endpoint in endpoints)
-                        EmitEndpointMapping(writer, endpoint, plan, varName);
+                        EmitEndpointMapping(writer, endpoint, plan, shadows, varName);
                 }
 
                 if (plan.ChildGroups.TryGetValue(groupFqn, out var children))
                 {
                     foreach (var childFqn in children)
-                        EmitGroupTree(writer, childFqn, varName, ref groupCounter, plan, emitted);
+                        EmitGroupTree(writer, childFqn, varName, ref groupCounter, plan, shadows, emitted);
                 }
             }
         }
@@ -195,9 +194,7 @@ partial class EndpointGenerator
             if (!endpoint.IsPartial) return;                                // MPEP001 / MPEP014
             if (endpoint.PathSpec is { AllPartial: false }) return;         // MPEP019
 
-            var bindable = endpoint.BoundProperties
-                .Where(property => property.Kind != BoundKind.Unsupported && property.IsSettable)
-                .ToList();
+            var bindable = ShadowParameters.Bindable(endpoint);
 
             string? baseClause;
             if (endpoint.Level == EndpointLevel.Raw)
@@ -300,29 +297,53 @@ partial class EndpointGenerator
             }
         }
 
-        private static void EmitEndpointMapping(IndentedTextWriter writer, EndpointInfo endpoint, EndpointMappingPlan plan, string routesVar)
+        private static void EmitEndpointMapping(
+            IndentedTextWriter writer,
+            EndpointInfo endpoint,
+            EndpointMappingPlan plan,
+            Dictionary<string, List<ShadowMember>> shadows,
+            string routesVar)
         {
-            var factoryField = $"_f{plan.FactoryIndex[endpoint.FullyQualifiedName]}";
+            const string Documentation = "global::MintPlayer.AspNetCore.Endpoints.EndpointDocumentation";
+
+            var index = plan.FactoryIndex[endpoint.FullyQualifiedName];
+            var factoryField = $"_f{index}";
+            var shadow = shadows[endpoint.FullyQualifiedName];
+
+            var map = shadow.Count == 0
+                ? $"Map<{endpoint.FullyQualifiedName}>({routesVar}, {factoryField})"
+                : $"Map<{endpoint.FullyQualifiedName}, {ShadowParameters.TypeName(endpoint, index)}>({routesVar}, {factoryField})";
+
+            var statements = new List<string>();
 
             if (endpoint.Level == EndpointLevel.TypedWithResponse)
-            {
-                using (writer.OpenBlock(""))
-                {
-                    writer.WriteLine($"var b = Map<{endpoint.FullyQualifiedName}>({routesVar}, {factoryField});");
-                    writer.WriteLine($"Produces<{endpoint.FullyQualifiedName}, {endpoint.RequestTypeFqn}, {endpoint.ResponseTypeFqn}>(b);");
-                }
-            }
+                statements.Add($"Produces<{endpoint.FullyQualifiedName}, {endpoint.RequestTypeFqn}, {endpoint.ResponseTypeFqn}>(b);");
             else if (endpoint.Level == EndpointLevel.ResponseOnly)
+                statements.Add($"ProducesResponse<{endpoint.FullyQualifiedName}, {endpoint.ResponseTypeFqn}>(b);");
+
+            // A request body can fail to bind (400) or arrive in a type nothing reads (415); a bound
+            // property can only fail to bind. Both are declared through the runtime helper the manual
+            // MapEndpoint<T>() path calls too, so the two registrations cannot drift apart.
+            if (endpoint.Level is EndpointLevel.Typed or EndpointLevel.TypedWithResponse)
+                statements.Add($"{Documentation}.DeclareRequestBody(b, typeof({endpoint.RequestTypeFqn}));");
+            else if (ShadowParameters.Bound(endpoint).Count > 0)
+                statements.Add($"{Documentation}.DeclareBindingFailure(b);");
+
+            // Erased by the compiler unless EndpointOpenApi.g.cs implements it.
+            if (shadow.Any(member => member.HasTypedSchema))
+                statements.Add($"{ShadowParameters.HookName(index)}(b);");
+
+            if (statements.Count == 0)
             {
-                using (writer.OpenBlock(""))
-                {
-                    writer.WriteLine($"var b = Map<{endpoint.FullyQualifiedName}>({routesVar}, {factoryField});");
-                    writer.WriteLine($"ProducesResponse<{endpoint.FullyQualifiedName}, {endpoint.ResponseTypeFqn}>(b);");
-                }
+                writer.WriteLine($"{map};");
+                return;
             }
-            else
+
+            using (writer.OpenBlock(""))
             {
-                writer.WriteLine($"Map<{endpoint.FullyQualifiedName}>({routesVar}, {factoryField});");
+                writer.WriteLine($"var b = {map};");
+                foreach (var statement in statements)
+                    writer.WriteLine(statement);
             }
         }
 
@@ -330,28 +351,21 @@ partial class EndpointGenerator
         {
             using (writer.OpenBlock("private static global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder Map<TEndpoint>(global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder routes, global::Microsoft.Extensions.DependencyInjection.ObjectFactory<TEndpoint> factory) where TEndpoint : class, global::MintPlayer.AspNetCore.Endpoints.IEndpoint"))
             {
-                using (writer.OpenBlock("var builder = global::Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapMethods(routes, TEndpoint.Path, TEndpoint.Methods, async (global::Microsoft.AspNetCore.Http.HttpContext ctx) =>"))
-                {
-                    // Constructed INSIDE the delegate, per request. Bound properties make an endpoint
-                    // stateful; hoisting this out of the lambda would turn it into a process-wide
-                    // singleton that leaks one request's route values into the next (PRD R2.12).
-                    writer.WriteLine("var ep = factory(ctx.RequestServices, null);");
-                    using (writer.OpenBlock("try"))
-                    {
-                        // Raw endpoints only: every other level binds inside its own HandleAsync.
-                        writer.WriteLine("if (ep is global::MintPlayer.AspNetCore.Endpoints.IParameterBinder binder && binder.BindParameters(ctx) is { } failed) return failed;");
-                        writer.WriteLine("return await ep.HandleAsync(ctx);");
-                    }
-                    using (writer.OpenBlock("finally"))
-                    {
-                        writer.WriteLine("if (ep is global::System.IAsyncDisposable ad) await ad.DisposeAsync();");
-                        writer.WriteLine("else if (ep is global::System.IDisposable d) d.Dispose();");
-                    }
-                }
-                writer.WriteLine(");");
-                writer.WriteLine("global::Microsoft.AspNetCore.Builder.RoutingEndpointConventionBuilderExtensions.WithMetadata(builder, global::MintPlayer.AspNetCore.Endpoints.EndpointAttributes.ForMetadata(typeof(TEndpoint)));");
-                writer.WriteLine("TEndpoint.Configure(builder);");
-                writer.WriteLine("return builder;");
+                EmitMapBody(writer, "global::Microsoft.AspNetCore.Http.HttpContext ctx");
+            }
+            writer.WriteLine();
+
+            // The shadow rides in as a generic type argument rather than a per-endpoint lambda, which
+            // is only sound because ApiExplorer reads the *closed* delegate at run time: measured on
+            // net10.0 and net11.0, an [AsParameters] TShadow here documents exactly the parameters a
+            // lambda spelling out the concrete type does. (Source-generated consumers such as
+            // Microsoft.Extensions.Validation read the open lambda at compile time and do not see
+            // through a type parameter — nothing here relies on them seeing the shadow.)
+            using (writer.OpenBlock("private static global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder Map<TEndpoint, TShadow>(global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder routes, global::Microsoft.Extensions.DependencyInjection.ObjectFactory<TEndpoint> factory) where TEndpoint : class, global::MintPlayer.AspNetCore.Endpoints.IEndpoint where TShadow : class"))
+            {
+                // __shadow is bound by the framework and never read. Every member is a string?, so
+                // binding it cannot fail and the library's own binder below still produces the 400.
+                EmitMapBody(writer, "[global::Microsoft.AspNetCore.Http.AsParametersAttribute] TShadow __shadow, global::Microsoft.AspNetCore.Http.HttpContext ctx");
             }
             writer.WriteLine();
 
@@ -390,6 +404,95 @@ partial class EndpointGenerator
                 writer.WriteLine("return new(name, groupPrefix + TEndpoint.Path, [.. TEndpoint.Methods], typeof(TEndpoint));");
             }
             writer.WriteLine();
+        }
+
+        /// <summary>
+        /// The body shared by both <c>Map</c> helpers; only the request delegate's parameter list differs.
+        /// </summary>
+        /// <remarks>
+        /// Emitted inline in each helper rather than factored into a shared method the lambda calls:
+        /// the construction has to be visibly inside the delegate (R2.12), and a test pins it there by
+        /// position in each helper.
+        /// </remarks>
+        private static void EmitMapBody(IndentedTextWriter writer, string delegateParameters)
+        {
+            using (writer.OpenBlock($"var builder = global::Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapMethods(routes, TEndpoint.Path, TEndpoint.Methods, async ({delegateParameters}) =>"))
+            {
+                // Constructed INSIDE the delegate, per request. Bound properties make an endpoint
+                // stateful; hoisting this out of the lambda would turn it into a process-wide
+                // singleton that leaks one request's route values into the next (PRD R2.12).
+                writer.WriteLine("var ep = factory(ctx.RequestServices, null);");
+                using (writer.OpenBlock("try"))
+                {
+                    // Raw endpoints only: every other level binds inside its own HandleAsync.
+                    writer.WriteLine("if (ep is global::MintPlayer.AspNetCore.Endpoints.IParameterBinder binder && binder.BindParameters(ctx) is { } failed) return failed;");
+                    writer.WriteLine("return await ep.HandleAsync(ctx);");
+                }
+                using (writer.OpenBlock("finally"))
+                {
+                    writer.WriteLine("if (ep is global::System.IAsyncDisposable ad) await ad.DisposeAsync();");
+                    writer.WriteLine("else if (ep is global::System.IDisposable d) d.Dispose();");
+                }
+            }
+            writer.WriteLine(");");
+            writer.WriteLine("global::Microsoft.AspNetCore.Builder.RoutingEndpointConventionBuilderExtensions.WithMetadata(builder, global::MintPlayer.AspNetCore.Endpoints.EndpointAttributes.ForMetadata(typeof(TEndpoint)));");
+            writer.WriteLine("TEndpoint.Configure(builder);");
+            writer.WriteLine("return builder;");
+        }
+
+        /// <summary>
+        /// Declares one partial-method hook per endpoint whose shadow has a typed schema to restore.
+        /// </summary>
+        /// <remarks>
+        /// This is the whole seam between this file and <c>EndpointOpenApi.g.cs</c>. A partial method
+        /// that returns <c>void</c> and has no access modifier may be left unimplemented, and then the
+        /// compiler removes the declaration <i>and every call to it</i> — so a consumer without
+        /// <c>Microsoft.AspNetCore.OpenApi</c> gets no method, no call and no reference, and this file
+        /// never has to name an OpenAPI type to make the call. One hook per endpoint rather than one
+        /// generic hook, so the implementing file dispatches at compile time instead of testing
+        /// <c>typeof(TEndpoint)</c> against every endpoint.
+        /// </remarks>
+        private static void EmitHooks(IndentedTextWriter writer, EndpointMappingPlan plan, Dictionary<string, List<ShadowMember>> shadows)
+        {
+            var any = false;
+            foreach (var endpoint in plan.MappableEndpoints)
+            {
+                if (!shadows[endpoint.FullyQualifiedName].Any(member => member.HasTypedSchema)) continue;
+
+                writer.WriteLine($"static partial void {ShadowParameters.HookName(plan.FactoryIndex[endpoint.FullyQualifiedName])}(global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder builder);");
+                any = true;
+            }
+
+            if (any) writer.WriteLine();
+        }
+
+        /// <summary>Emits the <c>string?</c> shadow parameter type of every endpoint that has one.</summary>
+        private static void EmitShadowTypes(IndentedTextWriter writer, EndpointMappingPlan plan, Dictionary<string, List<ShadowMember>> shadows)
+        {
+            foreach (var endpoint in plan.MappableEndpoints)
+            {
+                var members = shadows[endpoint.FullyQualifiedName];
+                if (members.Count == 0) continue;
+
+                var typeName = ShadowParameters.TypeName(endpoint, plan.FactoryIndex[endpoint.FullyQualifiedName]);
+
+                writer.WriteLine($"/// <summary>The route and query parameters of <c>{endpoint.FullyQualifiedName.Replace("global::", "")}</c>, declared for ApiExplorer only.</summary>");
+                writer.WriteLine("/// <remarks>Bound by the framework and never read: every member is a string, so it cannot fail, and the endpoint's own binder does the real conversion.</remarks>");
+                using (writer.OpenBlock($"internal sealed class {typeName}"))
+                {
+                    foreach (var member in members)
+                    {
+                        var attribute = member.Source == BoundSource.Route
+                            ? "global::Microsoft.AspNetCore.Mvc.FromRouteAttribute"
+                            : "global::Microsoft.AspNetCore.Mvc.FromQueryAttribute";
+                        if (member.NameOverride is not null)
+                            attribute += $"(Name = {Literal(member.NameOverride)})";
+
+                        writer.WriteLine($"[{attribute}] public string? @{member.Identifier} {{ get; set; }}");
+                    }
+                }
+                writer.WriteLine();
+            }
         }
 
         private static string Literal(string value) =>

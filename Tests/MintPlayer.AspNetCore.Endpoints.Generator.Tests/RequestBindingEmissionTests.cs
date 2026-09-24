@@ -422,10 +422,15 @@ public class RequestBindingEmissionTests
         var routes = GeneratedEndpointHost.MapAndCollectRoutes(generated, assemblyName);
 
         var get = Assert.Single(routes, route => route.RoutePattern.RawText == "/users/{id}");
-        var produces = Assert.Single(get.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>());
+        // Since M5 the bound Id also declares its 400, and the restored default 200 must not be added
+        // next to a declared success: exactly one success, the typed one.
+        var getResponses = get.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>();
+        var produces = Assert.Single(getResponses, m => m.StatusCode is >= 200 and < 300);
         Assert.Equal(200, produces.StatusCode);
         Assert.Equal("UserResponse", produces.Type?.Name);
+        Assert.Contains(getResponses, m => m.StatusCode == 400);
 
+        // Binds nothing, so declares nothing beyond its success.
         var accepted = Assert.Single(routes, route => route.RoutePattern.RawText == "/users/{id}/accepted");
         Assert.Equal(202, Assert.Single(accepted.Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>()).StatusCode);
     }
@@ -442,13 +447,19 @@ public class RequestBindingEmissionTests
     /// every single-threaded test, so it is pinned here by position: <c>factory(</c> must appear
     /// exactly once in the helper, after <c>async (</c> and before the lambda's closing <c>);</c>.
     /// </remarks>
-    [Fact]
-    public void MapHelper_ConstructsTheEndpointInsideTheRequestDelegate()
+    /// <remarks>
+    /// Since M5 there are two helpers — <c>Map&lt;TEndpoint, TShadow&gt;</c> adds the
+    /// <c>[AsParameters]</c> shadow to the delegate's parameter list — and both are pinned.
+    /// </remarks>
+    [Theory]
+    [InlineData("Map<TEndpoint>(")]
+    [InlineData("Map<TEndpoint, TShadow>(")]
+    public void MapHelper_ConstructsTheEndpointInsideTheRequestDelegate(string helperName)
     {
         var generated = Generated(FixtureSources.Corpus);
 
-        var helperStart = generated.IndexOf("private static global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder Map<TEndpoint>(", StringComparison.Ordinal);
-        Assert.True(helperStart >= 0, "Map<TEndpoint> helper not found");
+        var helperStart = generated.IndexOf("private static global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder " + helperName, StringComparison.Ordinal);
+        Assert.True(helperStart >= 0, $"{helperName} helper not found");
 
         var helperEnd = generated.IndexOf("return builder;", helperStart, StringComparison.Ordinal);
         Assert.True(helperEnd > helperStart, "Map<TEndpoint> helper has no 'return builder;'");

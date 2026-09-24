@@ -354,17 +354,28 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// A typed endpoint with no declared response type gets no <c>Produces</c> metadata, because
-    /// there is no type to describe.
+    /// A typed endpoint with no declared response type gets no <i>typed</i> <c>Produces</c>
+    /// metadata, because there is no type to describe — only the untyped default 200 plus the 400
+    /// and 415 its body can fail with.
     /// </summary>
+    /// <remarks>
+    /// Rewritten for M5. It used to assert no produces metadata at all; M5 adds
+    /// <c>ProducesProblem(400/415)</c>, and because ApiExplorer only assumes a 200 for an endpoint with
+    /// no response metadata, the library restores that 200 itself. The failure this still catches is a
+    /// response <i>type</i> being invented for a level that declares none.
+    /// </remarks>
     [Fact]
-    public void TypedEndpointWithoutResponseType_HasNoProducesMetadata()
+    public void TypedEndpointWithoutResponseType_HasNoTypedProducesMetadata()
     {
         var updateUser = Endpoints().Single(endpoint =>
             endpoint.RoutePattern.RawText == "/api/users/{id}"
             && endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains("PUT") == true);
 
-        Assert.Empty(updateUser.Metadata.OfType<Microsoft.AspNetCore.Http.Metadata.IProducesResponseTypeMetadata>());
+        var produces = updateUser.Metadata.OfType<Microsoft.AspNetCore.Http.Metadata.IProducesResponseTypeMetadata>().ToArray();
+
+        Assert.Equal([200, 400, 415], produces.Select(m => m.StatusCode).Order().ToArray());
+        var success = Assert.Single(produces, m => m.StatusCode == 200);
+        Assert.True(success.Type is null || success.Type == typeof(void));
     }
 
     [Fact]

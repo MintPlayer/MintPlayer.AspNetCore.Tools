@@ -38,6 +38,13 @@
 		     transitively. Without an explicit reference the driver throws FileNotFoundException
 		     the moment it touches the IncrementalGenerator base class. -->
 		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="10.16.0" GeneratePathProperty="true" />
+
+		<!-- Only so the OpenAPI emission tests can compile EndpointOpenApi.g.cs: the harness keeps
+		     these assemblies OUT of the fixture compilation unless a test asks for them, because
+		     their mere presence is what switches that file on. Conditioned per TFM like
+		     Microsoft.AspNetCore.Mvc.Testing, so net11.0 compiles against Microsoft.OpenApi 3.x. -->
+		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" Condition="'$(TargetFramework)' == 'net10.0'" />
+		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="11.0.0-rc.1.26425.128" Condition="'$(TargetFramework)' == 'net11.0'" />
 	</ItemGroup>
 
 	<!--

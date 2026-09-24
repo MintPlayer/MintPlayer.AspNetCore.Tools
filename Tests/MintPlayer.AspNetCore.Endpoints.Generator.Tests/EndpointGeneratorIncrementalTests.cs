@@ -71,6 +71,54 @@ public class EndpointGeneratorIncrementalTests
     }
 
     /// <summary>
+    /// The OpenAPI flag added to the model in M5 keeps it value-equal: a rerun over an identical
+    /// compilation that references <c>Microsoft.AspNetCore.OpenApi</c> is cached too.
+    /// </summary>
+    /// <remarks>
+    /// The flag is computed from the compilation on every run; a flag that compared unequal (or a
+    /// model that stopped comparing it) would rerun both producers on every keystroke.
+    /// </remarks>
+    [Fact]
+    public void RerunOverAnIdenticalCompilationWithOpenApi_DoesNotRebuildTheModel()
+    {
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [FixtureSources.Corpus], includeOpenApi: true);
+
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+        var second = driver.RunGenerators(compilation.Clone()).GetRunResult();
+
+        var reasons = ReasonsFor(second, TrackedModelStep);
+
+        Assert.NotEmpty(reasons);
+        Assert.All(reasons, reason =>
+            Assert.True(
+                reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                $"expected the model step to be cached, was {reason}"));
+    }
+
+    /// <summary>
+    /// Adding the OpenAPI package to an existing compilation <i>does</i> rebuild the model, and the
+    /// second file appears.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the flag's equality: if it did not take part, the cache would serve the old
+    /// output and <c>EndpointOpenApi.g.cs</c> would be missing until an unrelated edit.
+    /// </remarks>
+    [Fact]
+    public void AddingTheOpenApiReference_RebuildsTheModel_AndEmitsTheOpenApiFile()
+    {
+        var without = EndpointGeneratorHarness.CreateCompilation("Fixtures", [FixtureSources.Corpus]);
+        var with = EndpointGeneratorHarness.CreateCompilation("Fixtures", [FixtureSources.Corpus], includeOpenApi: true);
+
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(without);
+        Assert.DoesNotContain(driver.GetRunResult().GeneratedTrees, tree => tree.FilePath.EndsWith("EndpointOpenApi.g.cs", StringComparison.Ordinal));
+
+        var second = driver.RunGenerators(without.WithReferences(with.References)).GetRunResult();
+
+        Assert.Contains(IncrementalStepRunReason.Modified, ReasonsFor(second, TrackedModelStep));
+        Assert.Contains(second.GeneratedTrees, tree => tree.FilePath.EndsWith("EndpointOpenApi.g.cs", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// Editing a handler body does not rebuild the model either — the case that matters most, since
     /// it is what a developer does all day in the IDE.
     /// </summary>

@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc;
+
 namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 
 /// <summary>
@@ -8,8 +10,14 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// itself, so there is no library base class to bind <see cref="Id"/>; the generated partial
 /// implements <c>IParameterBinder</c> and the mapper calls it first. That is the one reason this
 /// class is <c>partial</c> — a raw endpoint with nothing to bind need not be.
+/// <para>
+/// A raw endpoint decides its own status, so the generator cannot document it; the attribute does.
+/// Class-level attributes become endpoint metadata, so the OpenAPI document lists 204 — and, because
+/// a success is now declared, not the default 200 it would otherwise assume.
+/// </para>
 /// </remarks>
 [MemberOf<UsersApi>]
+[ProducesResponseType(StatusCodes.Status204NoContent)]
 public partial class DeleteUser : IDeleteEndpoint
 {
     public static string Path => "/{id}";

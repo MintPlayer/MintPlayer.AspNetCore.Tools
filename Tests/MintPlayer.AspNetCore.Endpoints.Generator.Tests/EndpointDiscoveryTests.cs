@@ -431,7 +431,7 @@ public class EndpointDiscoveryTests
 
         var result = EndpointGeneratorHarness.Run("Fixtures", source);
         Assert.Empty(result.Diagnostics);
-        Assert.Contains("Map<global::Fixtures.GetUser>", Generated(result));
+        Assert.Contains("Map<global::Fixtures.GetUser, GetUser_Parameters", Generated(result));
         // M4: the [RouteParam] is inherited, and the binder that assigns it is emitted into the
         // concrete endpoint — an abstract base never gets a partial of its own.
         Assert.Contains("protected override void BindParameters(", Generated(result));

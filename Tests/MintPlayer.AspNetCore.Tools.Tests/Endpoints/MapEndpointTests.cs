@@ -411,4 +411,71 @@ public class MapEndpointTests
         Assert.DoesNotContain(EndpointAttributes.ForMetadata(typeof(OverridesGroupEndpoint)), IsMembership);
         Assert.DoesNotContain(EndpointAttributes.ForMetadata(typeof(ListUsersEndpoint)), IsMembership);
     }
+
+    // ---------- M5: request-side OpenAPI metadata on the manual path ----------
+
+    public sealed record CreateThing(string Name);
+
+    private sealed class CreateThingEndpoint : IEndpoint<CreateThing>
+    {
+        public static string Path => "/things";
+        public static IEnumerable<string> Methods => ["POST"];
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        public Task<IResult> HandleAsync(CreateThing request, CancellationToken cancellationToken) => Task.FromResult(Results.Ok());
+    }
+
+    private sealed class ThingByIdEndpoint : IGetEndpoint
+    {
+        public static string Path => "/things/{id}";
+        [RouteParam] public int Id { get; set; }
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    private static int[] ProducedStatuses(RouteEndpoint endpoint) =>
+        [.. endpoint.Metadata.OfType<Microsoft.AspNetCore.Http.Metadata.IProducesResponseTypeMetadata>().Select(m => m.StatusCode).Order()];
+
+    /// <summary>
+    /// A typed endpoint mapped by hand declares the same request body, 400 and 415 the generated
+    /// mapping declares — through the same <c>EndpointDocumentation</c> helper.
+    /// </summary>
+    /// <remarks>
+    /// Catches the two registrations drifting apart, and catches the body declaration regressing to
+    /// <c>.Accepts&lt;T&gt;("application/json")</c>: content types on the metadata switch on routing's
+    /// <c>AcceptsMatcherPolicy</c>, which then answers XML or any other type with an empty 415 before
+    /// the library's formatters or its own <c>problem+json</c> 415 get a say. The default 200 must also
+    /// survive, since ApiExplorer stops assuming it once any response is declared.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_TypedEndpoint_DeclaresRequestBodyWithoutContentTypes_And400And415()
+    {
+        var endpoint = Assert.Single(Map<CreateThingEndpoint>());
+
+        var accepts = Assert.Single(endpoint.Metadata.OfType<Microsoft.AspNetCore.Http.Metadata.IAcceptsMetadata>());
+        Assert.Equal(typeof(CreateThing), accepts.RequestType);
+        Assert.Empty(accepts.ContentTypes);
+        Assert.False(accepts.IsOptional);
+
+        Assert.Equal([200, 400, 415], ProducedStatuses(endpoint));
+    }
+
+    /// <summary>
+    /// An endpoint with a <c>[RouteParam]</c> declares the 400 its conversion can produce, and no body.
+    /// </summary>
+    /// <remarks>
+    /// The manual path cannot declare the path parameter itself — it has no compile-time shadow type
+    /// to hand ApiExplorer; that divergence is documented on <c>MapEndpoint</c>. This pins what it can do.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_EndpointWithBoundProperty_Declares400_AndNoBody()
+    {
+        var endpoint = Assert.Single(Map<ThingByIdEndpoint>());
+
+        Assert.Empty(endpoint.Metadata.OfType<Microsoft.AspNetCore.Http.Metadata.IAcceptsMetadata>());
+        Assert.Equal([200, 400], ProducedStatuses(endpoint));
+    }
+
+    /// <summary>An endpoint that binds nothing declares nothing extra — not even the default 200.</summary>
+    [Fact]
+    public void MapEndpoint_EndpointWithNothingToBind_DeclaresNoResponses()
+        => Assert.Empty(ProducedStatuses(Assert.Single(Map<HealthEndpoint>())));
 }

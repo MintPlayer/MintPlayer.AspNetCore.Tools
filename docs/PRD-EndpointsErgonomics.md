@@ -609,12 +609,35 @@ to be valid at all (P4).
 **R4.2 — Body verbs declare a request body.** `.Accepts<TRequest>("application/json")`.
 The generator already holds `RequestTypeFqn`.
 
+> **Corrected by M5: `.Accepts<TRequest>("application/json")` must not be used.** It is not
+> documentation-only. Routing's `AcceptsMatcherPolicy` reads the content types it declares, and
+> once they exist routing answers `application/xml` or `text/plain` **itself** with an
+> empty-body 415, before the endpoint runs. That would replace the library's own
+> `problem+json` 415 and break every consumer whose MVC input formatters read XML — the content
+> negotiation R2.9 exists to keep. Reproduced in a scratch app. The body is declared instead
+> through a metadata object that lists no content types: routing ignores it, and the document
+> still shows `requestBody: { required: true, content: application/json }` on both TFMs.
+
 **R4.3 — Typed endpoints declare their documented failure responses.**
 `.ProducesProblem(400)` and `.ProducesProblem(415)`, which are exactly the responses the
 README's binding-failure table already guarantees.
 
+> **Found in M5: declaring failures removes ApiExplorer's assumed 200.** ApiExplorer assumes a
+> 200 only for an endpoint with no response metadata at all. After `.ProducesProblem(400)`,
+> `GET /api/users` and `PUT /api/users/{id}` documented *only* their failures. A convention now
+> restores a 200 when nothing declares a success — checking both the minimal-API response
+> metadata and the interface MVC's `[ProducesResponseType]` implements, since the attribute is
+> not visible through the first. So `DELETE /api/users/{id}` documents 204 alone, not 200 and
+> 204. 415 is declared only for endpoints with a request body; GET and DELETE with bound
+> properties document 400 only.
+
 **R4.4 — Enrichment uses `AddOpenApiOperationTransformer`, not `.WithOpenApi`.** The
 latter is deprecated and, separately, has never worked with `AddOpenApi()` (P4.2).
+
+> **Known gap, recorded in M5: the manual `MapEndpoint<T>()` path documents bodies and failures
+> but not route or query parameters.** It is reflection-based and has no compile-time shadow
+> type to hand the framework, so a templated route mapped by hand stays spec-invalid in the
+> document. Documented in `MapEndpoint`'s remarks. The generated path is complete.
 
 **R4.5 — `SuccessStatusCode` reaches level-2 endpoints.** `IDeleteEndpoint<TRequest>` has
 no `SuccessStatusCode` member, so the fix for P4.1 is generator-side: emit the declared
@@ -647,6 +670,22 @@ framework** — verified by reflecting over all 142 assemblies in
 `C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App\10.0.12`. They ship in the
 separate `Microsoft.AspNetCore.OpenApi` package, so the runtime library must take a
 reference on it. The PRD did not previously account for this.
+
+> **Superseded before implementation: the library takes no new dependency.** Referencing
+> `Microsoft.AspNetCore.OpenApi` from the runtime library would force it on every consumer,
+> including those that never produce an OpenAPI document. The generator can see whether the
+> *consumer's* compilation references it, so the schema transformer is emitted into the
+> generated file **only when it does**. Consumers who use OpenAPI get typed parameter schemas
+> with nothing to configure; consumers who do not pay nothing. The unconditional metadata —
+> the request-body declaration, `.ProducesProblem()`, the shadow parameter itself — lives in
+> the shared framework and needs no reference at all.
+>
+> As built in M5, the OpenAPI code is its own producer and its own file, `EndpointOpenApi.g.cs`,
+> emitted only when the consumer compilation resolves the OpenAPI transformer types.
+> `EndpointMapping.g.cs` names no OpenAPI type; the two are joined by one
+> `static partial void OnEndpointMapped{n}(RouteHandlerBuilder)` hook per endpoint, which the
+> compiler erases entirely when the OpenAPI file is absent. A test loads the compiled assembly
+> and confirms the hook methods do not exist without the package and do with it.
 
 **R4.8 — An optional route token cannot be documented as optional.** `/search/{term?}` is
 emitted as path `/search/{term}` with `required: true`, and no separate `/search` entry, in

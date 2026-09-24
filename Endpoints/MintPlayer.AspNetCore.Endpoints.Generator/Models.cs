@@ -188,14 +188,30 @@ internal sealed class GroupInfo : IEquatable<GroupInfo>
 
 internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
 {
-    public AssemblyInfo(string assemblyName, string? methodNameOverride)
+    public AssemblyInfo(string assemblyName, string? methodNameOverride, bool hasOpenApiTransformers = false)
     {
         AssemblyName = assemblyName;
         MethodNameOverride = methodNameOverride;
+        HasOpenApiTransformers = hasOpenApiTransformers;
     }
 
     public string AssemblyName { get; }
     public string? MethodNameOverride { get; }
+
+    /// <summary>
+    /// True when the consumer's compilation can register an OpenAPI operation transformer — it
+    /// references a <c>Microsoft.AspNetCore.OpenApi</c> built on <c>Microsoft.OpenApi</c> 2.x or
+    /// later.
+    /// </summary>
+    /// <remarks>
+    /// The runtime library deliberately does not reference <c>Microsoft.AspNetCore.OpenApi</c>:
+    /// <c>AddOpenApiOperationTransformer</c> is not in the shared framework, so taking it would force
+    /// the package on every consumer, including those that never produce a document (PRD R4.7).
+    /// The generated file is the one place that can depend on it conditionally — it is compiled
+    /// in the consumer's project, against the consumer's references. So the schema transformer is
+    /// emitted only when this is true, and a consumer without OpenAPI pays nothing.
+    /// </remarks>
+    public bool HasOpenApiTransformers { get; }
 
     /// <summary>
     /// The name of the generated mapping extension method — always a valid C# identifier.
@@ -276,7 +292,10 @@ internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
     }
 
     public bool Equals(AssemblyInfo? other) =>
-        other is not null && AssemblyName == other.AssemblyName && MethodNameOverride == other.MethodNameOverride;
+        other is not null &&
+        AssemblyName == other.AssemblyName &&
+        MethodNameOverride == other.MethodNameOverride &&
+        HasOpenApiTransformers == other.HasOpenApiTransformers;
 
     public override bool Equals(object? obj) => Equals(obj as AssemblyInfo);
     public override int GetHashCode() => AssemblyName?.GetHashCode() ?? 0;
