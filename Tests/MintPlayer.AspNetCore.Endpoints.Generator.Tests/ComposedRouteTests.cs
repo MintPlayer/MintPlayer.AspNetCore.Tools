@@ -22,6 +22,18 @@ public class ComposedRouteTests
         Assert.Equal("/api/users/{id}", ComposedRoute.Compose(["/api", "/users"], "/{id}"));
     }
 
+    /// <summary>
+    /// A part written without a leading slash is joined with one, as the framework joins it: a
+    /// group <c>/api</c> with a member path <c>users</c> answers <c>/api/users</c>. Plain concatenation
+    /// produced <c>/apiusers</c>, a route nothing maps at, so a duplicate on the real route was missed.
+    /// </summary>
+    [Fact]
+    public void Compose_InsertsTheSlashNeitherSideSupplies()
+    {
+        Assert.Equal("/api/users", ComposedRoute.Compose(["/api"], "users"));
+        Assert.Equal("/api", ComposedRoute.Compose(["/api"], ""));
+    }
+
     [Fact]
     public void Compose_WorksWithNoGroups()
     {
@@ -60,6 +72,19 @@ public class ComposedRouteTests
     [InlineData("/items/{slug}", "/items/{}")]
     // The root must not normalise away to nothing.
     [InlineData("/", "/")]
+    // A catch-all keeps a marker (one for * and ** alike): it loses to an ordinary parameter, so
+    // /api/{**rest} and /api/{id} coexist.
+    [InlineData("/api/{**rest}", "/api/{*}")]
+    [InlineData("/api/{*rest:nonfile}", "/api/{*:nonfile}")]
+    // Optional markers and defaults are not distinctions at the same position.
+    [InlineData("/a/{id?}", "/a/{}")]
+    [InlineData("/a/{id:int=5}", "/a/{:int}")]
+    [InlineData("/a/{id:int?}", "/a/{:int}")]
+    // ... but '=' and '?' inside a constraint's arguments are part of the constraint.
+    [InlineData("/a/{id:regex(^a=b?$)}", "/a/{:regex(^a=b?$)}")]
+    // A missing leading slash is not a distinction, and an escaped brace is a literal.
+    [InlineData("users", "/users")]
+    [InlineData("/lit/{{x}}", "/lit/{{x}}")]
     public void Normalise_ReducesToWhatTheMatcherActuallyCompares(string route, string expected)
     {
         Assert.Equal(expected, ComposedRoute.Normalise(route));
@@ -87,6 +112,7 @@ public class ComposedRouteTests
     [InlineData("/users/me", "/users/{id}")]
     [InlineData("/items/{id:int}", "/items/{slug}")]
     [InlineData("/api/users", "/api/products")]
+    [InlineData("/api/{**rest}", "/api/{id}")]
     public void Normalise_KeepsRoutesThatCoexistDistinct(string left, string right)
     {
         Assert.NotEqual(ComposedRoute.Normalise(left), ComposedRoute.Normalise(right));

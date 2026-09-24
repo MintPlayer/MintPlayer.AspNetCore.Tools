@@ -115,7 +115,7 @@ internal static class RouteLiteral
     /// produce a route the endpoint does not actually answer on — worse than admitting ignorance.
     /// </para>
     /// </remarks>
-    private static ExpressionSyntax? ValueExpressionOf(SyntaxNode node)
+    internal static ExpressionSyntax? ValueExpressionOf(SyntaxNode node)
     {
         if (node is not PropertyDeclarationSyntax declaration) return null;
 

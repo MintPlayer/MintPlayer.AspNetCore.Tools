@@ -26,9 +26,11 @@ internal sealed class EndpointMappingPlan
         Dictionary<string, int> factoryIndex,
         Dictionary<string, List<string>> groupChains,
         HashSet<string> cyclicGroups,
-        Dictionary<string, string?> composedRoutes)
+        Dictionary<string, string?> composedRoutes,
+        List<string> unjoinedGroups)
     {
         ComposedRoutes = composedRoutes;
+        UnjoinedGroups = unjoinedGroups;
         DeclaredEndpoints = declared;
         MappableEndpoints = mappable;
         Groups = groups;
@@ -67,6 +69,12 @@ internal sealed class EndpointMappingPlan
 
     /// <summary>Fully qualified endpoint name to its group chain, outermost group first.</summary>
     public Dictionary<string, List<string>> GroupChains { get; }
+
+    /// <summary>
+    /// Declared groups that no mappable endpoint uses, directly or through a nested group, in
+    /// ordinal order. They get no <c>MapGroup</c> call.
+    /// </summary>
+    public List<string> UnjoinedGroups { get; }
 
     /// <summary>Groups that are nested inside themselves, so have no outermost prefix.</summary>
     public HashSet<string> CyclicGroups { get; }
@@ -110,6 +118,13 @@ internal sealed class EndpointMappingPlan
                 current = parentOf.TryGetValue(current, out var parent) ? parent : null;
         }
         needed.RemoveWhere(unusable.Contains);
+
+        // The set difference MPEP016 reports. A cyclic group is excluded: it already has MPEP005,
+        // which is the real reason nothing maps through it.
+        var unjoined = groups
+            .Select(group => group.FullyQualifiedName)
+            .Where(fqn => !needed.Contains(fqn) && !unusable.Contains(fqn))
+            .ToList();
 
         var childGroups = needed
             .Where(fqn => parentOf.TryGetValue(fqn, out var parent) && parent is not null && needed.Contains(parent))
@@ -157,7 +172,7 @@ internal sealed class EndpointMappingPlan
 
         return new EndpointMappingPlan(
             declared, mappable, groups, rootGroups, childGroups, endpointsByGroup,
-            factoryIndex, groupChains, cyclic, composedRoutes);
+            factoryIndex, groupChains, cyclic, composedRoutes, unjoined);
     }
 
     private static List<string> ChainOf(string? groupFqn, Dictionary<string, string?> parentOf)

@@ -178,7 +178,12 @@ public class EndpointGroupingTests
             }
             """;
 
-        Assert.Empty(EndpointGeneratorHarness.Run("Fixtures", source).Diagnostics);
+        // No MPEP004. MPEP016 at Info on the parent the rejected second attribute named is expected:
+        // the generator reads the first [MemberOf<T>], so that group really is unjoined, and the
+        // compilation already fails on CS0579.
+        Assert.All(
+            EndpointGeneratorHarness.Run("Fixtures", source).Diagnostics,
+            diagnostic => Assert.Equal("MPEP016", diagnostic.Id));
 
         var errors = EndpointGeneratorHarness.RunAndCompile("Fixtures", source)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);

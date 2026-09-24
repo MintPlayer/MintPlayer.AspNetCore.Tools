@@ -475,6 +475,16 @@ The source generator emits diagnostics for common mistakes:
 | MPEP004 | Error | Endpoint group implements `IMemberOf<T>` for multiple parent groups; only one parent is allowed |
 | MPEP005 | Error | Endpoint group is nested inside itself through `IMemberOf<T>` |
 | MPEP006 | Warning | The mapping method name had to be adjusted, because the assembly name or `[assembly: EndpointsMethodName]` is not a valid C# identifier |
+| MPEP007 | Warning | Two endpoints answer the same verb on the same composed route — an ambiguous-match 500 at run time. Case, a trailing slash and parameter names are ignored; constraints are not; `/users/me` beside `/users/{id}` is fine and not reported. A custom `Methods` counts only when written as a literal collection or an `HttpVerbs` field |
+| MPEP008 | Warning | A `{token}` in a typed endpoint's own `Path` has no `[RouteParam]` property, so the handler cannot read it (raw endpoints are not checked) |
+| MPEP009 | Error | A `[RouteParam]` property names a parameter the composed route does not have, so every request is a 400 |
+| MPEP010 | Warning | `Path` already begins with its group's composed prefix, so the endpoint maps at the prefix twice |
+| MPEP011 | Info | `Path` is not a compile-time constant, so the route checks above are skipped for it |
+| MPEP016 | Info | A declared group is never joined by any endpoint, so it is not mapped |
+| MPEP018 | Info | The single type argument of `IGetEndpoint<T>`/`IDeleteEndpoint<T>` (the response) is named like a request (`*Request`, `*Body`, `*Command`) |
+
+The route checks (MPEP007–MPEP010) only run where the route can be read at compile time — a
+constant `Path` and constant group `Prefix`es. Anything else is skipped silently, never guessed.
 
 A base class that **already** derives from one of the endpoint bases (`PostEndpoint<T>`,
 `GetEndpoint<T>`, …) is the supported way to share endpoint behaviour and reports nothing — the

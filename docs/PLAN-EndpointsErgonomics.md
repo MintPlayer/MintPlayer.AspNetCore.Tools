@@ -464,13 +464,14 @@ The differentiator. Additive — this is the designated cut if the PR overruns.
       both parameters with identical constraint text; intersect verb sets. Normalise
       case, collapse `//`, trim trailing `/`. **Do not diagnose shadowing** — `/users/{id}`
       vs `/users/me` is correct behaviour.
-- [ ] MPEP008 route parameter with no bindable member; MPEP009 bound member not in the
-      template. Both **Error**, both opportunistic — silent when the route is unreadable.
+- [x] MPEP008 route token with no `[RouteParam]` property, **Warning**, typed levels only; MPEP009
+      `[RouteParam]` key not in the composed route, **Error**. Both opportunistic. (Originally both
+      Error; adjusted for design A, see the PRD note under R3.3.)
 - [ ] MPEP010 `Path` already begins with its group prefix, **Warning**. Falls out of M2 for
       almost free and catches a silent 404.
 - [ ] MPEP011 non-constant `Path`, **Info**.
-- [ ] MPEP012 duplicate endpoint name, **Error**. `.WithName()` duplicates throw on the
-      **first request**, not at startup — only the generator sees every endpoint at once.
+- [ ] ~~MPEP012 duplicate endpoint name~~ **Moved to M8.** Nothing emits `.WithName()` until typed
+      links need a stable name, and duplicates only throw once it is emitted.
 - [ ] MPEP014 bound members on a non-`partial` type; MPEP016 unjoined group, **Info** (the
       set difference already exists in `EndpointMappingPlan.From`).
 - [ ] **Every aborting diagnostic emits a throwing stub** so the consumer does not read a

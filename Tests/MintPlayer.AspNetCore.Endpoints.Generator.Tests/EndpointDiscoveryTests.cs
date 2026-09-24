@@ -271,8 +271,11 @@ public class EndpointDiscoveryTests
         var result = EndpointGeneratorHarness.Run("Fixtures", source);
         var generated = Generated(result);
 
-        // Nothing from the generator: the retired MPEP003 must not come back.
-        Assert.Empty(result.Diagnostics);
+        // Nothing from the generator: the retired MPEP003 must not come back. The one exception is
+        // MPEP016 at Info on the group the rejected second attribute named — the generator reads the
+        // first [MemberOf<T>], so that group really is unjoined — which is invisible by default and
+        // sits in a compilation CS0579 already fails.
+        Assert.All(result.Diagnostics, diagnostic => Assert.Equal("MPEP016", diagnostic.Id));
 
         // The base class, so the user's override compiles and the only error is the one that explains
         // the actual mistake.
@@ -335,7 +338,10 @@ public class EndpointDiscoveryTests
             }
             """;
 
-        Assert.Empty(EndpointGeneratorHarness.Run("Fixtures", firstPart, secondPart).Diagnostics);
+        // Only MPEP016 (Info) on the group the rejected attribute named; see EndpointInTwoGroups_IsCS0579_ButKeepsItsBaseClass.
+        Assert.All(
+            EndpointGeneratorHarness.Run("Fixtures", firstPart, secondPart).Diagnostics,
+            diagnostic => Assert.Equal("MPEP016", diagnostic.Id));
 
         var errors = Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", firstPart, secondPart));
         Assert.Equal("CS0579", Assert.Single(errors).Id);

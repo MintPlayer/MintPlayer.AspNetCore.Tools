@@ -99,8 +99,23 @@
 		<Error Condition="!Exists('%(_EndpointsGeneratorAnalyzer.FullPath)')"
 		       Text="PackEndpointsGenerator resolved '%(_EndpointsGeneratorAnalyzer.FullPath)' but that file does not exist. Packing would produce a nupkg with no analyzer in it and no error." />
 
+		<!--
+		  The folder comes from the generator project, which owns $(EndpointsAnalyzerPackPath), so the
+		  two packages cannot drift into different analyzer folders. A value passed on the command line
+		  is a global property and reaches both projects alike.
+		-->
+		<MSBuild Condition="'$(EndpointsAnalyzerPackPath)' == ''"
+		         Projects="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
+		         Targets="GetEndpointsAnalyzerPackPath"
+		         Properties="Configuration=$(Configuration)"
+		         RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier">
+			<Output TaskParameter="TargetOutputs" PropertyName="EndpointsAnalyzerPackPath" />
+		</MSBuild>
+		<Error Condition="'$(EndpointsAnalyzerPackPath)' == ''"
+		       Text="PackEndpointsGenerator could not resolve EndpointsAnalyzerPackPath from MintPlayer.AspNetCore.Endpoints.Generator. Packing without it would place the analyzer at the package root, where Roslyn never loads it." />
+
 		<ItemGroup>
-			<TfmSpecificPackageFile Include="@(_EndpointsGeneratorAnalyzer)" PackagePath="analyzers/dotnet/cs" />
+			<TfmSpecificPackageFile Include="@(_EndpointsGeneratorAnalyzer)" PackagePath="$(EndpointsAnalyzerPackPath)" />
 		</ItemGroup>
 	</Target>
 

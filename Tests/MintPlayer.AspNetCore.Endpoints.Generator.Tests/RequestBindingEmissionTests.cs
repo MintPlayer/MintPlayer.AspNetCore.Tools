@@ -64,7 +64,7 @@ public class RequestBindingEmissionTests
     private const string EveryFormEndpoint = """
         public partial class Search : IGetEndpoint<UserResponse>
         {
-            public static string Path => "/search/{id}/{kind}/{slug}/{name}";
+            public static string Path => "/search/{id}/{kind}/{slug}/{name}/{userId?}";
 
             [RouteParam] public int Id { get; set; }
             [RouteParam] public Kind Kind { get; set; }

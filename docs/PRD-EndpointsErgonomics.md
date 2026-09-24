@@ -571,6 +571,31 @@ MPEP004 are freed by R1.6 but are **not** reused, so shipped ids never change me
 | MPEP018 | Info | A body-less verb's arity-1 type argument looks like a request, not a response (R2.14c) |
 | MPEP019 | Error | An endpoint is nested inside a type that is not `partial` |
 
+> **Adjusted for design A before M6 (R2.1 moved binding onto the endpoint):**
+> - **MPEP008 becomes a Warning, and skips raw endpoints.** A raw endpoint may read
+>   `RouteValues` by hand, so an unbound token there is not evidence of anything. On a typed
+>   level the handler has no other way to reach the value, so an unbound token is almost always
+>   a typo — but a token can legitimately exist purely for matching (`/v{version}/…`), so it
+>   warns rather than blocks. It is checked against the endpoint's *own* `Path`, so a token a
+>   group prefix contributes is not blamed on the endpoint.
+> - **MPEP009 stays an Error.** A `[RouteParam]` whose key is not in the composed route is
+>   prototype A's control C3: it compiles clean and returns 400 on every request, forever.
+> - **MPEP012 moves to M8.** Duplicate names only matter once `.WithName()` is emitted, and
+>   nothing emits it until typed links need a stable name. Its id stays reserved.
+> - **MPEP007 treats an unreadable custom `Methods` as unknown verbs, and unknown as no
+>   conflict.** As built in M6, a custom `Methods` written as a collection expression, a
+>   `new[]`/`new string[]` of constants, or an `HttpVerbs.X` field *is* recovered at compile
+>   time, so the measured partial-overlap case — `["GET","HEAD"]` against
+>   `["HEAD","OPTIONS"]`, where HEAD answers 500 — is reported, naming only HEAD. Anything else
+>   stays silent.
+>
+> Two defects in M2's `ComposedRoute`, found by M6's measurements and fixed there: `Normalise`
+> erased the catch-all marker, which would have reported `/api/{**rest}` against `/api/{id}` as a
+> conflict although ASP.NET Core gives the ordinary parameter precedence and both answer; and
+> `Compose` joined `/api` + `users` as `/apiusers` where ASP.NET Core inserts the slash. And on
+> its first run MPEP009 found its own target shape in an M4 test fixture — a `[RouteParam("userId")]`
+> on a route with no `{userId}`.
+
 **R3.3a — MPEP019 exists because the compiler's own message is unhelpful here.** Found
 while implementing M1: an endpoint nested inside a non-`partial` type now emits a correct
 nested partial chain, which the compiler then rejects with **`CS0260 Missing partial

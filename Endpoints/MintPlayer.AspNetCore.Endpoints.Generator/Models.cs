@@ -23,8 +23,10 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         bool baseChainReachesEndpointBase = false,
         string? descriptorName = null, LocationKey? location = null,
         PathSpec? pathSpec = null, string? route = null,
-        ImmutableArray<BoundProperty> boundProperties = default)
+        ImmutableArray<BoundProperty> boundProperties = default,
+        string? knownMethods = null)
     {
+        KnownMethods = knownMethods;
         BoundProperties = boundProperties.IsDefault ? ImmutableArray<BoundProperty>.Empty : boundProperties;
         PathSpec = pathSpec;
         Route = route;
@@ -89,6 +91,15 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public ImmutableArray<BoundProperty> BoundProperties { get; }
 
     /// <summary>
+    /// The verbs this endpoint answers, encoded by <see cref="MethodsLiteral"/>, or
+    /// <see langword="null"/> when they are not known at compile time.
+    /// </summary>
+    /// <remarks>
+    /// Null is "unknown", and MPEP007 treats unknown as "no conflict" — never as a conflict.
+    /// </remarks>
+    public string? KnownMethods { get; }
+
+    /// <summary>
     /// True when the user's own base class already derives from one of the library's endpoint bases.
     /// </summary>
     /// <remarks>
@@ -147,6 +158,7 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         LocationKeys.AreEqual(Location, other.Location) &&
         PathSpecs.AreEqual(PathSpec, other.PathSpec) &&
         Route == other.Route &&
+        KnownMethods == other.KnownMethods &&
         // ImmutableArray's own equality compares the backing array by reference. Using it here
         // would make every run look like a change and kill incremental caching, silently.
         SequenceComparer<BoundProperty>.Instance.Equals(BoundProperties, other.BoundProperties);

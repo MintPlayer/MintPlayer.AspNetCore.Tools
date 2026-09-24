@@ -237,6 +237,33 @@ public class EndpointGeneratorIncrementalTests
     }
 
     /// <summary>
+    /// Editing a literal <c>Methods</c> rebuilds the model, because MPEP007 reads it.
+    /// </summary>
+    /// <remarks>
+    /// <c>EndpointInfo.KnownMethods</c> is part of equality. Leave it out and adding a verb that now
+    /// collides with another endpoint is served from the cache, so the duplicate-route warning only
+    /// appears after an unrelated edit — or never, in the IDE.
+    /// </remarks>
+    [Fact]
+    public void ChangingALiteralMethodsCollection_RebuildsTheModel()
+    {
+        var before = FixtureSources.Corpus;
+        var after = before.Replace("[\"OPTIONS\", \"HEAD\"]", "[\"OPTIONS\", \"HEAD\", \"TRACE\"]");
+        Assert.NotEqual(before, after);
+
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [before]);
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+
+        var edited = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Last(),
+            EndpointGeneratorHarness.CreateCompilation("Fixtures", [after]).SyntaxTrees.Last());
+
+        var result = driver.RunGenerators(edited).GetRunResult();
+
+        Assert.Contains(IncrementalStepRunReason.Modified, ReasonsFor(result, TrackedModelStep));
+    }
+
+    /// <summary>
     /// A change that <i>does</i> affect the model rebuilds it, so the caching is not simply stuck.
     /// </summary>
     /// <remarks>

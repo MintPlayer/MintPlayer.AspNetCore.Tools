@@ -34,11 +34,25 @@ internal static class ComposedRoute
         foreach (var prefix in groupPrefixes)
         {
             if (prefix is null) return null;
-            builder.Append(prefix);
+            Join(builder, prefix);
         }
 
-        builder.Append(path);
+        Join(builder, path);
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Appends a part, inserting the <c>/</c> the framework inserts when neither side supplies one:
+    /// a group <c>/api</c> with a member path of <c>users</c> maps at <c>/api/users</c>, not
+    /// <c>/apiusers</c>.
+    /// </summary>
+    private static void Join(StringBuilder builder, string part)
+    {
+        if (builder.Length > 0 && part.Length > 0 &&
+            builder[builder.Length - 1] != '/' && part[0] != '/')
+            builder.Append('/');
+
+        builder.Append(part);
     }
 
     /// <summary>
@@ -110,33 +124,34 @@ internal static class ComposedRoute
     /// </remarks>
     public static string Normalise(string route)
     {
-        var builder = new StringBuilder(route.Length);
-        var inParameter = false;
-        var sawConstraintSeparator = false;
+        var builder = new StringBuilder(route.Length + 1);
 
-        foreach (var c in route)
+        // "users" and "/users" are the same route to the matcher.
+        if (route.Length == 0 || route[0] != '/') builder.Append('/');
+
+        for (var i = 0; i < route.Length; i++)
         {
+            var c = route[i];
+
+            if (c == '{' && i + 1 < route.Length && route[i + 1] == '{')
+            {
+                builder.Append("{{");                   // an escaped literal brace, not a parameter
+                i++;
+                continue;
+            }
+
             if (c == '{')
             {
-                inParameter = true;
-                sawConstraintSeparator = false;
-                builder.Append('{');
-                continue;
-            }
+                var close = route.IndexOf('}', i + 1);
+                if (close < 0)
+                {
+                    // Malformed; keep the rest verbatim rather than inventing a parameter.
+                    builder.Append(route, i, route.Length - i);
+                    break;
+                }
 
-            if (c == '}')
-            {
-                inParameter = false;
-                builder.Append('}');
-                continue;
-            }
-
-            if (inParameter)
-            {
-                // Everything up to the first ':' is the name and is erased; the constraint that
-                // follows is kept verbatim, because it is what lets two parameter segments coexist.
-                if (c == ':') sawConstraintSeparator = true;
-                if (sawConstraintSeparator) builder.Append(c);
+                builder.Append(NormaliseParameter(route.Substring(i + 1, close - i - 1)));
+                i = close;
                 continue;
             }
 
@@ -151,5 +166,54 @@ internal static class ComposedRoute
             builder.Length--;
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// A parameter reduced to what decides whether it can coexist with another at the same
+    /// position: whether it is a catch-all, and its constraints.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>
+    /// The name is erased (<c>{id}</c> and <c>{key}</c> collide).
+    /// </item>
+    /// <item>
+    /// A catch-all keeps a <c>*</c> marker, <c>*</c> and <c>**</c> alike. A catch-all has lower
+    /// precedence than an ordinary parameter, so <c>/api/{**rest}</c> and <c>/api/{id}</c> both
+    /// answer — erasing the stars would call that a duplicate.
+    /// </item>
+    /// <item>
+    /// The optional marker and a default value are dropped: <c>/a/{id?}</c> and <c>/a/{id}</c> still
+    /// both claim <c>/a/5</c> at the same precedence.
+    /// </item>
+    /// </list>
+    /// </remarks>
+    private static string NormaliseParameter(string body)
+    {
+        var catchAll = body.StartsWith("*", StringComparison.Ordinal);
+        body = body.TrimStart('*');
+
+        var constraintStart = body.IndexOf(':');
+        var constraints = constraintStart < 0 ? "" : body.Substring(constraintStart);
+
+        // Cut a default ("=value") that is not inside a constraint's argument list, then a trailing
+        // optional marker. A regex constraint may legitimately contain '=' or '?' inside parentheses.
+        var depth = 0;
+        for (var i = 0; i < constraints.Length; i++)
+        {
+            var c = constraints[i];
+            if (c == '(') depth++;
+            else if (c == ')' && depth > 0) depth--;
+            else if (c == '=' && depth == 0)
+            {
+                constraints = constraints.Substring(0, i);
+                break;
+            }
+        }
+
+        if (constraints.EndsWith("?", StringComparison.Ordinal))
+            constraints = constraints.Substring(0, constraints.Length - 1);
+
+        return "{" + (catchAll ? "*" : "") + constraints + "}";
     }
 }
