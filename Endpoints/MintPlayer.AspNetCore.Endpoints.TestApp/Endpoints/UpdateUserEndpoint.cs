@@ -6,7 +6,8 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// PUT with typed request — body parsing from base class, no response type.
 /// PUT /api/users/{id}
 /// </summary>
-public partial class UpdateUser : IPutEndpoint<UpdateUserRequest>, IMemberOf<UsersApi>
+[MemberOf<UsersApi>]
+public partial class UpdateUser : IPutEndpoint<UpdateUserRequest>
 {
     public static string Path => "/{id}";
 

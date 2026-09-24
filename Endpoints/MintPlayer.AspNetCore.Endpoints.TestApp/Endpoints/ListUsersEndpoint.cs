@@ -3,7 +3,8 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// <summary>
 /// Raw GET inside a group — GET /api/users/
 /// </summary>
-public class ListUsers : IGetEndpoint, IMemberOf<UsersApi>
+[MemberOf<UsersApi>]
+public class ListUsers : IGetEndpoint
 {
     public static string Path => "/";
 

@@ -11,8 +11,14 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
 /// <remarks>
 /// Discovery is a two-stage filter: a cheap syntactic predicate on the base list, then a semantic
 /// check for <c>IEndpointBase</c>. Everything interesting happens in the gap between them, and every
-/// case where the semantic stage gives up has a diagnostic — MPEP001 to MPEP003 — because the
-/// alternative the consumer used to get was a bare CS0115 or CS0263 in their own file.
+/// case where the semantic stage gives up has a diagnostic — MPEP001 and MPEP002 — because the
+/// alternative the consumer used to get was a bare CS0115 or CS0263 in their own file. (MPEP003,
+/// an endpoint in two groups, is retired: that shape is now the compiler's CS0579.)
+/// <para>
+/// The syntactic stage accepts any non-abstract class with a base list. It used to look for an
+/// endpoint interface or <c>IMemberOf</c> by name, which silently missed an endpoint inheriting
+/// its verb from a base class of its own — see the <c>InheritedVerb</c> tests below.
+/// </para>
 /// </remarks>
 public class EndpointDiscoveryTests
 {
@@ -215,17 +221,22 @@ public class EndpointDiscoveryTests
     }
 
     /// <summary>
-    /// An endpoint in two groups gets MPEP003 — and still gets its base class.
+    /// An endpoint declaring two groups is <c>CS0579</c> — and still gets its base class.
     /// </summary>
     /// <remarks>
-    /// Two <c>IMemberOf&lt;T&gt;</c> means there is no single prefix, so the endpoint cannot be
-    /// routed. It used to be filtered out of the one list that drives the partial base class as
-    /// well, so a typed endpoint lost its route, its descriptor <i>and</i> its base class and failed
-    /// to compile with an unexplained CS0115. The base class has nothing to do with grouping, so it
-    /// is emitted regardless and the one real problem is reported once.
+    /// Two memberships means there is no single prefix, so the endpoint cannot be routed. Under
+    /// <c>IMemberOf&lt;T&gt;</c> the generator had to detect it and report MPEP003; with
+    /// <c>[MemberOf&lt;T&gt;]</c> being <c>AllowMultiple = false</c> the compiler refuses it, and
+    /// this test pins that the refusal really comes from the compiler rather than from nowhere.
+    /// <para>
+    /// The second half is older and still load-bearing. The endpoint used to be filtered out of the
+    /// one list that drives the partial base class as well, so a typed endpoint lost its base class
+    /// and failed with an unexplained CS0115 on top of the real error. The base class has nothing to
+    /// do with grouping, so it is emitted regardless and the one real problem is reported once.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void EndpointInTwoGroups_ReportsMPEP003_ButKeepsItsBaseClass()
+    public void EndpointInTwoGroups_IsCS0579_ButKeepsItsBaseClass()
     {
         var source = $$"""
             {{Preamble}}
@@ -240,7 +251,9 @@ public class EndpointDiscoveryTests
                 public static string Prefix => "/admin";
             }
 
-            public partial class CreateUser : IPostEndpoint<UserRequest, UserResponse>, IMemberOf<ApiGroup>, IMemberOf<AdminGroup>
+            [MemberOf<ApiGroup>]
+            [MemberOf<AdminGroup>]
+            public partial class CreateUser : IPostEndpoint<UserRequest, UserResponse>
             {
                 public static string Path => "/users";
 
@@ -258,25 +271,175 @@ public class EndpointDiscoveryTests
         var result = EndpointGeneratorHarness.Run("Fixtures", source);
         var generated = Generated(result);
 
-        var diagnostic = Assert.Single(result.Diagnostics);
-        Assert.Equal("MPEP003", diagnostic.Id);
-        Assert.Contains("CreateUser", diagnostic.GetMessage());
-        Assert.Equal("CreateUser", TextAt(diagnostic.Location));
+        // Nothing from the generator: the retired MPEP003 must not come back.
+        Assert.Empty(result.Diagnostics);
 
         // The base class, so the user's override compiles and the only error is the one that explains
         // the actual mistake.
         Assert.Contains(
             "partial class CreateUser : global::MintPlayer.AspNetCore.Endpoints.PostEndpoint<global::Fixtures.UserRequest> { }",
             generated);
-
-        // But no route and no descriptor: there is no prefix to put it behind.
-        Assert.DoesNotContain("Map<global::Fixtures.CreateUser>", generated);
-        Assert.DoesNotContain("Describe<global::Fixtures.CreateUser>", generated);
         Assert.Contains("global::Fixtures.HealthCheck", generated);
 
-        // MPEP003 is the only error; the CS0115 that used to accompany it is gone.
         var errors = Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", source));
-        Assert.DoesNotContain(errors, error => error.Id == "CS0115");
+        var duplicate = Assert.Single(errors);
+        Assert.Equal("CS0579", duplicate.Id);
+        Assert.Contains("MemberOf", TextAt(duplicate.Location));
+    }
+
+    /// <summary>
+    /// One <c>[MemberOf&lt;T&gt;]</c> on each of two partial declarations is also <c>CS0579</c>.
+    /// </summary>
+    /// <remarks>
+    /// This is the shape that made MPEP003 hard to retire: each declaration looks innocent on its
+    /// own, and a generator reading only the declaration that triggered it would see one group and
+    /// map it. The compiler merges attributes across partial parts before applying
+    /// <c>AllowMultiple</c>, which is what R1.6 relies on — pinned here so a change to the attribute's
+    /// usage (or an accidental <c>AllowMultiple = true</c>) cannot quietly bring back an endpoint
+    /// that is in two groups at once.
+    /// </remarks>
+    [Fact]
+    public void EndpointInTwoGroupsAcrossPartialDeclarations_IsCS0579()
+    {
+        const string firstPart = """
+            using MintPlayer.AspNetCore.Endpoints;
+
+            namespace Fixtures;
+
+            [MemberOf<AdminGroup>]
+            public partial class CreateUser
+            {
+            }
+            """;
+
+        var secondPart = $$"""
+            {{Preamble}}
+
+            public class ApiGroup : IEndpointGroup
+            {
+                public static string Prefix => "/api";
+            }
+
+            public class AdminGroup : IEndpointGroup
+            {
+                public static string Prefix => "/admin";
+            }
+
+            [MemberOf<ApiGroup>]
+            public partial class CreateUser : IPostEndpoint<UserRequest, UserResponse>
+            {
+                public static string Path => "/users";
+
+                public override Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
+                    => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        Assert.Empty(EndpointGeneratorHarness.Run("Fixtures", firstPart, secondPart).Diagnostics);
+
+        var errors = Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", firstPart, secondPart));
+        Assert.Equal("CS0579", Assert.Single(errors).Id);
+    }
+
+    /// <summary>
+    /// An endpoint whose verb comes from its own abstract base class, carrying its own
+    /// <c>[MemberOf&lt;T&gt;]</c>, is discovered and mapped under the group's prefix.
+    /// </summary>
+    /// <remarks>
+    /// The syntactic pre-filter used to match base-list names that began with an endpoint
+    /// interface, plus <c>IMemberOf</c>. This class names neither — its base list is just
+    /// <c>CreateUserBase</c> — and it only ever worked because an <c>IMemberOf&lt;T&gt;</c> sat in
+    /// the same base list. Moving membership to an attribute removed that accident, so without the
+    /// widened pre-filter this shape would have stopped being mapped, with no diagnostic.
+    /// </remarks>
+    [Fact]
+    public void InheritedVerb_WithOwnMembership_IsDiscoveredAndMappedUnderTheGroup()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            public class ApiGroup : IEndpointGroup
+            {
+                public static string Prefix => "/api";
+            }
+
+            public abstract class CreateUserBase : PostEndpoint<UserRequest>, IPostEndpoint<UserRequest, UserResponse>
+            {
+                public static string Path => "/users";
+            }
+
+            [MemberOf<ApiGroup>]
+            public partial class CreateUser : CreateUserBase
+            {
+                public override Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
+                    => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        Assert.Empty(EndpointGeneratorHarness.Run("Fixtures", source).Diagnostics);
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", source)));
+
+        const string assemblyName = "Fixtures.InheritedVerbOwnMembership";
+        var generated = EndpointGeneratorHarness.RunAndLoad(assemblyName, source);
+        var route = Assert.Single(GeneratedEndpointHost.MapAndCollectRoutes(generated, assemblyName));
+
+        Assert.Equal("/api/users", route.RoutePattern.RawText);
+    }
+
+    /// <summary>
+    /// An endpoint that declares <i>neither</i> its verb nor its group — both come from its base —
+    /// is discovered and mapped under the inherited group's prefix.
+    /// </summary>
+    /// <remarks>
+    /// This one was silently never mapped before M3: <c>partial class GetUser : UsersEndpointBase</c>
+    /// has nothing in its base list the old name-based pre-filter recognised, and with
+    /// <c>IMemberOf&lt;T&gt;</c> on the base there was not even the accidental match the previous
+    /// test used to rely on. It is the shape membership inheritance (R1.4) exists to support, so it
+    /// is asserted end to end — discovered, compiled, and mapped at the composed route.
+    /// </remarks>
+    [Fact]
+    public void InheritedVerbAndInheritedMembership_IsDiscoveredAndMappedUnderTheInheritedGroup()
+    {
+        var source = $$"""
+            {{Preamble}}
+
+            public class ApiGroup : IEndpointGroup
+            {
+                public static string Prefix => "/api";
+            }
+
+            [MemberOf<ApiGroup>]
+            public class UsersApi : IEndpointGroup
+            {
+                public static string Prefix => "/users";
+            }
+
+            [MemberOf<UsersApi>]
+            public abstract class UsersEndpointBase : GetEndpoint<UserRequest>, IGetEndpoint<UserRequest, UserResponse>
+            {
+                public static string Path => "/{id}";
+
+                protected override ValueTask<UserRequest?> BindRequestAsync(HttpContext context)
+                    => ValueTask.FromResult<UserRequest?>(new UserRequest(1));
+            }
+
+            public partial class GetUser : UsersEndpointBase
+            {
+                public override Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
+                    => Task.FromResult(Results.Ok(new UserResponse(request.Id, "Alice")));
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+        Assert.Empty(result.Diagnostics);
+        Assert.Contains("Map<global::Fixtures.GetUser>", Generated(result));
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", source)));
+
+        const string assemblyName = "Fixtures.InheritedVerbAndMembership";
+        var generated = EndpointGeneratorHarness.RunAndLoad(assemblyName, source);
+        var route = Assert.Single(GeneratedEndpointHost.MapAndCollectRoutes(generated, assemblyName));
+
+        Assert.Equal("/api/users/{id}", route.RoutePattern.RawText);
     }
 
     /// <summary>
@@ -306,7 +469,8 @@ public class EndpointDiscoveryTests
                 public static string Path => "/users";
             }
 
-            public class CreateUser : CreateUserBase, IMemberOf<ApiGroup>
+            [MemberOf<ApiGroup>]
+            public class CreateUser : CreateUserBase
             {
                 public override Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
                     => Task.FromResult(Results.Ok());
@@ -344,7 +508,8 @@ public class EndpointDiscoveryTests
 
             namespace Fixtures;
 
-            public partial class CreateUser : MyOwnBase, IMemberOf<ApiGroup>
+            [MemberOf<ApiGroup>]
+            public partial class CreateUser : MyOwnBase
             {
             }
             """;

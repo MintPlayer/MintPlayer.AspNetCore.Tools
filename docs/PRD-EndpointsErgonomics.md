@@ -268,6 +268,26 @@ the reflection path uses `GetCustomAttribute(inherit: true)`. `ISymbol.GetAttrib
 never returns inherited attributes, so `Inherited = true` alone is inert for a generator —
 the walk is mandatory, not optional.
 
+> **Corrected while implementing M3: the reflection path must not use
+> `GetCustomAttribute(inherit: true)`.** The runtime hides an inherited
+> `AllowMultiple = false` attribute only when the derived type carries the *same attribute
+> type* — and `MemberOfAttribute<UsersApi>` and `MemberOfAttribute<OtherApi>` are different
+> closed types. So for exactly the override case R1.5 permits, `inherit: true` returns
+> **both** attributes, and the reflection path would disagree with the generator. The
+> implementation walks `Type.BaseType` with `inherit: false` and takes the first hit — the
+> generator's rule, stated the same way. The same fact means `EndpointAttributes.ForMetadata`,
+> which does use `inherit: true`, would have leaked two membership attributes into an
+> overriding endpoint's metadata; R1.7's exclusion covers it.
+>
+> **And membership inheritance exposed a discovery bug that predates this PRD.** The
+> generator's syntactic pre-filter matched base-list names beginning with an endpoint
+> interface, plus `IMemberOf`. An endpoint inheriting its *verb* from a base class of its own
+> — `partial class GetUser : UsersEndpointBase<…>` — names neither, so it never reached the
+> semantic check and was silently never mapped. It only ever worked when an `IMemberOf<T>`
+> happened to sit in the same base list. With that accident removed the shape would have
+> broken outright, so the pre-filter now accepts any non-abstract class with a base list and
+> the semantic check decides. The cost is one `GetDeclaredSymbol` per such class.
+
 **R1.5 — A derived endpoint may re-declare membership to override it.** `AllowMultiple =
 false` gives CS0579 within one type; two declarations in a chain are legal and mean
 override.

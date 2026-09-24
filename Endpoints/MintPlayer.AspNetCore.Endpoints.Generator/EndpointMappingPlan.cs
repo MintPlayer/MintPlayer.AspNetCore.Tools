@@ -86,21 +86,17 @@ internal sealed class EndpointMappingPlan
             .ToList();
 
         var parentOf = groups
-            .Where(group => !group.HasMultipleParents)
             .ToDictionary(group => group.FullyQualifiedName, group => group.ParentGroupFqn, StringComparer.Ordinal);
 
         var cyclic = FindCyclicGroups(parentOf);
 
-        // A group with two parents, or one inside a cycle, has no single prefix. It is left out of
-        // the tree rather than quietly re-rooted at the top: a working route at the wrong URL is
-        // harder to notice than a missing one, and MPEP004/MPEP005 say what happened.
-        var unusable = new HashSet<string>(
-            groups.Where(group => group.HasMultipleParents).Select(group => group.FullyQualifiedName),
-            StringComparer.Ordinal);
-        unusable.UnionWith(cyclic);
+        // A group inside a cycle has no single prefix. It is left out of the tree rather than
+        // quietly re-rooted at the top: a working route at the wrong URL is harder to notice than a
+        // missing one, and MPEP005 says what happened. (A group with two parents used to be the
+        // other unusable shape; [MemberOf<T>] with AllowMultiple = false makes it CS0579 instead.)
+        var unusable = new HashSet<string>(cyclic, StringComparer.Ordinal);
 
         var mappable = declared
-            .Where(endpoint => !endpoint.HasMultipleGroups)
             .Where(endpoint => endpoint.GroupTypeFqn is null || !unusable.Contains(endpoint.GroupTypeFqn))
             .ToList();
 

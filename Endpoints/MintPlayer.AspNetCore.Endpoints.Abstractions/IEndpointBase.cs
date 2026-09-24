@@ -8,7 +8,7 @@ public interface IEndpointBase
     /// <summary>
     /// The route pattern this endpoint answers on (e.g. <c>"/api/users/{id}"</c>), <b>relative to
     /// the prefix of the group it belongs to</b>. An endpoint declaring
-    /// <c>IMemberOf&lt;UsersApi&gt;</c> where the group's prefix is <c>"/api/users"</c> writes
+    /// <c>[MemberOf&lt;UsersApi&gt;]</c> where the group's prefix is <c>"/api/users"</c> writes
     /// <c>"/{id}"</c> here, not the full route.
     /// </summary>
     /// <remarks>

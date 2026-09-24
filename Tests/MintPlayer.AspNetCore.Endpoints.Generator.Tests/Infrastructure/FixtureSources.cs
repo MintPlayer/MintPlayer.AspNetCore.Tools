@@ -40,13 +40,15 @@ internal static class FixtureSources
             public static string Prefix => "/api";
         }
 
-        public class UsersApi : IEndpointGroup, IMemberOf<ApiGroup>
+        [MemberOf<ApiGroup>]
+        public class UsersApi : IEndpointGroup
         {
             public static string Prefix => "/users";
             static void IEndpointGroup.Configure(RouteGroupBuilder group) => group.WithTags("Users");
         }
 
-        public class ProductsApi : IEndpointGroup, IMemberOf<ApiGroup>
+        [MemberOf<ApiGroup>]
+        public class ProductsApi : IEndpointGroup
         {
             public static string Prefix => "/products";
         }
@@ -64,13 +66,15 @@ internal static class FixtureSources
             public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
         }
 
-        public class ListUsers : IGetEndpoint, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public class ListUsers : IGetEndpoint
         {
             public static string Path => "/";
             public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
         }
 
-        public partial class GetUser : IGetEndpoint<GetUserRequest, UserResponse>, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class GetUser : IGetEndpoint<GetUserRequest, UserResponse>
         {
             public static string Path => "/{id}";
 
@@ -81,7 +85,8 @@ internal static class FixtureSources
                 => Task.FromResult(Results.Ok(new UserResponse(request.Id, "Alice")));
         }
 
-        public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserResponse>, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserResponse>
         {
             public static string Path => "/";
 
@@ -91,7 +96,8 @@ internal static class FixtureSources
                 => Task.FromResult(Results.Ok(new CreateUserResponse(1, request.Name)));
         }
 
-        public partial class UpdateUser : IPutEndpoint<UpdateUserRequest>, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class UpdateUser : IPutEndpoint<UpdateUserRequest>
         {
             public static string Path => "/{id}";
 
@@ -99,7 +105,8 @@ internal static class FixtureSources
                 => Task.FromResult(Results.Ok());
         }
 
-        public partial class PatchUser : IPatchEndpoint<UpdateUserRequest, UserResponse>, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class PatchUser : IPatchEndpoint<UpdateUserRequest, UserResponse>
         {
             public static string Path => "/{id}/patch";
 
@@ -107,7 +114,8 @@ internal static class FixtureSources
                 => Task.FromResult(Results.Ok(new UserResponse(request.Id, request.Name)));
         }
 
-        public partial class DeleteUser : IDeleteEndpoint<GetUserRequest>, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class DeleteUser : IDeleteEndpoint<GetUserRequest>
         {
             public static string Path => "/{id}";
 
@@ -118,7 +126,8 @@ internal static class FixtureSources
                 => Task.FromResult(Results.NoContent());
         }
 
-        public class ListProducts : IGetEndpoint, IMemberOf<ProductsApi>
+        [MemberOf<ProductsApi>]
+        public class ListProducts : IGetEndpoint
         {
             public static string Path => "/";
             public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());

@@ -6,7 +6,8 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// GET with typed request — must provide explicit BindRequestAsync.
 /// GET /api/users/{id}
 /// </summary>
-public partial class GetUser : IGetEndpoint<GetUserRequest, UserResponse>, IMemberOf<UsersApi>
+[MemberOf<UsersApi>]
+public partial class GetUser : IGetEndpoint<GetUserRequest, UserResponse>
 {
     public static string Path => "/{id}";
 

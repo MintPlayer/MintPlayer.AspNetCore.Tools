@@ -12,7 +12,7 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public EndpointInfo(string fqn, string ns, string className, bool isPartial, bool hasExistingBaseClass,
         EndpointLevel level, HttpMethodKind httpMethod,
         string? requestTypeFqn, string? responseTypeFqn,
-        string? groupTypeFqn, bool hasMultipleGroups,
+        string? groupTypeFqn,
         bool baseChainReachesEndpointBase = false,
         string? descriptorName = null, LocationKey? location = null,
         PathSpec? pathSpec = null, string? route = null)
@@ -29,7 +29,6 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         RequestTypeFqn = requestTypeFqn;
         ResponseTypeFqn = responseTypeFqn;
         GroupTypeFqn = groupTypeFqn;
-        HasMultipleGroups = hasMultipleGroups;
         BaseChainReachesEndpointBase = baseChainReachesEndpointBase;
         DescriptorName = descriptorName;
         Location = location;
@@ -45,7 +44,6 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public string? RequestTypeFqn { get; }
     public string? ResponseTypeFqn { get; }
     public string? GroupTypeFqn { get; }
-    public bool HasMultipleGroups { get; }
 
     /// <summary>
     /// The chain of types this endpoint is nested inside, or null when it sits directly in its
@@ -128,7 +126,6 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         RequestTypeFqn == other.RequestTypeFqn &&
         ResponseTypeFqn == other.ResponseTypeFqn &&
         GroupTypeFqn == other.GroupTypeFqn &&
-        HasMultipleGroups == other.HasMultipleGroups &&
         BaseChainReachesEndpointBase == other.BaseChainReachesEndpointBase &&
         DescriptorName == other.DescriptorName &&
         LocationKeys.AreEqual(Location, other.Location) &&
@@ -141,19 +138,17 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
 
 internal sealed class GroupInfo : IEquatable<GroupInfo>
 {
-    public GroupInfo(string fullyQualifiedName, string? parentGroupFqn, bool hasMultipleParents,
+    public GroupInfo(string fullyQualifiedName, string? parentGroupFqn,
         LocationKey? location = null, string? prefix = null)
     {
         FullyQualifiedName = fullyQualifiedName;
         ParentGroupFqn = parentGroupFqn;
-        HasMultipleParents = hasMultipleParents;
         Location = location;
         Prefix = prefix;
     }
 
     public string FullyQualifiedName { get; }
     public string? ParentGroupFqn { get; }
-    public bool HasMultipleParents { get; }
 
     /// <inheritdoc cref="EndpointInfo.Route"/>
     public string? Prefix { get; }
@@ -165,7 +160,6 @@ internal sealed class GroupInfo : IEquatable<GroupInfo>
         other is not null &&
         FullyQualifiedName == other.FullyQualifiedName &&
         ParentGroupFqn == other.ParentGroupFqn &&
-        HasMultipleParents == other.HasMultipleParents &&
         LocationKeys.AreEqual(Location, other.Location) &&
         Prefix == other.Prefix;
 

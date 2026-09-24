@@ -21,9 +21,6 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
         {
             var location = endpoint.Location.ToLocation(compilation);
 
-            if (endpoint.HasMultipleGroups)
-                yield return DiagnosticDescriptors.EndpointHasMultipleGroups.Create(location, endpoint.ClassName);
-
             if (endpoint.Level == EndpointLevel.Raw)
                 continue;
 
@@ -46,9 +43,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
         {
             var location = group.Location.ToLocation(compilation);
 
-            if (group.HasMultipleParents)
-                yield return DiagnosticDescriptors.GroupHasMultipleParents.Create(location, ShortNameOf(group.FullyQualifiedName));
-            else if (plan.CyclicGroups.Contains(group.FullyQualifiedName))
+            if (plan.CyclicGroups.Contains(group.FullyQualifiedName))
                 yield return DiagnosticDescriptors.GroupNestingIsCyclic.Create(location, ShortNameOf(group.FullyQualifiedName));
         }
 

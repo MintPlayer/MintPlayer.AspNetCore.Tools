@@ -6,7 +6,8 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// DELETE with typed request — must provide explicit BindRequestAsync.
 /// DELETE /api/users/{id}
 /// </summary>
-public partial class DeleteUser : IDeleteEndpoint<GetUserRequest>, IMemberOf<UsersApi>
+[MemberOf<UsersApi>]
+public partial class DeleteUser : IDeleteEndpoint<GetUserRequest>
 {
     public static string Path => "/{id}";
 

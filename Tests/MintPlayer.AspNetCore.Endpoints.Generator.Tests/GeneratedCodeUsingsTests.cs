@@ -22,7 +22,8 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
 /// <c>FrameworkReference Microsoft.AspNetCore.App</c>, or in any project with
 /// <c>&lt;ImplicitUsings&gt;disable&lt;/ImplicitUsings&gt;</c>. Both are entirely reasonable ways to
 /// consume the package, and the consumer got three CS1061 errors in generated source they cannot
-/// edit. The file now emits the three usings its own calls need.
+/// edit. The file first emitted the three usings its own calls needed; since R6.9 it calls the
+/// extension methods in their static, fully qualified form and needs no usings at all.
 /// </para>
 /// </remarks>
 public class GeneratedCodeUsingsTests
@@ -95,16 +96,26 @@ public class GeneratedCodeUsingsTests
         Assert.Empty(errors);
     }
 
-    /// <summary>The using directives are actually in the file, rather than happening to be in scope.</summary>
+    /// <summary>
+    /// The generated file carries no using directives at all: every extension method is called in
+    /// its static, fully qualified form.
+    /// </summary>
+    /// <remarks>
+    /// This used to assert the opposite — that the three usings the extension calls needed were in
+    /// the file, rather than merely happening to be in scope. R6.9 (M1) removed the dependency
+    /// instead of satisfying it, so the pin is now that none come back — a reintroduced extension
+    /// call would bring its using back with it. The compile tests above are what prove the static
+    /// calls actually resolve.
+    /// </remarks>
     [Fact]
-    public void GeneratedFile_EmitsTheUsingsItsExtensionCallsNeed()
+    public void GeneratedFile_CarriesNoUsingDirectives()
     {
         var generated = string.Join(
             "\n",
             EndpointGeneratorHarness.Run("Fixtures", TypedPostEndpoint).GeneratedTrees.Select(tree => tree.ToString()));
 
-        Assert.Contains("using Microsoft.AspNetCore.Builder;", generated);
-        Assert.Contains("using Microsoft.AspNetCore.Http;", generated);
-        Assert.Contains("using Microsoft.AspNetCore.Routing;", generated);
+        // Non-vacuous: the file does contain the extension calls the usings used to serve.
+        Assert.Contains("global::Microsoft.AspNetCore.Builder.", generated);
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"^\s*using\s+[\w.]+\s*;", System.Text.RegularExpressions.RegexOptions.Multiline), generated);
     }
 }

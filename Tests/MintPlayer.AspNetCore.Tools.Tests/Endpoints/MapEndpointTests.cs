@@ -69,7 +69,8 @@ public class MapEndpointTests
         public static string Prefix => "/api";
     }
 
-    private sealed class UsersGroup : IEndpointGroup, IMemberOf<ApiGroup>
+    [MemberOf<ApiGroup>]
+    private sealed class UsersGroup : IEndpointGroup
     {
         public static string Prefix => "/users";
         public static void Configure(RouteGroupBuilder group) => group.WithTags("Users");
@@ -80,18 +81,62 @@ public class MapEndpointTests
         public static string Prefix => "/admin";
     }
 
-    private sealed class ListUsersEndpoint : IGetEndpoint, IMemberOf<UsersGroup>
+    [MemberOf<UsersGroup>]
+    private sealed class ListUsersEndpoint : IGetEndpoint
     {
         public static string Path => "/";
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 
-    private sealed class AmbiguousEndpoint : IGetEndpoint, IMemberOf<UsersGroup>, IMemberOf<AdminGroup>
+    // Membership declared on plain abstract bases, so the endpoints below differ only in where the
+    // attribute sits. The bases do not implement IGetEndpoint: a class implementing it must supply the
+    // static Path itself, and each endpoint needs its own.
+    [MemberOf<UsersGroup>]
+    private abstract class InUsersGroup;
+
+    private abstract class InUsersGroupIndirectly : InUsersGroup;
+
+    private sealed class InheritsGroupEndpoint : InUsersGroup, IGetEndpoint
     {
-        public static string Path => "/";
-        public static IEnumerable<string> Methods => ["GET"];
+        public static string Path => "/inherited";
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
+
+    private sealed class InheritsGroupTwoLevelsUpEndpoint : InUsersGroupIndirectly, IGetEndpoint
+    {
+        public static string Path => "/two-up";
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    [MemberOf<AdminGroup>]
+    private sealed class OverridesGroupEndpoint : InUsersGroup, IGetEndpoint
+    {
+        public static string Path => "/overridden";
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    [MemberOf<CycleB>]
+    private sealed class CycleA : IEndpointGroup
+    {
+        public static string Prefix => "/a";
+    }
+
+    [MemberOf<CycleA>]
+    private sealed class CycleB : IEndpointGroup
+    {
+        public static string Prefix => "/b";
+    }
+
+    [MemberOf<CycleA>]
+    private sealed class InCycleEndpoint : IGetEndpoint
+    {
+        public static string Path => "/";
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    private static bool IsMembership(object attribute)
+        => attribute.GetType() is { IsGenericType: true } type
+            && type.GetGenericTypeDefinition() == typeof(MemberOfAttribute<>);
 
     private static IReadOnlyList<RouteEndpoint> Map<TEndpoint>() where TEndpoint : class, IEndpoint
     {
@@ -223,7 +268,8 @@ public class MapEndpointTests
     /// </summary>
     /// <remarks>
     /// It used to map at <c>TEndpoint.Path</c> verbatim, so an endpoint declaring
-    /// <c>IMemberOf&lt;UsersGroup&gt;</c> with <c>Path =&gt; "/"</c> landed at <c>/</c> instead of
+    /// membership of <c>UsersGroup</c> (then <c>IMemberOf&lt;UsersGroup&gt;</c>, now
+    /// <c>[MemberOf&lt;UsersGroup&gt;]</c>) with <c>Path =&gt; "/"</c> landed at <c>/</c> instead of
     /// <c>/api/users/</c>. The README advertised manual registration with no such caveat, so an
     /// application mixing generated and manual registration got two different routes for the same
     /// endpoint class depending on how it was mapped — which is the kind of difference nobody looks
@@ -250,21 +296,119 @@ public class MapEndpointTests
     }
 
     /// <summary>
-    /// An endpoint in two groups is refused, loudly, at registration time.
+    /// An endpoint in two groups can no longer reach <c>MapEndpoint</c> at all: the attribute is
+    /// single-use, so the shape is <c>CS0579</c>.
     /// </summary>
     /// <remarks>
-    /// There is no single prefix to resolve, and the generator reports MPEP003 for exactly this shape.
-    /// Picking one arbitrarily would register the endpoint at a route the author never asked for, and
-    /// silence is what made the whole class of grouping defects hard to find.
+    /// There is no single prefix to resolve for such an endpoint, and picking one arbitrarily would
+    /// register it at a route the author never asked for. Under <c>IMemberOf&lt;T&gt;</c> this method
+    /// had to refuse it with an <see cref="InvalidOperationException"/> at registration time; now the
+    /// compiler refuses it earlier, and that guard was removed. What keeps the removal safe is the
+    /// attribute's usage, so that is what is pinned here — <c>AllowMultiple = true</c> would bring the
+    /// ambiguous shape back with nothing left to catch it. (The compile error itself is asserted by
+    /// the generator suite, which can compile a fixture that does not build.)
+    /// <para>
+    /// <c>Inherited = true</c> is pinned alongside it: it is what makes membership on a base class
+    /// meaningful to anything reading the attribute through reflection.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void MapEndpoint_EndpointInTwoGroups_Throws()
+    public void MemberOfAttribute_IsSingleUse_SoAnEndpointInTwoGroupsCannotBeDeclared()
+    {
+        var usage = Assert.Single(
+            typeof(MemberOfAttribute<>).GetCustomAttributes(typeof(AttributeUsageAttribute), inherit: false)
+                .Cast<AttributeUsageAttribute>());
+
+        Assert.False(usage.AllowMultiple);
+        Assert.True(usage.Inherited);
+        Assert.Equal(AttributeTargets.Class, usage.ValidOn);
+    }
+
+    /// <summary>
+    /// Cyclic group nesting is refused, loudly, at registration time.
+    /// </summary>
+    /// <remarks>
+    /// This is the one grouping mistake C# cannot forbid — <c>[MemberOf&lt;B&gt;] class A</c> and
+    /// <c>[MemberOf&lt;A&gt;] class B</c> compile — so the runtime still has to catch it, just as the
+    /// generator reports MPEP005. A cycle has no outermost group and so no prefix; without the visited
+    /// set the chain walk would never terminate.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_CyclicGroupNesting_Throws()
     {
         var app = WebApplication.CreateBuilder([]).Build();
 
-        var exception = Assert.Throws<InvalidOperationException>(() => app.MapEndpoint<AmbiguousEndpoint>());
+        var exception = Assert.Throws<InvalidOperationException>(() => app.MapEndpoint<InCycleEndpoint>());
 
-        Assert.Contains("IMemberOf", exception.Message);
-        Assert.Contains(nameof(AmbiguousEndpoint), exception.Message);
+        Assert.Contains("cyclic", exception.Message);
+    }
+
+    /// <summary>Membership declared on a base class applies to the derived endpoint.</summary>
+    /// <remarks>
+    /// <c>ISymbol.GetAttributes()</c> never returns inherited attributes, so the generator walks the
+    /// base chain explicitly; this path walks <see cref="Type.BaseType"/>. Both must land here, or an
+    /// application mixing generated and manual registration maps one class at two routes.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_MembershipOnABaseClass_Applies()
+    {
+        var endpoint = Assert.Single(Map<InheritsGroupEndpoint>());
+
+        Assert.Equal("/api/users/inherited", endpoint.RoutePattern.RawText);
+    }
+
+    /// <summary>The walk does not stop at the direct base.</summary>
+    [Fact]
+    public void MapEndpoint_MembershipTwoLevelsUp_Applies()
+    {
+        var endpoint = Assert.Single(Map<InheritsGroupTwoLevelsUpEndpoint>());
+
+        Assert.Equal("/api/users/two-up", endpoint.RoutePattern.RawText);
+    }
+
+    /// <summary>
+    /// A derived endpoint's own <c>[MemberOf&lt;T&gt;]</c> overrides its base's: nearest wins.
+    /// </summary>
+    /// <remarks>
+    /// This is the case <c>GetCustomAttributes(inherit: true)</c> gets wrong, and the first assertion
+    /// proves the premise rather than assuming it: the runtime only hides an inherited
+    /// <c>AllowMultiple = false</c> attribute when the derived type carries the <i>same</i> attribute
+    /// type, and <c>MemberOfAttribute&lt;AdminGroup&gt;</c> and
+    /// <c>MemberOfAttribute&lt;UsersGroup&gt;</c> are different closed types — so it returns both. Any
+    /// reading of membership through <c>inherit: true</c> that expects one match
+    /// (<c>SingleOrDefault</c>, <c>GetCustomAttribute</c>) throws here, and one that takes an
+    /// arbitrary match depends on an enumeration order reflection does not document.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_MembershipOnSelfAndOnBase_TheDerivedDeclarationWins()
+    {
+        Assert.Equal(
+            2,
+            typeof(OverridesGroupEndpoint).GetCustomAttributes(inherit: true).Count(IsMembership));
+
+        var endpoint = Assert.Single(Map<OverridesGroupEndpoint>());
+
+        Assert.Equal("/admin/overridden", endpoint.RoutePattern.RawText);
+    }
+
+    /// <summary>
+    /// <c>[MemberOf&lt;T&gt;]</c> is an instruction to the mapper, not route metadata, and does not
+    /// reach <c>endpoint.Metadata</c> — including for an endpoint that overrides its base's group.
+    /// </summary>
+    /// <remarks>
+    /// Class-level attributes are transferred with <c>inherit: true</c>, and before R1.7 nothing
+    /// excluded membership, so every grouped endpoint carried a library-internal attribute where
+    /// middleware and OpenAPI transformers enumerate metadata. The overriding endpoint is the sharp
+    /// case: it would have carried <i>two</i> of them, naming two different groups, one of which it
+    /// is not in.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_DoesNotTransferMembershipIntoEndpointMetadata()
+    {
+        foreach (var endpoint in Map<ListUsersEndpoint>().Concat(Map<InheritsGroupEndpoint>()).Concat(Map<OverridesGroupEndpoint>()))
+            Assert.DoesNotContain(endpoint.Metadata, IsMembership);
+
+        Assert.DoesNotContain(EndpointAttributes.ForMetadata(typeof(OverridesGroupEndpoint)), IsMembership);
+        Assert.DoesNotContain(EndpointAttributes.ForMetadata(typeof(ListUsersEndpoint)), IsMembership);
     }
 }

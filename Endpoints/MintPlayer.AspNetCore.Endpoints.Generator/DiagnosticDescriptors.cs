@@ -24,32 +24,17 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Derive the base class itself from the matching endpoint base (PostEndpoint<T>, GetEndpoint<T>, …) so the chain ends where the generator would have put it.");
 
-    public static readonly DiagnosticDescriptor EndpointHasMultipleGroups = new(
-        id: "MPEP003",
-        title: "Endpoint belongs to multiple groups",
-        messageFormat: "Endpoint class '{0}' implements IMemberOf<T> for multiple groups; only one group is allowed",
-        category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true,
-        description: "An endpoint's route is its group's prefix plus its own path, so two groups mean two routes and no way to choose.");
-
-    // MPEP003's message names an *endpoint* class and an endpoint's single route; a group with two
-    // parents is a different shape with a different consequence (every endpoint beneath it moves),
-    // and a consumer filtering warnings needs to be able to tell them apart. Hence its own id
-    // rather than reusing MPEP003 with a vaguer message.
-    public static readonly DiagnosticDescriptor GroupHasMultipleParents = new(
-        id: "MPEP004",
-        title: "Endpoint group belongs to multiple parent groups",
-        messageFormat: "Endpoint group '{0}' implements IMemberOf<T> for multiple parent groups; only one parent is allowed",
-        category: Category,
-        defaultSeverity: DiagnosticSeverity.Error,
-        isEnabledByDefault: true,
-        description: "A group's prefix is its parent's prefix plus its own, so two parents mean every endpoint in the group has two routes.");
+    // MPEP003 (endpoint in two groups) and MPEP004 (group with two parents) are retired, and their
+    // ids are deliberately NOT reused: a shipped id must never change meaning. Both shapes are now
+    // CS0579 - [MemberOf<T>] is AllowMultiple = false, which the compiler enforces even across
+    // partial declarations. The generator still runs on that invalid compilation and takes the
+    // first attribute, but the build fails on CS0579 either way, so a diagnostic of ours would only
+    // repeat it.
 
     public static readonly DiagnosticDescriptor GroupNestingIsCyclic = new(
         id: "MPEP005",
         title: "Endpoint group nesting is cyclic",
-        messageFormat: "Endpoint group '{0}' is nested inside itself through IMemberOf<T>; the group and its endpoints cannot be mapped",
+        messageFormat: "Endpoint group '{0}' is nested inside itself through [MemberOf<T>]; the group and its endpoints cannot be mapped",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,

@@ -21,16 +21,17 @@ public class EndpointInfoTests
         bool isPartial = true,
         bool hasExistingBaseClass = false,
         string? groupTypeFqn = null,
-        bool hasMultipleGroups = false,
         bool baseChainReachesEndpointBase = false,
-        string? descriptorName = null)
+        string? descriptorName = null,
+        string? route = null)
         => new(
             "global::Fixtures.MyEndpoint", "Fixtures", "MyEndpoint",
             isPartial, hasExistingBaseClass,
             level, httpMethod,
             requestTypeFqn, responseTypeFqn,
-            groupTypeFqn, hasMultipleGroups,
-            baseChainReachesEndpointBase, descriptorName);
+            groupTypeFqn,
+            baseChainReachesEndpointBase, descriptorName,
+            route: route);
 
     /// <summary>A raw endpoint needs no base class — it handles <c>HttpContext</c> itself.</summary>
     [Fact]
@@ -84,9 +85,11 @@ public class EndpointInfoTests
         Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, isPartial: false));
         Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, hasExistingBaseClass: true));
         Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, groupTypeFqn: "global::Fixtures.ApiGroup"));
-        Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, hasMultipleGroups: true));
+        // HasMultipleGroups used to be compared here. It is gone with MPEP003: two memberships on one
+        // type is CS0579, so there is no longer a second group to record.
         Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, baseChainReachesEndpointBase: true));
         Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, descriptorName: "Named"));
+        Assert.NotEqual(info, Info(EndpointLevel.Typed, HttpMethodKind.Post, route: "/users"));
         Assert.False(info.Equals(null));
         Assert.False(info.Equals("global::Fixtures.MyEndpoint"));
     }
@@ -118,12 +121,14 @@ public class EndpointInfoTests
     [Fact]
     public void GroupInfo_Equals_ComparesEveryMember()
     {
-        var group = new GroupInfo("global::Fixtures.UsersApi", "global::Fixtures.ApiGroup", false);
+        var group = new GroupInfo("global::Fixtures.UsersApi", "global::Fixtures.ApiGroup", prefix: "/users");
 
-        Assert.Equal(group, new GroupInfo("global::Fixtures.UsersApi", "global::Fixtures.ApiGroup", false));
-        Assert.NotEqual(group, new GroupInfo("global::Fixtures.OtherApi", "global::Fixtures.ApiGroup", false));
-        Assert.NotEqual(group, new GroupInfo("global::Fixtures.UsersApi", null, false));
-        Assert.NotEqual(group, new GroupInfo("global::Fixtures.UsersApi", "global::Fixtures.ApiGroup", true));
+        Assert.Equal(group, new GroupInfo("global::Fixtures.UsersApi", "global::Fixtures.ApiGroup", prefix: "/users"));
+        Assert.NotEqual(group, new GroupInfo("global::Fixtures.OtherApi", "global::Fixtures.ApiGroup", prefix: "/users"));
+        Assert.NotEqual(group, new GroupInfo("global::Fixtures.UsersApi", null, prefix: "/users"));
+        // HasMultipleParents used to be compared here; it went with MPEP004, since a group with two
+        // parents is now CS0579. The prefix is the member that took its place in the comparison.
+        Assert.NotEqual(group, new GroupInfo("global::Fixtures.UsersApi", "global::Fixtures.ApiGroup", prefix: "/other"));
         Assert.False(group.Equals(null));
         Assert.False(group.Equals("global::Fixtures.UsersApi"));
     }

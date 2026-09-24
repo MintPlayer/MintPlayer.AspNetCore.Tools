@@ -3,7 +3,8 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// <summary>
 /// Route group for product endpoints — nested under ApiGroup, so resolves to /api/products.
 /// </summary>
-public class ProductsApi : IEndpointGroup, IMemberOf<ApiGroup>
+[MemberOf<ApiGroup>]
+public class ProductsApi : IEndpointGroup
 {
     public static string Prefix => "/products";
 

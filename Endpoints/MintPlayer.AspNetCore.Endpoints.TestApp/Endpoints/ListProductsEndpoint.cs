@@ -3,7 +3,8 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// <summary>
 /// GET /api/products/ — list all products.
 /// </summary>
-public class ListProducts : IGetEndpoint, IMemberOf<ProductsApi>
+[MemberOf<ProductsApi>]
+public class ListProducts : IGetEndpoint
 {
     public static string Path => "/";
 

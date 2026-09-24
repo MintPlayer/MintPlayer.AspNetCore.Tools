@@ -28,7 +28,8 @@ public static partial class NestedContainer
     /// GET /api/users/nested/{id} — identical in behaviour to <see cref="GetUser"/>, and declared
     /// inside a containing type so the nesting is exercised end to end.
     /// </summary>
-    public partial class NestedGetUser : IGetEndpoint<GetUserRequest, UserResponse>, IMemberOf<UsersApi>
+    [MemberOf<UsersApi>]
+    public partial class NestedGetUser : IGetEndpoint<GetUserRequest, UserResponse>
     {
         public static string Path => "/nested/{id}";
 

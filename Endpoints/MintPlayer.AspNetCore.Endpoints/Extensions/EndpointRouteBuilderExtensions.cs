@@ -16,20 +16,19 @@ public static class EndpointRouteBuilderExtensions
     /// <c>Map{AssemblyName}Endpoints()</c> method instead.
     /// </summary>
     /// <remarks>
-    /// An endpoint that declares <c>IMemberOf&lt;TGroup&gt;</c> is mapped under that group's prefix,
-    /// exactly as the generated mapping would map it — so an application that mixes generated and
-    /// manual registration gets the same route either way. Each call creates its own
-    /// <c>RouteGroupBuilder</c> chain, so the group's <c>Configure</c> hook runs once per call.
+    /// An endpoint in a group — through <c>[MemberOf&lt;TGroup&gt;]</c> on itself or on a base
+    /// class — is mapped under that group's prefix, exactly as the generated mapping would map it,
+    /// so an application that mixes generated and manual registration gets the same route either
+    /// way. Each call creates its own <c>RouteGroupBuilder</c> chain, so the group's
+    /// <c>Configure</c> hook runs once per call.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
-    /// The endpoint or one of its groups declares more than one <c>IMemberOf&lt;TGroup&gt;</c>, or
-    /// the group nesting is cyclic. Neither has a single resolvable prefix, and guessing one would
-    /// silently register the endpoint at the wrong route.
+    /// The group nesting is cyclic. A cycle has no outermost group and so no prefix, and guessing
+    /// one would silently register the endpoint at the wrong route. (Two memberships on one type is
+    /// no longer possible to express: it is <c>CS0579</c>.)
     /// </exception>
     public static IEndpointRouteBuilder MapEndpoint<
-        [DynamicallyAccessedMembers(
-            DynamicallyAccessedMemberTypes.PublicConstructors |
-            DynamicallyAccessedMemberTypes.Interfaces)] TEndpoint>(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] TEndpoint>(
         this IEndpointRouteBuilder app)
         where TEndpoint : class, IEndpoint
     {
@@ -70,8 +69,7 @@ public static class EndpointRouteBuilderExtensions
     /// <summary>
     /// The group types <paramref name="type"/> sits in, outermost first.
     /// </summary>
-    private static List<Type> ResolveGroupChain(
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.Interfaces)] Type type)
+    private static List<Type> ResolveGroupChain(Type type)
     {
         var chain = new List<Type>();
         var visited = new HashSet<Type>();
@@ -94,23 +92,37 @@ public static class EndpointRouteBuilderExtensions
         return chain;
     }
 
-    private static Type? ParentGroupOf(
-        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.Interfaces)] Type type)
+    /// <summary>
+    /// The group <paramref name="type"/> belongs to: the nearest <c>[MemberOf&lt;TGroup&gt;]</c>
+    /// walking up the base chain, or <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// This must implement exactly the rule the source generator implements, or an application
+    /// mixing generated and manual registration maps the same endpoint at two different routes.
+    /// <para>
+    /// <b>It deliberately does not use <c>GetCustomAttributes(inherit: true)</c>.</b> The runtime
+    /// only hides an inherited <c>AllowMultiple = false</c> attribute when the derived type carries
+    /// the <i>same attribute type</i> — and <c>MemberOfAttribute&lt;UsersApi&gt;</c> and
+    /// <c>MemberOfAttribute&lt;OtherApi&gt;</c> are different closed types. So for an endpoint that
+    /// overrides its base's group, <c>inherit: true</c> returns both, and picking either one is a
+    /// guess. Walking <see cref="Type.BaseType"/> with <c>inherit: false</c> and taking the first
+    /// hit is the generator's rule, stated the same way.
+    /// </para>
+    /// </remarks>
+    private static Type? ParentGroupOf(Type type)
     {
-        var memberships = type.GetInterfaces()
-            .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IMemberOf<>))
-            .Select(i => i.GetGenericArguments()[0])
-            .Distinct()
-            .ToArray();
-
-        return memberships.Length switch
+        for (var current = type; current is not null; current = current.BaseType)
         {
-            0 => null,
-            1 => memberships[0],
-            _ => throw new InvalidOperationException(
-                $"'{type.FullName}' declares IMemberOf<> for {memberships.Length} groups " +
-                $"({string.Join(", ", memberships.Select(g => g.Name))}); exactly one is allowed.")
-        };
+            foreach (var attribute in current.GetCustomAttributes(inherit: false))
+            {
+                var attributeType = attribute.GetType();
+                if (attributeType.IsGenericType &&
+                    attributeType.GetGenericTypeDefinition() == typeof(MemberOfAttribute<>))
+                    return attributeType.GetGenericArguments()[0];
+            }
+        }
+
+        return null;
     }
 
     // Prefix and Configure are static abstract interface members, so they can only be reached

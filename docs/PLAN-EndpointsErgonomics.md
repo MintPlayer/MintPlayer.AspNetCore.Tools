@@ -334,8 +334,11 @@ The foundation. M5, M6, M8 and M9 all depend on it, and it is ~40 lines.
       package. (R1.4, R1.5)
 - [ ] `EndpointGenerator.cs:74-95` — drop the dead `name.StartsWith("IMemberOf")` arm from
       `IsEndpointCandidate`.
-- [ ] `EndpointRouteBuilderExtensions.cs:91-107` — `ParentGroupOf` switches to
-      `GetCustomAttribute(inherit: true)`, implementing the **same** nearest-wins rule.
+- [x] `EndpointRouteBuilderExtensions.cs` — `ParentGroupOf` walks `Type.BaseType` with
+      `GetCustomAttributes(inherit: false)` and takes the first hit, implementing the **same**
+      nearest-wins rule. ~~`GetCustomAttribute(inherit: true)`~~ was the original plan and is
+      wrong: for a generic attribute it returns both the derived and the base declaration when
+      their closed types differ, which is exactly the override case (PRD R1.4, corrected).
 - [ ] `EndpointAttributes.cs:30-36` — exclude `MemberOfAttribute<>` from `IsMeaningful`, or
       it leaks into `endpoint.Metadata`. (R1.7)
 - [ ] `DiagnosticDescriptors.cs` — delete MPEP003 and MPEP004; reword MPEP005's message,

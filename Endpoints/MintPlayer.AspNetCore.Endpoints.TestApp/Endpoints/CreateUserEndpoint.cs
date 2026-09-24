@@ -8,7 +8,8 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// Generator emits: partial class CreateUser : PostEndpoint&lt;CreateUserRequest&gt;
 /// Generator emits: .Produces&lt;CreateUserResponse&gt;(201)
 /// </summary>
-public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserResponse>, IMemberOf<UsersApi>
+[MemberOf<UsersApi>]
+public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserResponse>
 {
     public static string Path => "/";
 

@@ -71,28 +71,26 @@ public partial class EndpointGenerator : IncrementalGenerator
             .Select(static (model, _) => (IDiagnosticReporter)new EndpointDiagnosticReporter(model)));
     }
 
-    private static bool IsEndpointCandidate(SyntaxNode node, CancellationToken _)
-    {
-        if (node is not ClassDeclarationSyntax classDecl || classDecl.BaseList is null)
-            return false;
-
-        foreach (var baseType in classDecl.BaseList.Types)
-        {
-            var name = NameOf(baseType.Type);
-
-            if (name is not null && (
-                name.StartsWith("IEndpoint") ||
-                name.StartsWith("IGetEndpoint") ||
-                name.StartsWith("IPostEndpoint") ||
-                name.StartsWith("IPutEndpoint") ||
-                name.StartsWith("IDeleteEndpoint") ||
-                name.StartsWith("IPatchEndpoint") ||
-                name.StartsWith("IMemberOf")))
-                return true;
-        }
-
-        return false;
-    }
+    /// <summary>
+    /// Syntactic pre-filter: any non-abstract class with a base list is a candidate, and the
+    /// transform's semantic check (<c>AllInterfaces</c> contains <c>IEndpointBase</c>) decides.
+    /// </summary>
+    /// <remarks>
+    /// This used to match base-list names beginning with an endpoint interface, plus
+    /// <c>IMemberOf</c>. That silently missed every endpoint inheriting its verb interface from a
+    /// base class of its own: <c>partial class GetUser : UsersEndpointBase&lt;…&gt;</c> names no
+    /// endpoint interface, so it never reached the semantic check and was never mapped. It only
+    /// ever worked when an <c>IMemberOf&lt;T&gt;</c> happened to sit in the same base list. With
+    /// membership now an attribute that inherits through base classes (PRD R1.4), that accident is
+    /// gone and the shape would break outright, so the name match is dropped rather than patched.
+    /// <para>
+    /// The cost is one <c>GetDeclaredSymbol</c> and an interface scan per class with a base list.
+    /// Abstract classes are excluded here because the transform would reject them anyway.
+    /// </para>
+    /// </remarks>
+    private static bool IsEndpointCandidate(SyntaxNode node, CancellationToken _) =>
+        node is ClassDeclarationSyntax { BaseList: not null } classDecl &&
+        !classDecl.Modifiers.Any(SyntaxKind.AbstractKeyword);
 
     private static string? NameOf(TypeSyntax type) => type switch
     {
@@ -117,7 +115,6 @@ public partial class EndpointGenerator : IncrementalGenerator
         INamedTypeSymbol? verbInterface = null;
         INamedTypeSymbol? typedInterface = null;
         var httpMethod = HttpMethodKind.Custom;
-        var groupTypeFqns = new List<string>();
 
         foreach (var iface in symbol.AllInterfaces)
         {
@@ -125,14 +122,6 @@ public partial class EndpointGenerator : IncrementalGenerator
 
             var name = iface.Name;
             var arity = iface.TypeArguments.Length;
-
-            if (name == "IMemberOf" && arity == 1)
-            {
-                var groupFqn = iface.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-                if (!groupTypeFqns.Contains(groupFqn))
-                    groupTypeFqns.Add(groupFqn);
-                continue;
-            }
 
             var method = name switch
             {
@@ -206,8 +195,7 @@ public partial class EndpointGenerator : IncrementalGenerator
             hasExistingBaseClass,
             level, httpMethod,
             requestTypeFqn, responseTypeFqn,
-            groupTypeFqns.Count == 1 ? groupTypeFqns[0] : groupTypeFqns.FirstOrDefault(),
-            groupTypeFqns.Count > 1,
+            GroupMembership.Resolve(symbol, EndpointsNamespace),
             baseChainReachesEndpointBase,
             GetDescriptorName(symbol),
             symbol.FromSymbol().AsKey(),
@@ -264,22 +252,9 @@ public partial class EndpointGenerator : IncrementalGenerator
         if (!symbol.AllInterfaces.Any(i => i.Name == "IEndpointGroup" && i.ContainingNamespace?.ToDisplayString() == EndpointsNamespace))
             return null;
 
-        var parentGroupFqns = new List<string>();
-
-        foreach (var iface in symbol.AllInterfaces)
-        {
-            if (iface.ContainingNamespace?.ToDisplayString() != EndpointsNamespace) continue;
-            if (iface.Name != "IMemberOf" || iface.TypeArguments.Length != 1) continue;
-
-            var parentFqn = iface.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            if (!parentGroupFqns.Contains(parentFqn))
-                parentGroupFqns.Add(parentFqn);
-        }
-
         return new GroupInfo(
             symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            parentGroupFqns.FirstOrDefault(),
-            parentGroupFqns.Count > 1,
+            GroupMembership.Resolve(symbol, EndpointsNamespace),
             symbol.FromSymbol().AsKey(),
             RouteLiteral.Read(symbol, "Prefix", context.SemanticModel, ct));
     }
