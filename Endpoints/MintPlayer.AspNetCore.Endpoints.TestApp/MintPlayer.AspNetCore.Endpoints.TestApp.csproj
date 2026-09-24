@@ -32,4 +32,35 @@
 		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="11.0.0-rc.1.26425.128" Condition="'$(TargetFramework)' == 'net11.0'" />
 	</ItemGroup>
 
+	<!--
+	The contract snapshot (PRD R7.5). Every build runs this app's Program.cs under GetDocument.Insider
+	and writes the OpenAPI document it serves to openapi/MintPlayer.AspNetCore.Endpoints.TestApp.json,
+	which is committed. CI fails when a build leaves that file changed (an endpoint was changed without
+	committing the new contract) and runs `oasdiff breaking` against the base branch's copy.
+
+	The package generates for the FIRST target framework only (its buildMultiTargeting targets pick
+	$(TargetFrameworks)[0], here net10.0), so there is one snapshot, not one per TFM. Measured: with
+	OpenApiVersion pinned in Program.cs, the net11.0 document differs from the net10.0 one only in the
+	order of the keys under "responses" (net11.0 sorts them by status code), which neither a JSON
+	reader nor oasdiff sees. Before the pin the "openapi" field differed too: 3.1.1 against 3.2.0.
+
+	The package version tracks Microsoft.AspNetCore.OpenApi above, per TFM, for the same reason.
+	-->
+	<PropertyGroup>
+		<OpenApiGenerateDocumentsOnBuild>true</OpenApiGenerateDocumentsOnBuild>
+		<OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)\openapi</OpenApiDocumentsDirectory>
+		<OpenApiGenerateDocumentsOptions>--openapi-version OpenApi3_1</OpenApiGenerateDocumentsOptions>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.12" Condition="'$(TargetFramework)' == 'net10.0'">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="11.0.0-rc.1.26425.128" Condition="'$(TargetFramework)' == 'net11.0'">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+	</ItemGroup>
+
 </Project>

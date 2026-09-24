@@ -676,7 +676,9 @@ appended blockquotes; this section records only where the work stands.)*
 | M6 route diagnostics + packaging (R6.5a) | `9dbe320` | generator 255, runtime 139 |
 | M7 validation | `3fdbf22` | generator 268, runtime 151 |
 | M8 typed links + `.WithName()` + MPEP012 | see `git log` ("M8: …") | generator 290, runtime 215 |
-| M9 contract + typed client, scoped store in the TestApp | uncommitted at time of writing | generator 305, runtime 269 (Tools.Tests whole project 1071) |
+| M9 contract + typed client, scoped store in the TestApp | see `git log` ("M9: …") | generator 305, runtime 269 (Tools.Tests whole project 1071) |
+| M10 contract snapshot + CI gate | uncommitted at time of writing | no new tests; swept together with M11 |
+| M11 `partial` code fix (MPEP001/014/019) | uncommitted at time of writing | generator 312, Tools.Tests 1071 (runtime 269) |
 
 "Runtime" means `Tests\MintPlayer.AspNetCore.Tools.Tests --filter "FullyQualifiedName~Endpoints"`.
 
@@ -761,17 +763,33 @@ note under R7.4a):
   this as out of scope, with the reason.
 
 - **M9 cross-assembly client — done**, see its section above.
-- **M10 contract snapshot + CI** — committed OpenAPI document via
-  `Microsoft.Extensions.ApiDescription.Server`, `OpenApiVersion` pinned, `Program.cs` guarded
-  against `GetDocument.Insider`, CI fails on a dirty tree and on `oasdiff breaking`.
-- **M11 MPEP001 code fix** — shape set by S5: separate
-  `MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes` project (netstandard2.0, no
-  `EnforceExtendedAnalyzerRules`, Roslyn refs `PrivateAssets="all" ExcludeAssets="runtime"`
-  pinned to the generator's Roslyn), packed into the **same** analyzer folder as the generator
-  (`$(EndpointsAnalyzerPackPath)`), with `<Error>` guards. Test with
-  **`Microsoft.CodeAnalysis.CSharp.CodeFix.Testing` 1.1.2 + `DefaultVerifier`** — the `.XUnit`
-  package fails against xunit 2.9.3 — using `EmptyDiagnosticAnalyzer` and
-  `GetSourceGenerators()`, since MPEP001 comes from the generator.
+- **M10 contract snapshot + CI — done** (details in the PRD's "As built in M10" note under R7.5).
+  Snapshot `Endpoints/MintPlayer.AspNetCore.Endpoints.TestApp/openapi/MintPlayer.AspNetCore.Endpoints.TestApp.json`
+  from `Microsoft.Extensions.ApiDescription.Server` 10.0.12 / 11.0.0-rc.1.26425.128. Deviations:
+  - **One snapshot (net10.0), not one per TFM**: the package generates for the first TFM only, and
+    net11.0's document differs only in `3.1.1`/`3.1.2` and `responses` key order (oasdiff: no change).
+  - **The version is pinned twice**: `AddOpenApi(o => o.OpenApiVersion = OpenApi3_1)` does not reach
+    the build-time tool (net11.0 still wrote 3.2.0); `OpenApiGenerateDocumentsOptions
+    --openapi-version OpenApi3_1` does.
+  - **The `GetDocument.Insider` guard is a flag with nothing behind it**: the TestApp has no startup
+    side effects, and `app.Run()` must not be skipped (measured: empty `paths`).
+  - CI: the dirty-tree check covers the whole tree; oasdiff 1.32.1 is pinned by version and SHA-256,
+    compares against the PR base SHA and skips while the base has no snapshot (so it first bites on
+    the PR after the one that introduces it). Both gates verified locally, not in Actions.
+- **M11 MPEP001 code fix — done** (details in the PRD's "As built in M11" note under R3.3a).
+  `MakePartialCodeFixProvider` in the new `MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes`
+  project, in the solution, packed into `$(EndpointsAnalyzerPackPath)` in both packages. Deviations:
+  - **Fixes MPEP014 and MPEP019 as well** — the same missing `partial`; MPEP019 fixes the containers.
+  - **Fix All is the stock batch fixer**: measured to merge the identical edits two nested endpoints
+    produce; a custom fix-all was tried and removed.
+  - **Tests live in `Generator.Tests`** (7 tests, both TFMs), not a new test project, with
+    `CodeFix.Testing` 1.1.2 + `DefaultVerifier` + `EmptyDiagnosticAnalyzer` + `GetSourceGenerators()`.
+  - The code fix is not in the generator's `GetTargetPath`; a new `GetEndpointsCodeFixAssembly`
+    target in the generator project feeds both packs, with the guards.
+  - Not verified: the lightbulb in a real IDE (the harness applies the fix without MEF; the export
+    attributes are asserted instead).
+  - Found, not fixed: a private nested endpoint is mapped anyway and fails with CS0122 in generated
+    code, with no diagnostic.
 - **M12 README rewrite** (646 lines) — must cover: the explicit binding rule and why not
   convention (over-posting); the arity-1 asymmetry (`IGetEndpoint<TResponse>` is the response);
   `[MemberOf<T>]` and inheritance; the already-working `[Authorize]`/`[EnableRateLimiting]`/

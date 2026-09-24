@@ -100,7 +100,48 @@
 		</ItemGroup>
 	</Target>
 
-	<Target Name="PackAnalyzerAssemblies" DependsOnTargets="GetTargetPath">
+	<!--
+	The MPEP001/MPEP014/MPEP019 code fix (M11) is a second assembly in the same analyzer folder. It is
+	separate because a CodeFixProvider needs Microsoft.CodeAnalysis.Workspaces, which csc's analyzer
+	host does not load: inside the generator assembly it would stop the GENERATOR loading on every
+	command-line build. Beside it, csc scans it, finds no generator or analyzer, and moves on; only the
+	IDE instantiates it (spike S5).
+
+	ReferenceOutputAssembly="false": the reference only orders the build, so the code fix exists before
+	either package reads it. It is not part of this assembly's compile closure, and it is deliberately
+	not added to GetTargetPath either, which would hand it to csc as an analyzer in every project here
+	that references the generator.
+	-->
+	<ItemGroup>
+		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.csproj"
+		                  ReferenceOutputAssembly="false"
+		                  PrivateAssets="all" />
+	</ItemGroup>
+
+	<!--
+	Returns the code-fix assembly; both packages call it, so there is one place that knows where the
+	code fix comes from and one pair of guards on it.
+
+	Two existence tests, and both are needed. GetTargetPath returns a path without touching the disk,
+	so '@(x)' == '' catches a target that returned nothing (a renamed project), and
+	!Exists('%(x.FullPath)') catches a path that is returned but not built — what a no-build pack over
+	a half-cleaned tree looks like. The second batches over the items and runs zero times on an empty
+	list, which is why the first exists.
+	-->
+	<Target Name="GetEndpointsCodeFixAssembly" Returns="@(_EndpointsCodeFixAssembly)">
+		<MSBuild Projects="..\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.csproj"
+		         Targets="GetTargetPath"
+		         Properties="Configuration=$(Configuration)"
+		         RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier">
+			<Output TaskParameter="TargetOutputs" ItemName="_EndpointsCodeFixAssembly" />
+		</MSBuild>
+		<Error Condition="'@(_EndpointsCodeFixAssembly)' == ''"
+		       Text="GetTargetPath on MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes returned nothing. Packing would produce a package whose code fixes never appear in the IDE, with no error anywhere." />
+		<Error Condition="!Exists('%(_EndpointsCodeFixAssembly.FullPath)')"
+		       Text="The code-fix assembly '%(_EndpointsCodeFixAssembly.FullPath)' does not exist. Build before packing; otherwise the package ships without its code fixes and nothing reports it." />
+	</Target>
+
+	<Target Name="PackAnalyzerAssemblies" DependsOnTargets="GetTargetPath;GetEndpointsCodeFixAssembly">
 		<!--
 		A guard, because the failure it catches is silent: if SuppressToolsAnalyzerCopies ever stops
 		running (a renamed hook, a props change upstream), the package still packs, still installs, and
@@ -115,7 +156,19 @@
 
 		<ItemGroup>
 			<TfmSpecificPackageFile Include="@(TargetPathWithTargetPlatformMoniker)" PackagePath="$(EndpointsAnalyzerPackPath)" />
+			<TfmSpecificPackageFile Include="@(_EndpointsCodeFixAssembly)" PackagePath="$(EndpointsAnalyzerPackPath)" />
 		</ItemGroup>
+
+		<!-- The code fix must ship, and only in the generator's folder: in any other analyzer folder the
+		     IDE would load it from a place the SDK never pairs with the generator. -->
+		<ItemGroup>
+			<_EndpointsCodeFixPackFile Include="@(TfmSpecificPackageFile)" Condition="'%(Filename)%(Extension)' == 'MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll'" />
+			<_MisplacedEndpointsCodeFixPackFile Include="@(_EndpointsCodeFixPackFile)" Condition="'%(PackagePath)' != '$(EndpointsAnalyzerPackPath)'" />
+		</ItemGroup>
+		<Error Condition="'@(_EndpointsCodeFixPackFile)' == ''"
+		       Text="MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll is not among the files being packed. The package would ship without its code fixes." />
+		<Error Condition="'@(_MisplacedEndpointsCodeFixPackFile)' != ''"
+		       Text="MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll would be packed into '%(_MisplacedEndpointsCodeFixPackFile.PackagePath)' instead of $(EndpointsAnalyzerPackPath), beside the generator." />
 	</Target>
 
 	<!-- Lets MintPlayer.AspNetCore.Endpoints pack into the same folder without a second literal. -->

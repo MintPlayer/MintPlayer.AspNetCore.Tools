@@ -54,6 +54,9 @@ internal static class EndpointGeneratorHarness
     private static readonly Lazy<ImmutableArray<MetadataReference>> references = new(() =>
         [.. allReferences.Value.Where(reference => !IsOpenApiAssembly(reference))]);
 
+    /// <summary>The default consumer's reference set, for harnesses other than this one (the code-fix tests).</summary>
+    internal static ImmutableArray<MetadataReference> DefaultReferences => references.Value;
+
     private static bool IsOpenApiAssembly(MetadataReference reference) =>
         Path.GetFileName(reference.Display) is "Microsoft.AspNetCore.OpenApi.dll" or "Microsoft.OpenApi.dll";
 

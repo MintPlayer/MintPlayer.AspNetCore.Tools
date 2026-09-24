@@ -53,6 +53,51 @@ jobs:
     - name: Build
       run: dotnet build --configuration Release --no-restore
 
+    - name: Assert the contract snapshot is committed
+      # The build above regenerates the TestApp's OpenAPI document into
+      # Endpoints/MintPlayer.AspNetCore.Endpoints.TestApp/openapi/ (PRD R7.5). If that leaves the tree
+      # dirty, an endpoint changed without its contract being committed: build locally and commit the
+      # file. The whole tree is checked, not just that folder — a build that rewrites any tracked file,
+      # or leaves an unignored one behind, is a defect of its own.
+      run: |
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "::error::The build left the working tree dirty. If the OpenAPI snapshot changed, build locally and commit Endpoints/MintPlayer.AspNetCore.Endpoints.TestApp/openapi/."
+          git status --porcelain
+          git diff
+          exit 1
+        fi
+
+    - name: Install oasdiff
+      if: github.event_name == 'pull_request'
+      # Pinned by version AND checksum. The archive goes to RUNNER_TEMP, never the workspace.
+      env:
+        OASDIFF_VERSION: 1.32.1
+        OASDIFF_SHA256: 7c8939fc49b75ee11fec66a5b83b37a2fca6aee109fed85013b1ba2ac2a1ee7f
+      run: |
+        archive="$RUNNER_TEMP/oasdiff.tar.gz"
+        curl -sSfL -o "$archive" "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+        echo "${OASDIFF_SHA256}  $archive" | sha256sum --check --strict
+        mkdir -p "$RUNNER_TEMP/oasdiff"
+        tar -xzf "$archive" -C "$RUNNER_TEMP/oasdiff" oasdiff
+        echo "$RUNNER_TEMP/oasdiff" >> "$GITHUB_PATH"
+
+    - name: Assert no breaking change to the contract
+      if: github.event_name == 'pull_request'
+      # Compares the base branch's committed snapshot with this PR's. A removed path, a newly required
+      # parameter or a narrowed response is an ERR and fails the job. (Optic was archived in January
+      # 2026, hence oasdiff.) A base branch without a snapshot has nothing to compare against.
+      env:
+        SNAPSHOT: Endpoints/MintPlayer.AspNetCore.Endpoints.TestApp/openapi/MintPlayer.AspNetCore.Endpoints.TestApp.json
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        git fetch --no-tags --depth=1 origin "$BASE_SHA"
+        if ! git cat-file -e "$BASE_SHA:$SNAPSHOT" 2>/dev/null; then
+          echo "::notice::The base branch has no contract snapshot at $SNAPSHOT yet; skipping oasdiff."
+          exit 0
+        fi
+        git show "$BASE_SHA:$SNAPSHOT" > "$RUNNER_TEMP/base-openapi.json"
+        oasdiff breaking "$RUNNER_TEMP/base-openapi.json" "$SNAPSHOT" --fail-on ERR
+
     - name: Test
       # --no-build: `--no-restore` alone does NOT imply it. Without this the solution gets
       # built a second time in Debug and coverage is measured on THAT build rather than the

@@ -538,6 +538,29 @@ server assembly itself compiles in the client but is not deployed with it (MPEP0
 no contracts, or an IDE that momentarily sees no referenced assemblies — no client is generated and nothing
 is reported; code that uses the client then fails to compile, which is the signal.
 
+## Contract snapshot in CI
+
+To catch an accidental API change, commit the OpenAPI document your app serves and let CI compare it.
+`Microsoft.Extensions.ApiDescription.Server` (same version as `Microsoft.AspNetCore.OpenApi`) writes it
+on every build:
+
+```xml
+<PropertyGroup>
+  <OpenApiGenerateDocumentsOnBuild>true</OpenApiGenerateDocumentsOnBuild>
+  <OpenApiDocumentsDirectory>$(MSBuildProjectDirectory)\openapi</OpenApiDocumentsDirectory>
+  <!-- The build-time tool ignores AddOpenApi's OpenApiVersion; pin it here as well. -->
+  <OpenApiGenerateDocumentsOptions>--openapi-version OpenApi3_1</OpenApiGenerateDocumentsOptions>
+</PropertyGroup>
+```
+
+Pin `OpenApiVersion` in `AddOpenApi` too: the default differs between .NET 10 (3.1) and .NET 11 (3.2).
+A multi-targeted project writes the document for its first target framework only. Generating the
+document **runs your `Program.cs`**: put migrations, seeding and similar side effects behind
+`Assembly.GetEntryAssembly()?.GetName().Name != "GetDocument.Insider"`, but do not skip `app.Run()`, or
+the document comes out with no paths. In CI, fail when the build leaves the file changed
+(`git status --porcelain`), and run `oasdiff breaking base.json head.json --fail-on ERR` against the
+base branch's copy. This repository's own `pull-request.yml` does both for the sample TestApp.
+
 ## Manual registration
 
 For one-off registrations without the source generator:
@@ -591,6 +614,10 @@ generator has nothing left to add, and such a class need not be `partial`.
 
 An endpoint dropped for MPEP003 still gets its generated base class, so the ambiguous group is the
 only error you see.
+
+MPEP001, MPEP014 and MPEP019 come with a code fix in Visual Studio and Rider: **Make 'X' partial**
+(for MPEP019, every enclosing type that is not `partial` yet). Fix All works across a document,
+project or solution. The fix ships in both packages, next to the generator.
 
 ## How the source generator works
 

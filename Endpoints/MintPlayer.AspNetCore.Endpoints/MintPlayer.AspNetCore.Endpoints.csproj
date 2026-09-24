@@ -127,9 +127,30 @@
 		<Error Condition="'$(EndpointsAnalyzerPackPath)' == ''"
 		       Text="PackEndpointsGenerator could not resolve EndpointsAnalyzerPackPath from MintPlayer.AspNetCore.Endpoints.Generator. Packing without it would place the analyzer at the package root, where Roslyn never loads it." />
 
+		<!--
+		  The code-fix assembly (M11), from the generator project, which owns the list and guards that it
+		  resolves to a file that exists. It goes into the same folder as the generator.
+		-->
+		<MSBuild Projects="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
+		         Targets="GetEndpointsCodeFixAssembly"
+		         Properties="Configuration=$(Configuration)"
+		         RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier">
+			<Output TaskParameter="TargetOutputs" ItemName="_EndpointsCodeFixAnalyzer" />
+		</MSBuild>
+
 		<ItemGroup>
 			<TfmSpecificPackageFile Include="@(_EndpointsGeneratorAnalyzer)" PackagePath="$(EndpointsAnalyzerPackPath)" />
+			<TfmSpecificPackageFile Include="@(_EndpointsCodeFixAnalyzer)" PackagePath="$(EndpointsAnalyzerPackPath)" />
 		</ItemGroup>
+
+		<ItemGroup>
+			<_EndpointsCodeFixPackFile Include="@(TfmSpecificPackageFile)" Condition="'%(Filename)%(Extension)' == 'MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll'" />
+			<_MisplacedEndpointsCodeFixPackFile Include="@(_EndpointsCodeFixPackFile)" Condition="'%(PackagePath)' != '$(EndpointsAnalyzerPackPath)'" />
+		</ItemGroup>
+		<Error Condition="'@(_EndpointsCodeFixPackFile)' == ''"
+		       Text="MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll is not among the files being packed. The package would ship without its code fixes." />
+		<Error Condition="'@(_MisplacedEndpointsCodeFixPackFile)' != ''"
+		       Text="MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll would be packed into '%(_MisplacedEndpointsCodeFixPackFile.PackagePath)' instead of $(EndpointsAnalyzerPackPath), beside the generator." />
 	</Target>
 
 </Project>

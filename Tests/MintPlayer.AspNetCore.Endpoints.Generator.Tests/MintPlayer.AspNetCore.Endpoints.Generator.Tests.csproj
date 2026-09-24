@@ -39,6 +39,14 @@
 		     the moment it touches the IncrementalGenerator base class. -->
 		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="10.16.0" GeneratePathProperty="true" />
 
+		<!-- The code-fix harness (M11). NOT the .XUnit flavour: its newest version, 1.1.2, was built
+		     against xunit 2.4.x and every assertion dies with MissingMethodException on this repo's
+		     xunit 2.9.3 (spike S5). The plain package's DefaultVerifier has no xunit dependency. -->
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp.CodeFix.Testing" Version="1.1.2" />
+		<!-- The code-fix project references Workspaces with ExcludeAssets="runtime" so that nothing of it
+		     ships; the test host has to supply the real assembly, at the generator's Roslyn (4.14.0). -->
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.14.0" />
+
 		<!-- Only so the OpenAPI emission tests can compile EndpointOpenApi.g.cs: the harness keeps
 		     these assemblies OUT of the fixture compilation unless a test asks for them, because
 		     their mere presence is what switches that file on. Conditioned per TFM like
@@ -70,6 +78,8 @@
 	-->
 	<ItemGroup>
 		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj" />
+		<!-- Plain for the same coverage reason as the generator: its DLL and PDB land in the output root. -->
+		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.csproj" />
 		<!-- Fixture sources reference these types; the driver also needs them as metadata
 		     references. -->
 		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints\MintPlayer.AspNetCore.Endpoints.csproj" />

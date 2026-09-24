@@ -612,6 +612,32 @@ never wrote, and saying nothing about endpoints. `PathSpec.AllPartial` already c
 exactly this condition and is currently unused. Report MPEP019 and skip emission, so the
 consumer reads one accurate error instead of a confusing one.
 
+> **As built in M11 — the code fix covers MPEP001, MPEP014 and MPEP019:** all three are "a
+> `partial` is missing", reported on the endpoint's identifier, so one `CodeFixProvider`
+> (`MakePartialCodeFixProvider`, "Make 'X' partial") repairs them. MPEP001 and MPEP014 make the
+> endpoint itself `partial`; MPEP019 makes every enclosing type that is not yet `partial`
+> `partial`, outermost first, leaving the ones that already are alone. `partial` is appended after
+> the existing modifiers (CS0267 wants it last); a declaration with no modifiers hands its leading
+> trivia to the new keyword. Fix All uses the stock batch fixer: measured, two MPEP019s on endpoints
+> in the same container produce identical edits that it merges into one, so a custom fix-all bought
+> nothing and was dropped. The ids are literals in the code-fix assembly, which does not reference
+> the generator; a test pins them to `DiagnosticDescriptors`.
+>
+> Shipping: a separate `MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes` assembly
+> (netstandard2.0, Roslyn 4.14.0 with `PrivateAssets="all" ExcludeAssets="runtime"`, no
+> `EnforceExtendedAnalyzerRules`), packed into `$(EndpointsAnalyzerPackPath)` beside the generator
+> in **both** packages. The generator project owns it (`GetEndpointsCodeFixAssembly`, called by
+> both pack targets) and guards it: pack fails if the path is not returned, the file does not exist,
+> it is not among the packed files, or it lands in another folder (triggered on purpose:
+> the missing file fails both packs, the wrong folder fails the generator's). It is
+> deliberately not part of the generator's `GetTargetPath`, which would hand it to `csc` as an
+> analyzer in every project in this repo that references the generator. A consumer restored from the
+> Release nupkg builds with zero warnings and the generator's four files present.
+>
+> Found while writing the tests, not fixed here: an endpoint declared as a *private* nested type (a
+> nested `class X` with no modifiers) is mapped anyway, and the generated `EndpointMapping.g.cs` /
+> `EndpointContracts.g.cs` then fail with CS0122. No diagnostic explains it.
+
 **R3.4 — Every diagnostic that aborts emission must emit a throwing stub.** Measured: a
 generator that bails on a bad input leaves the abstract member unimplemented, so the
 consumer reads `CS0534 … does not implement inherited abstract member BindRequestAsync`
@@ -1183,6 +1209,34 @@ reimplementation of `PublicApiAnalyzers`.** `OpenApiVersion` must be pinned expl
 the default moved 3.0 → 3.1 → 3.2 across three releases and an unpinned snapshot churns
 catastrophically on SDK upgrade. Note build-time generation **runs `Program.cs`** against a
 mock server.
+
+> **As built in M10:**
+> - **The snapshot** is `Endpoints/MintPlayer.AspNetCore.Endpoints.TestApp/openapi/MintPlayer.AspNetCore.Endpoints.TestApp.json`,
+>   written on every build by `Microsoft.Extensions.ApiDescription.Server` (10.0.12 for net10.0,
+>   11.0.0-rc.1.26425.128 for net11.0, matching `Microsoft.AspNetCore.OpenApi`).
+> - **One snapshot, from net10.0.** The package's multi-targeting targets generate for the *first*
+>   TFM only. Measured with the version pinned, the net11.0 document differs from net10.0's in two
+>   ways only: the `openapi` field (`3.1.1` against `3.1.2` — the patch level is Microsoft.OpenApi 2.x
+>   against 3.x) and the order of the keys under `responses` (net11.0 sorts by status code).
+>   `oasdiff breaking` between the two reports no breaking change. A per-TFM snapshot would need a
+>   custom target around the package's private `_OpenApiDocumentsCache`, which both inner builds share.
+> - **Pinning `OpenApiVersion` takes two settings, not one.** `AddOpenApi(o => o.OpenApiVersion = OpenApi3_1)`
+>   pins what `/openapi/v1.json` serves, but the build-time tool passes its own version and ignores
+>   it: with only that set, net11.0 still wrote `3.2.0`. The csproj also passes
+>   `<OpenApiGenerateDocumentsOptions>--openapi-version OpenApi3_1</OpenApiGenerateDocumentsOptions>`.
+>   Unpinned, net10.0 writes `3.1.1` and net11.0 `3.2.0`.
+> - **The `GetDocument.Insider` guard cannot skip `app.Run()`.** The tool swaps in a no-op server
+>   and reads the endpoints from the running host; measured, returning before `Run()` writes a
+>   document whose `paths` is empty. `Program.cs` computes `isBuildTimeDocumentGeneration` and says
+>   what belongs behind it (migrations, seeding); the TestApp has no such side effect, so nothing is
+>   behind it yet.
+> - **CI** (`pull-request.yml`): after the Release build, `git status --porcelain` must be empty —
+>   the whole tree, so any build that rewrites a tracked file fails too; then oasdiff 1.32.1
+>   (release tarball, SHA-256 verified) runs `oasdiff breaking <base> <head> --fail-on ERR`
+>   against the snapshot at the PR's base SHA, and skips with a notice while the base branch has no
+>   snapshot (true for the PR that introduces it). Verified locally: renaming a route regenerates the
+>   file (drift), removing a path is `api-path-removed-without-deprecation` and exit 1, identical
+>   documents exit 0.
 
 **R7.6 — The AOT claim must not be made.** `[AsParameters]` was expected to buy RDG-generated,
 AOT-safe binding. Measured: with `EnableRequestDelegateGenerator=true`, RDG emitted
