@@ -14,8 +14,10 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         string? requestTypeFqn, string? responseTypeFqn,
         string? groupTypeFqn, bool hasMultipleGroups,
         bool baseChainReachesEndpointBase = false,
-        string? descriptorName = null, LocationKey? location = null)
+        string? descriptorName = null, LocationKey? location = null,
+        PathSpec? pathSpec = null)
     {
+        PathSpec = pathSpec;
         FullyQualifiedName = fqn;
         Namespace = ns;
         ClassName = className;
@@ -43,6 +45,23 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public string? ResponseTypeFqn { get; }
     public string? GroupTypeFqn { get; }
     public bool HasMultipleGroups { get; }
+
+    /// <summary>
+    /// The chain of types this endpoint is nested inside, or null when it sits directly in its
+    /// namespace.
+    /// </summary>
+    /// <remarks>
+    /// Emitting a nested endpoint's partial into a flat <c>namespace { }</c> block produces code
+    /// that does not compile, because the containing types are never reopened. Nothing in the
+    /// fixture corpus was nested, which is why a 988-test suite did not catch it.
+    /// <para>
+    /// <see cref="MintPlayer.SourceGenerators.Tools.PathSpec.AllPartial"/> also answers the
+    /// follow-up question the flat form could not even ask: whether every containing type is
+    /// <c>partial</c>. If one is not, the endpoint cannot be extended from a generated file at
+    /// all, and that is a diagnostic rather than a silent miscompile.
+    /// </para>
+    /// </remarks>
+    public PathSpec? PathSpec { get; }
 
     /// <summary>
     /// True when the user's own base class already derives from one of the library's endpoint bases.
@@ -100,7 +119,8 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         HasMultipleGroups == other.HasMultipleGroups &&
         BaseChainReachesEndpointBase == other.BaseChainReachesEndpointBase &&
         DescriptorName == other.DescriptorName &&
-        LocationKeys.AreEqual(Location, other.Location);
+        LocationKeys.AreEqual(Location, other.Location) &&
+        PathSpecs.AreEqual(PathSpec, other.PathSpec);
 
     public override bool Equals(object? obj) => Equals(obj as EndpointInfo);
     public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
@@ -291,6 +311,43 @@ internal sealed class SequenceComparer<T> : IEqualityComparer<ImmutableArray<T>>
     }
 
     public int GetHashCode(ImmutableArray<T> obj) => obj.IsDefault ? 0 : obj.Length;
+}
+
+internal static class PathSpecs
+{
+    /// <summary>
+    /// Field-wise equality for <see cref="PathSpec"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="PathSpec"/> carries a <c>[ValueComparer]</c> attribute, but using the generated
+    /// comparer would put <c>MintPlayer.ValueComparerGenerator.Attributes.dll</c> on this
+    /// generator's analyzer-load path — a dependency this package deliberately does not have, and
+    /// one whose absence fails at load time with an error naming an assembly the consumer never
+    /// referenced. Fifteen hand-written lines are the cheaper trade, and they match how
+    /// <see cref="LocationKeys"/> already handles the same problem.
+    /// </remarks>
+    public static bool AreEqual(PathSpec? left, PathSpec? right)
+    {
+        if (ReferenceEquals(left, right)) return true;
+        if (left is null || right is null) return false;
+        if (left.ContainingNamespace != right.ContainingNamespace) return false;
+        if (left.Parents.Length != right.Parents.Length) return false;
+
+        for (var i = 0; i < left.Parents.Length; i++)
+        {
+            var a = left.Parents[i];
+            var b = right.Parents[i];
+            if (a.Name != b.Name
+                || a.Type != b.Type
+                || a.IsPartial != b.IsPartial
+                || a.GenericTypeParameters != b.GenericTypeParameters)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }
 
 internal static class LocationKeys

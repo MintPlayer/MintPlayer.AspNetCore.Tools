@@ -210,7 +210,8 @@ public partial class EndpointGenerator : IncrementalGenerator
             groupTypeFqns.Count > 1,
             baseChainReachesEndpointBase,
             GetDescriptorName(symbol),
-            symbol.FromSymbol().AsKey());
+            symbol.FromSymbol().AsKey(),
+            symbol.GetPathSpec(ct));
     }
 
     private static bool IsMoreDerived(INamedTypeSymbol candidate, INamedTypeSymbol? incumbent)

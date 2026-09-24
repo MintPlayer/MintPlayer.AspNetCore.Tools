@@ -82,6 +82,23 @@
 		         RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier">
 			<Output TaskParameter="TargetOutputs" ItemName="_EndpointsGeneratorAnalyzer" />
 		</MSBuild>
+
+		<!--
+		  Guards, not warnings. An analyzer payload that comes out empty installs perfectly happily
+		  and then does nothing: no generated mapping, no diagnostic, and nothing for the consumer
+		  to search for. There is no error to notice, so the only way this is caught is by failing
+		  the pack.
+
+		  Two different existence tests are needed and mixing them up produces a guard that can
+		  never fire. GetTargetPath returns a literal path, so the item exists whether or not the
+		  file does, which calls for Exists('%(...)'). A glob contributes no items at all when it
+		  matches nothing, so it would have to be tested as '@(...)' == '' instead.
+		-->
+		<Error Condition="'@(_EndpointsGeneratorAnalyzer)' == ''"
+		       Text="PackEndpointsGenerator resolved no analyzer assembly from MintPlayer.AspNetCore.Endpoints.Generator. Packing would produce a nupkg with an empty analyzers/ folder, which restores cleanly and generates nothing." />
+		<Error Condition="!Exists('%(_EndpointsGeneratorAnalyzer.FullPath)')"
+		       Text="PackEndpointsGenerator resolved '%(_EndpointsGeneratorAnalyzer.FullPath)' but that file does not exist. Packing would produce a nupkg with no analyzer in it and no error." />
+
 		<ItemGroup>
 			<TfmSpecificPackageFile Include="@(_EndpointsGeneratorAnalyzer)" PackagePath="analyzers/dotnet/cs" />
 		</ItemGroup>

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -25,7 +26,11 @@ public static class EndpointRouteBuilderExtensions
     /// the group nesting is cyclic. Neither has a single resolvable prefix, and guessing one would
     /// silently register the endpoint at the wrong route.
     /// </exception>
-    public static IEndpointRouteBuilder MapEndpoint<TEndpoint>(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapEndpoint<
+        [DynamicallyAccessedMembers(
+            DynamicallyAccessedMemberTypes.PublicConstructors |
+            DynamicallyAccessedMemberTypes.Interfaces)] TEndpoint>(
+        this IEndpointRouteBuilder app)
         where TEndpoint : class, IEndpoint
     {
         var factory = ActivatorUtilities.CreateFactory<TEndpoint>(Type.EmptyTypes);
@@ -65,7 +70,8 @@ public static class EndpointRouteBuilderExtensions
     /// <summary>
     /// The group types <paramref name="type"/> sits in, outermost first.
     /// </summary>
-    private static List<Type> ResolveGroupChain(Type type)
+    private static List<Type> ResolveGroupChain(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.Interfaces)] Type type)
     {
         var chain = new List<Type>();
         var visited = new HashSet<Type>();
@@ -88,7 +94,8 @@ public static class EndpointRouteBuilderExtensions
         return chain;
     }
 
-    private static Type? ParentGroupOf(Type type)
+    private static Type? ParentGroupOf(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.Interfaces)] Type type)
     {
         var memberships = type.GetInterfaces()
             .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IMemberOf<>))

@@ -105,9 +105,81 @@ library whose error messages are worse than the ones it replaced.
 
 ## M0 outcome
 
-*(Written after the spikes run. One bold-led paragraph per spike, stating what was
-observed and what it changed. Corrections to the PRD are appended there as blockquotes,
-per this repo's convention — never rewritten in place.)*
+*(One bold-led paragraph per spike. Corrections to the PRD are appended there as
+blockquotes, per this repo's convention — never rewritten in place.)*
+
+**S1 — PASS, and the chosen option beats the alternative rather than tying it.** A
+`string?` shadow plus a ~70-line schema transformer produced a parameter document
+**byte-identical** to a typed shadow's on both net10.0 and net11.0, while keeping the
+library's `application/problem+json` 400 (`"The route parameter 'id' must be a valid
+Int32; 'abc' is not."`) where the typed shadow returns a zero-length body with no content
+type. It also does things the typed shadow cannot: emit an enum's `enum: [0,1,2]` list —
+a typed `ItemKind?` yields a bare `"type": "integer"` — and carry `minimum`/`maximum`/
+`maxLength` from `[Range]`/`[StringLength]`. The typed shadow additionally binds enums
+**case-sensitively** and accepts undefined values, making it the only mode where the
+framework and the library disagree about what is valid. R4's decision is confirmed; the
+`type: string` fallback is not needed.
+
+Three corrections went back into the PRD. **R4.6 was wrong** — one source file compiled
+unchanged against Microsoft.OpenApi 2.12.0 and 3.10.0 with zero `#if` and zero warnings,
+so no per-TFM code is planned. **R4.7 is new** — `AddOpenApi`/`AddOpenApiOperationTransformer`
+are not in the shared framework (verified across all 142 assemblies of
+`Microsoft.AspNetCore.App\10.0.12`), so the runtime library needs a package reference on
+`Microsoft.AspNetCore.OpenApi`. **R4.8 is new** — an optional route token `{term?}` is
+documented as `required: true` with no separate path entry, in both modes; an operation
+transformer cannot add a path key and OpenAPI forbids an optional path parameter, so this
+is a named accuracy gap rather than a fixable defect.
+
+One trap recorded for M5: an `int` path parameter is emitted by ASP.NET Core as
+`pattern` + `type: ["integer","string"]` + `format: "int32"`, **not** plain
+`type: integer`. A first transformer wrote the obvious shape and only the byte-diff caught
+it — which is why M5's gate compares whole documents rather than inspecting fields.
+
+**S2 — PASS, and R5 does not reduce to a diagnostic plus a paragraph.** A
+generator-shaped call site with no typed parameter returned 400 `application/problem+json`
+with every field key populated, on both TFMs; nested members report as `Inner.Name`, and
+the inner type does **not** need its own attribute because the generated resolver recurses
+into complex members automatically. The library's explicit path is *more* RFC-compliant
+than the framework's own filter, which omits `type` and `status`.
+
+Four things went back into the PRD, and M7 is bigger than it looked. **R5.2's null check
+is wrong** — `IOptions<ValidationOptions>` always resolves, so `TryGetValidatableTypeInfo`
+returning false is the only real guard. **R5.5 is new and is the condition most likely to
+bite**: a `[ValidatableType]` in a contracts assembly with `AddValidation()` called
+elsewhere is silently undiscovered; two remedies are proven. **R5.6 is new**: on net10.0
+ASP0029 is an *error*, and it covers not just the attributes but the whole API surface the
+library itself calls — so `MintPlayer.AspNetCore.Endpoints` needs the `NoWarn` in its own
+csproj, not only consumers. **R5.7 is new and is the real cost**: `IValidatableInfo` →
+`IValidatableTypeInfo`, `ValidateContext.ValidationContext` removed, and `ValidationErrors`
+changes shape between the TFMs, so the call needs `#if NET11_0_OR_GREATER`. A working
+reference implementation exists at `scratchpad\spike-S2\LibSim\EndpointRunner.cs`.
+
+Ironic footnote: R4.6's per-TFM concern was retracted for `Microsoft.OpenApi` and turns
+out to be true for `Microsoft.Extensions.Validation` instead.
+
+**S6 — PASS, and the client reference shape is the whole answer.** A generator in a client
+assembly read all four contracts out of the server's metadata, with the control confirming
+the `Path` literal is gone (`DeclaringSyntaxReferences.Length = 0`,
+`Locations = [MetadataFile]`). A raw non-`partial` endpoint's contract crossed identically,
+which is the case a type-level attribute could not have reached.
+
+The decisive finding is negative: **`ProjectReference` is fatal and cannot be mitigated.**
+It propagates the server's `FrameworkReference Microsoft.AspNetCore.App`, and a Blazor WASM
+client then fails with `NETSDK1082 … no runtime pack … for 'browser-wasm'`. Four
+mitigations were tested and all four still fail, because the client fails in
+`ProcessFrameworkReferences` before the server project is even built. The working shape is
+a metadata-only `<Reference>` with `<Private>false</Private>`: **+1 compile-time reference
+assembly, 0 shipped bytes, no ASP.NET Core in the client**, and a loud `MSB3245` + `CS1061`
+if the server DLL is missing. Emitting the attributes into Contracts instead was tested and
+produces nothing, since Contracts has no endpoint types and cannot reference Server without
+a cycle.
+
+Two consequences went into the PRD as R7.4 and R7.4a. M9 must ship the reference snippet
+as documentation or a targets file, because getting it wrong is an `MSB3245` + `CS1061`
+cascade rather than a clear message, and the server must be built before the client with a
+configuration-sensitive `HintPath`. And the client generator must treat zero contracts as
+an empty client rather than an error, because roslyn#57997's IDE-only failure is **not
+detectable from a command-line build** — measured indistinguishable on every shape.
 
 ---
 

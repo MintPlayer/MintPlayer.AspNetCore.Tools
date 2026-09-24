@@ -428,22 +428,60 @@ placeholder.** A GET with a typed response and no body must not be written
 scenarios declaring a placeholder request they never touched — a word that appears in
 every signature and in the OpenAPI-facing generic argument list and means nothing.
 
-Specified ladder:
+Specified ladder, for all five verbs:
 
-| Verb class | Interfaces | Handler |
-|---|---|---|
-| GET, DELETE | `IGetEndpoint` | `HandleAsync(HttpContext)` |
-| | `IGetEndpoint<TResponse>` | `HandleAsync(CancellationToken)` |
-| POST, PUT, PATCH | `IPostEndpoint` | `HandleAsync(HttpContext)` |
-| | `IPostEndpoint<TBody>` | `HandleAsync(TBody, CancellationToken)` |
-| | `IPostEndpoint<TBody, TResponse>` | `HandleAsync(TBody, CancellationToken)` |
+| Arity | Body verbs (POST/PUT/PATCH) | Body-less verbs (GET/DELETE) | Handler |
+|---|---|---|---|
+| 0 | `IPostEndpoint` | `IGetEndpoint`, `IDeleteEndpoint` | `HandleAsync(HttpContext)` |
+| 1 | `IPostEndpoint<TRequest>` — the **body** | `IGetEndpoint<TResponse>`, `IDeleteEndpoint<TResponse>` — the **response** | body verb: `HandleAsync(TRequest, ct)`; body-less: `HandleAsync(ct)` |
+| 2 | `IPostEndpoint<TRequest, TResponse>` | `IGetEndpoint<TRequest, TResponse>`, `IDeleteEndpoint<TRequest, TResponse>` | `HandleAsync(TRequest, ct)` |
 
-The single type argument therefore means the **response** on a body-less verb and the
-**body** on a body verb. That asymmetry is a real cost in learnability and must be stated
-plainly in the README — but it mirrors HTTP, where a GET has no body to name, and it is
-cheaper than a placeholder type that lies in every signature. It is a breaking
-reinterpretation of today's `IGetEndpoint<TRequest>`, which the no-backward-compatibility
-waiver permits.
+**Arity 2 is uniform across all five verbs** — always `(TRequest, TResponse)`. Only arity 1
+differs, and the rule is one sentence: *GET and DELETE do not normally carry a body, so
+their single type argument is the response; if your API sends one anyway, use the
+two-argument form.*
+
+**R2.14a — declaring a `TRequest` on a body-less verb means "this endpoint takes a body",
+and routes it to `BodyEndpoint<TRequest>`.** Real APIs deviate from the specification —
+Elasticsearch accepts a body on GET, and a DELETE that carries one is legal if
+semantically undefined (RFC 9110). The two-argument form exists for exactly those, and it
+must give them content-negotiated body binding like any POST, not the abstract binder that
+`NonBodyEndpoint<TRequest>` supplies today.
+
+**R2.14b — `NonBodyEndpoint<TRequest>` is deleted.** It loses every user. Route values no
+longer travel through `TRequest` (R2.1), and a body-less verb that *does* declare a request
+now derives from `BodyEndpoint<TRequest>` (R2.14a), so nothing is left that needs an
+abstract `BindRequestAsync`. This removes a class, the abstract-member ceremony, the
+"GET/DELETE must override `BindRequestAsync`" rule from the README, and the reflection pin
+test that guards it. The library gets smaller, not merely the consumer's code.
+
+**Why arity 1 is the response on body-less verbs, and not the request.** A DELETE that
+*returns* a body is common — the deleted resource, or a confirmation envelope — while a
+DELETE that *takes* one is rare. That is the same profile as GET, so the two agree. The
+resilience argument is asymmetric and decides it: if arity 1 meant `TRequest`, then
+DELETE-with-a-response — the common case — would need the two-argument form with a
+placeholder request, reintroducing exactly the problem R2.14 exists to remove. The
+converse costs nothing: an endpoint with no response body simply declares no type argument.
+
+**Two rough edges, recorded rather than designed around:**
+
+- **A body-less verb with a body but no declared response is inexpressible.**
+  `IGetEndpoint<TRequest>` collides with `IGetEndpoint<TResponse>`. Fallbacks: declare a
+  response type, or drop to arity 0. One README line, not a third interface.
+- **A 204-style endpoint gets `HandleAsync(HttpContext)` rather than `HandleAsync(ct)`**,
+  because it has no type argument and therefore lands at arity 0. The cancellation token is
+  still reachable as `httpContext.RequestAborted`. Filling this gap would mean either a
+  placeholder response type or changing arity 0 to stop meaning "raw", and neither is worth
+  one ignored parameter.
+
+The asymmetry at arity 1 is a genuine learnability cost and the README must state it
+plainly. It is a breaking reinterpretation of today's `IGetEndpoint<TRequest>`, which the
+no-backward-compatibility waiver permits.
+
+**R2.14c — MPEP018 (Info) flags a suspected mis-declared type argument.** A body-less verb
+whose arity-1 type argument is never returned from `HandleAsync` — or whose name ends in
+`Request`/`Body`/`Command` — is probably a consumer who expected arity 1 to mean the
+request. Heuristic, therefore **Info** severity, never a warning.
 
 ### R3 — Route capture and diagnostics
 
@@ -476,6 +514,17 @@ MPEP004 are freed by R1.6 but are **not** reused, so shipped ids never change me
 | MPEP015 | Warning | A request type carries DataAnnotations but is not `[ValidatableType]` |
 | MPEP016 | Info | A declared group is never joined by any endpoint |
 | MPEP017 | Error | Both a generated and a hand-written binder exist |
+| MPEP018 | Info | A body-less verb's arity-1 type argument looks like a request, not a response (R2.14c) |
+| MPEP019 | Error | An endpoint is nested inside a type that is not `partial` |
+
+**R3.3a — MPEP019 exists because the compiler's own message is unhelpful here.** Found
+while implementing M1: an endpoint nested inside a non-`partial` type now emits a correct
+nested partial chain, which the compiler then rejects with **`CS0260 Missing partial
+modifier on declaration of type 'NestedContainer'; another partial declaration of this
+type exists`** — pointed at the consumer's own class, mentioning a partial declaration they
+never wrote, and saying nothing about endpoints. `PathSpec.AllPartial` already computes
+exactly this condition and is currently unused. Report MPEP019 and skip emission, so the
+consumer reads one accurate error instead of a confusing one.
 
 **R3.4 — Every diagnostic that aborts emission must emit a throwing stub.** Measured: a
 generator that bails on a bad input leaves the abstract member unimplemented, so the
@@ -515,6 +564,36 @@ breaks 2.x→3.x in .NET 11 (default spec version 3.0 → 3.1 → 3.2). The pack
 `net10.0;net11.0`, so anything touching `OpenApiSchema`/`OpenApiParameter` needs
 conditional code. This is the real cost of R4.
 
+> **Corrected by spike S1. This requirement overstated the cost and is not supported by
+> the evidence.** One transformer source file compiled and ran unchanged against
+> **Microsoft.OpenApi 2.12.0.0** (net10.0) and **3.10.0.0** (net11.0), with **zero `#if`**
+> and zero warnings on both. `OpenApiSchema`, `IOpenApiSchema`, `OpenApiParameter`,
+> `IOpenApiParameter`, `JsonSchemaType`, `OpenApiSchemaReference`,
+> `OpenApiDocument.AddComponent` and `OpenApiOperationTransformerContext.Document` are
+> present and identically shaped in both.
+>
+> The one API break that does bite is 1.x→2.x, not 10→11: the `Microsoft.OpenApi.Models`
+> namespace **does not exist** on either TFM (consolidated into `Microsoft.OpenApi`), so
+> any snippet carried over from a .NET 9 sample needs that `using` stripped. Also
+> `OpenApiSchema.Minimum`/`Maximum` are **`string?`** (arbitrary precision) in both 2.x and
+> 3.x — assigning a numeric literal is CS0029 — while `MaxLength` is `int?`.
+>
+> Both TFMs stay in the acceptance sweep as the guard. No conditional code is planned.
+
+**R4.7 — A new package dependency is required.** `AddOpenApi` and
+`AddOpenApiOperationTransformer` are **not in the `Microsoft.AspNetCore.App` shared
+framework** — verified by reflecting over all 142 assemblies in
+`C:\Program Files\dotnet\shared\Microsoft.AspNetCore.App\10.0.12`. They ship in the
+separate `Microsoft.AspNetCore.OpenApi` package, so the runtime library must take a
+reference on it. The PRD did not previously account for this.
+
+**R4.8 — An optional route token cannot be documented as optional.** `/search/{term?}` is
+emitted as path `/search/{term}` with `required: true`, and no separate `/search` entry, in
+**both** shadow modes. This is framework behaviour, not a consequence of the shadow choice:
+an operation transformer cannot add a path key, and OpenAPI forbids `required: false` on a
+path parameter. Swagger UI therefore cannot exercise the absent case. Record it as a known
+accuracy gap in R4.1 rather than attempting a fix.
+
 ### Requires a decision — how the framework learns about route parameters **[decision]**
 
 R4.1 needs the framework to see a bound parameter. The generator can emit a nullable
@@ -545,6 +624,36 @@ are the thing the library is *for* — the existing `EndpointBindingException` d
 its README documentation are an explicit prior commitment to message quality, and a
 bodyless 400 is a regression against the status quo. A degraded schema is not.
 
+> **Confirmed by spike S1. The fallback is not needed, and the chosen option is strictly
+> better than the typed shadow rather than merely equal.**
+>
+> The parameter document produced by a `string?` shadow plus a ~70-line transformer is
+> **byte-identical** to the typed shadow's, on net10.0 and net11.0 (`diff` empty after
+> normalising the ephemeral port). Simultaneously, `GET /users/abc` still returns
+> `application/problem+json` with `"The route parameter 'id' must be a valid Int32; 'abc'
+> is not."`, where the typed shadow returns a **400 with a zero-length body and no
+> content type**.
+>
+> Three findings that go beyond parity:
+> - **Enums are better, not equal.** A typed `ItemKind?` shadow produces
+>   `"ItemKind": { "type": "integer" }` — no `enum` list at all. The transformer emits
+>   `"enum": [0,1,2], "type":"integer", "format":"int32"`. The typed shadow is also
+>   case-*sensitive* (`/items/kind/vinyl` → empty 400) and accepts undefined values, so it
+>   is the only mode where the framework's parse and the library's `Enum.IsDefined` check
+>   disagree about validity.
+> - **`[Range]`/`[StringLength]` on a bound property can reach the schema** as
+>   `minimum`/`maximum`/`maxLength`. Every line of that diff is an addition; nothing is
+>   lost. In the library the generator emits these as literals, so no reflection ships.
+> - **An `int` path parameter is not `type: integer`.** ASP.NET Core 10/11 emits
+>   `pattern: "^-?(?:0|[1-9]\d*)$"` + `type: ["integer","string"]` + `format: "int32"`.
+>   The transformer must reproduce that triple exactly or parity drifts — a first attempt
+>   writing plain `type: integer` was caught only by the byte-diff, which is why the M5
+>   gate compares documents rather than eyeballing them.
+>
+> Corroborating R5.1a from the other direction: **`GET /paged/0` returns 200 in every
+> mode.** `[Range]` is now *documented* and still not *enforced*, so the document
+> advertises a constraint nothing checks. That asymmetry needs a README sentence.
+
 ### R5 — Validation
 
 **R5.1 — The library does not discover validatable types; the consumer marks them.**
@@ -571,13 +680,84 @@ requirement group exists to prevent.
 `TryGetValidatableTypeInfo(typeof(TRequest), out var info)`, runs it, and maps failures to
 a 400, behind a null check so nothing breaks when `AddValidation()` was never called.
 
+> **Confirmed by spike S2 — it works — with one correction to the mechanism.** A
+> generator-shaped call site (`MapMethods(path, methods, async (HttpContext ctx) => …)`,
+> no typed parameter) returned **400 `application/problem+json`** with every field key
+> populated, on both TFMs.
+>
+> **The null check described above will never fire.** `IOptions<ValidationOptions>`
+> *always* resolves — `AddOptions()` registers the open generic and `ValidationOptions` is
+> default-constructible — so it was non-null even in an app that never called
+> `AddValidation()`. The real guard is `TryGetValidatableTypeInfo` returning **false**. Use
+> `GetService` rather than `GetRequiredService` for the degenerate non-ASP.NET host, but do
+> not treat null as the signal.
+>
+> Measured aside worth keeping: the library's explicit path emits a *more* RFC-compliant
+> document than the framework's own filter, which returns `application/json` with no `type`
+> and no `status`. And an `IValidatableObject` `ValidationResult` carrying **no** member
+> names lands under the empty-string key `""` — ugly, not lost, worth a README line.
+
+**R5.5 — A marked type must live in an assembly that itself calls `AddValidation()`.**
+This is the condition most likely to bite, because failing it is silent on .NET 10. A
+`[ValidatableType]` declared in a contracts assembly while `AddValidation()` is called in
+the web app is **not** discovered — proven, `TryGetValidatableTypeInfo` returns false and
+the request returns 200. The generator uses `ForAttributeWithMetadataName`, which sees only
+its own compilation.
+
+Two remedies, both proven to produce an identical correct 400:
+
+- **Preferred:** the declaring assembly references `Microsoft.Extensions.Validation` and
+  exposes its own `AddXxxValidation(this IServiceCollection s) => s.AddValidation();`,
+  which the app calls alongside its own. Caveat: the second `AddValidation()` re-registers
+  `RuntimeValidatableParameterInfoResolver`, so that resolver appears twice — harmless, but
+  it is duplicate registration.
+- **Fallback:** the app declares a local `[ValidatableType]` "anchor" whose only member is
+  of the external type. The generator's automatic recursion into complex members then pulls
+  the external type into the local resolver. Requires nothing of the other assembly. The
+  anchor must be `public` or `internal` and must not be `file`-local (ASP0033).
+
+**R5.6 — .NET 10 requires `<NoWarn>$(NoWarn);ASP0029</NoWarn>`, including in this
+library's own projects.** On net10.0 `ASP0029` is reported as an **error**, not a warning
+— *"'ValidatableTypeAttribute' is for evaluation purposes only"* — and it fires on
+`[ValidatableType]`, `[SkipValidation]`, **and on the entire R5.2 API surface** the library
+touches: `ValidationOptions.Resolvers`, `ValidationOptions.TryGetValidatableTypeInfo`,
+`IValidatableInfo`, `ValidateContext`. Plain `Microsoft.NET.Sdk` and
+`Microsoft.NET.Sdk.Web` behave identically — there is no Web-SDK exemption.
+`services.AddValidation()` itself is not flagged. On net11.0 the attributes and the API
+have graduated out of `[Experimental]`: same source, zero warnings, no `NoWarn` needed.
+
+**R5.7 — The validation call needs `#if NET11_0_OR_GREATER`.** This is the largest
+implementation cost S2 uncovered, and it is not a one-liner. The public surface changed
+between the TFMs:
+
+| net10.0 | net11.0 |
+|---|---|
+| `IValidatableInfo` | `IValidatableTypeInfo` |
+| `ValidateContext.ValidationContext` | removed; `ValidateContext.ServiceProvider` |
+| `ValidationErrors` is `Dictionary<string,string[]>` | `IReadOnlyDictionary<string, IReadOnlyList<ValidationError>>` |
+| concrete `ValidatableTypeInfo` etc. public | not in the public ref surface |
+
+Note this is the one place R4.6's retracted concern turns out to be true after all — just
+for `Microsoft.Extensions.Validation` rather than for `Microsoft.OpenApi`.
+
 **R5.3 — MPEP015 converts the framework's silent no-op into a visible one.** A request
 type carrying DataAnnotations but not `[ValidatableType]` is exactly the shape that
 silently returns 200 on invalid input.
 
+> **Confirmed by S2, and narrowed.** .NET 11 ships **ASP0038** — *"'[ValidatableType]' has
+> no effect if there is no 'AddValidation' call in the current project"* — which covers
+> R5.5's failure but **not** R5.3's: it says nothing about a type carrying DataAnnotations
+> with no `[ValidatableType]` at all. .NET 10 ships no equivalent diagnostic whatsoever
+> (its generator ships only ASP0029). MPEP015 therefore still earns its place, and must
+> **not** fire where ASP0038 already would, or a .NET 11 consumer gets told twice.
+
 **R5.4 — The generator must not emit `[ValidatableType]`.** .NET 11 ships **ASP0037
 "ValidatableType cannot be used in generated code"**, and generator-ordering makes it
 unreliable regardless.
+
+> **Corroborated verbatim by S2**, from the shipped analyzer's own message text:
+> *"…has no effect because the type is declared in generated code… Source generators
+> cannot inspect each other's output. Declare the type in a regular .cs file instead."*
 
 ### R6 — Packaging, AOT and hygiene
 
@@ -595,6 +775,22 @@ entries, not by reading the build log.
 **R6.4 — `[DynamicallyAccessedMembers]` on the two reflective sites**, plus
 `<IsAotCompatible>true</IsAotCompatible>` on the two shipping projects as a regression
 gate (P11).
+
+> **Corrected while implementing M1. Two annotations do not clear it, and the gate moves
+> to after M3.** Annotating `MapEndpoint<TEndpoint>` and `ParentGroupOf` did remove IL2091
+> and IL2070 as predicted, but the annotations **cascade**: the analyzer then reported
+> IL2087 on `ResolveGroupChain`'s call site and IL2072 on `ParentGroupOf`'s return, and
+> annotating the return in turn produced four IL2063s. Measured residue with
+> `IsAotCompatible=true`: **10 warnings**, of which only four are the genuinely-known
+> `MakeGenericMethod` and `MapMethods(…, Delegate)` pair.
+>
+> Chasing the rest now would be wasted work, because **M3 deletes the code being
+> annotated**: `ParentGroupOf`'s `GetInterfaces()` walk is replaced by
+> `GetCustomAttribute`, which needs no `Interfaces` annotation at all, and the group-chain
+> reflection changes shape with it. So M1 keeps the two parameter annotations, which are
+> correct and permanent, and **defers turning `IsAotCompatible` on until M3 has landed**
+> and the true residue is visible. Turning it on early would put ten warnings into a repo
+> whose convention is a warning-clean build, for no benefit.
 
 **R6.5 — `MintPlayer.SourceGenerators.Tools` is upgraded 10.16.0 → 10.21.0**, moving the
 generator's Roslyn floor from 4.14.0 to 5.x. Safe given the packages target
@@ -667,6 +863,52 @@ survive the assembly boundary where the `Path` literal does not. Razor and RestE
 use this pattern. **Do not build a JSON manifest**: Microsoft deprecated
 `Microsoft.Extensions.ApiDescription.Client`, `<OpenApiReference>` and `dotnet openapi` in
 .NET 10 Preview 7 and deleted the source directory.
+
+> **Confirmed by spike S6, with one constraint that decides M9's whole shape.**
+>
+> **The client must reference the server assembly metadata-only, never by
+> `ProjectReference`.** A `ProjectReference` propagates the server's
+> `FrameworkReference Microsoft.AspNetCore.App` transitively — the client then compiles
+> `typeof(WebApplication)` successfully and pulls 310 reference assemblies, and a Blazor
+> WASM client does not merely bloat, it **fails to build**: `NETSDK1082: There was no
+> runtime pack for Microsoft.AspNetCore.App available for the specified
+> RuntimeIdentifier 'browser-wasm'`. Four mitigations were tested and **all four still
+> fail**: `ExcludeAssets="runtime"`, `PrivateAssets="all"`, a server-side
+> `<FrameworkReference Update="…" PrivateAssets="All" />`, and the plain control. The
+> client fails in `ProcessFrameworkReferences` before the server project is even built, so
+> it is not suppressible from either side.
+>
+> The working shape is `<Reference Include="Server"><HintPath>…</HintPath><Private>false</Private></Reference>`
+> alongside a normal `ProjectReference` to Contracts. Measured cost to the client: **one
+> extra compile-time reference assembly (168 → 169) and zero shipped bytes** — the
+> published `wwwroot/_framework` contains no server assembly at all. And the failure mode
+> is loud, not silent: hiding the server DLL gives `MSB3245` followed by `CS1061` on every
+> generated method.
+>
+> **Emitting the attributes into Contracts instead does not work**, and was tested rather
+> than assumed: the generator wired into Contracts emits nothing, because Contracts has no
+> endpoint types and cannot reference Server without a cycle. It would need a
+> hand-maintained attribute list or an IL-rewriting build step. Rejected.
+>
+> Also proven: the ordering constraint is real (`CS1730` when attributes follow a type in
+> the same file) and the generator's emit order satisfies it; and a **raw, non-`partial`
+> endpoint's contract crosses the boundary identically**, which is the case a type-level
+> attribute could not have reached and the reason assembly-level is correct.
+
+**R7.4a — The client generator must treat "zero contracts" as an empty client, never an
+error.** dotnet/roslyn#57997's failure mode — `ReferencedAssemblySymbols` returning nothing
+under the IDE's analysis service — **is not detectable from a command-line build at all**;
+S6 measured `Compilation.References` and `ReferencedAssemblySymbols` as indistinguishable
+there (310/310, 168/168, 169/169, 195/195). So the guard cannot be a diagnostic; it has to
+be a design choice. A generator that errors on zero contracts would paint a wall of red
+squiggles in the IDE while `dotnet build` stays green.
+
+Memoise on `compilation.GetMetadataReference(assemblySymbol)`, which S6 confirmed
+round-trips reference-identically (same=169, different=0). One correction to the stated
+rationale: `IAssemblySymbol` identity is **not** unstable *within* a shared
+`MetadataReference` — two compilations sharing one reference returned
+`ReferenceEquals(sym1, sym2) == true`. The Akka.NET advice still holds for the case where
+the reference set changes, but the PRD should not overstate it.
 
 **R7.5 — The contract snapshot is a committed OpenAPI document plus `oasdiff`, not a
 reimplementation of `PublicApiAnalyzers`.** `OpenApiVersion` must be pinned explicitly —
