@@ -21,6 +21,9 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
         {
             var location = endpoint.Location.ToLocation(compilation);
 
+            if (endpoint.InaccessibleReason is { } whyEndpoint)
+                yield return DiagnosticDescriptors.TypeNotAccessibleToGeneratedCode.Create(location, "Endpoint class", endpoint.ClassName, whyEndpoint);
+
             foreach (var property in endpoint.BoundProperties)
             {
                 var source = property.Source == BoundSource.Route ? "route" : "query string";
@@ -82,6 +85,9 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
 
             if (plan.CyclicGroups.Contains(group.FullyQualifiedName))
                 yield return DiagnosticDescriptors.GroupNestingIsCyclic.Create(location, ShortNameOf(group.FullyQualifiedName));
+
+            if (group.InaccessibleReason is { } whyGroup)
+                yield return DiagnosticDescriptors.TypeNotAccessibleToGeneratedCode.Create(location, "Endpoint group", ShortNameOf(group.FullyQualifiedName), whyGroup);
         }
 
         foreach (var groupFqn in plan.UnjoinedGroups)

@@ -10,6 +10,13 @@ namespace MintPlayer.AspNetCore.Endpoints;
 /// <summary>Manual endpoint registration, for one-off routes without the source generator.</summary>
 public static class EndpointRouteBuilderExtensions
 {
+    // Measured with IsAotCompatible (PRD R6.4): these two reflective steps are the whole trim/AOT
+    // residue of this path, and both are inherent to it, so it says so rather than suppressing them.
+    private const string ManualMappingIsReflective =
+        "MapEndpoint<TEndpoint>() maps through the Delegate overload of MapMethods, which RequestDelegateFactory " +
+        "binds by reflection, and reaches a [MemberOf<T>] group's static Prefix and Configure through " +
+        "MethodInfo.MakeGenericMethod. Neither is trim- or AOT-safe.";
+
     /// <summary>
     /// Maps a single endpoint class, inside its declared route group chain. For automatic discovery
     /// of every endpoint in an assembly, use the source-generated
@@ -52,6 +59,8 @@ public static class EndpointRouteBuilderExtensions
     /// one would silently register the endpoint at the wrong route. (Two memberships on one type is
     /// no longer possible to express: it is <c>CS0579</c>.)
     /// </exception>
+    [RequiresUnreferencedCode(ManualMappingIsReflective)]
+    [RequiresDynamicCode(ManualMappingIsReflective)]
     public static IEndpointRouteBuilder MapEndpoint<
         [DynamicallyAccessedMembers(
             DynamicallyAccessedMemberTypes.PublicConstructors |
@@ -228,6 +237,8 @@ public static class EndpointRouteBuilderExtensions
     private static readonly MethodInfo mapGroupOf =
         typeof(EndpointRouteBuilderExtensions).GetMethod(nameof(MapGroupCore), BindingFlags.NonPublic | BindingFlags.Static)!;
 
+    [RequiresUnreferencedCode(ManualMappingIsReflective)]
+    [RequiresDynamicCode(ManualMappingIsReflective)]
     private static IEndpointRouteBuilder MapGroupOf(IEndpointRouteBuilder routes, Type groupType) =>
         (RouteGroupBuilder)mapGroupOf.MakeGenericMethod(groupType).Invoke(null, [routes])!;
 

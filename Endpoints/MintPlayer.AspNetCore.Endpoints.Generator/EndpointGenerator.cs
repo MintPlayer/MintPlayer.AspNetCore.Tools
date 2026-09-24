@@ -216,7 +216,7 @@ public partial class EndpointGenerator : IncrementalGenerator
 
         return new EndpointInfo(
             symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            symbol.ContainingNamespace?.ToDisplayString() ?? "",
+            symbol.ContainingNamespace is { IsGlobalNamespace: false } containingNamespace ? containingNamespace.ToDisplayString() : "",
             symbol.Name,
             isPartial,
             hasExistingBaseClass,
@@ -232,7 +232,9 @@ public partial class EndpointGenerator : IncrementalGenerator
             MethodsLiteral.Read(symbol, httpMethod, context.SemanticModel, ct),
             level is EndpointLevel.Typed or EndpointLevel.TypedWithResponse
                 ? RequestValidationGaps.Inspect(carrier!.TypeArguments[0], context.SemanticModel.Compilation)
-                : RequestValidationGap.None);
+                : RequestValidationGap.None,
+            GeneratedCodeAccess.WhyInaccessible(symbol),
+            GeneratedCodeAccess.IsInFileLocalType(symbol));
     }
 
     private static bool IsMoreDerived(INamedTypeSymbol candidate, INamedTypeSymbol? incumbent)
@@ -288,7 +290,8 @@ public partial class EndpointGenerator : IncrementalGenerator
             symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             GroupMembership.Resolve(symbol, EndpointsNamespace),
             symbol.FromSymbol().AsKey(),
-            RouteLiteral.Read(symbol, "Prefix", context.SemanticModel, ct));
+            RouteLiteral.Read(symbol, "Prefix", context.SemanticModel, ct),
+            GeneratedCodeAccess.WhyInaccessible(symbol));
     }
 
     private static bool ReachesEndpointBase(INamedTypeSymbol? type)

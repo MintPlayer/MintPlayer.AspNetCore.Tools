@@ -79,7 +79,12 @@ internal static class RequestValidation
         var validateContext = new ValidateContext
         {
             ValidationOptions = options,
-            ValidationContext = new System.ComponentModel.DataAnnotations.ValidationContext(request, context.RequestServices, items: null),
+            // The display-name overload: the one without it discovers the name by reflection and is
+            // [RequiresUnreferencedCode] (IL2026 under IsAotCompatible, PRD R6.4). With no member
+            // name set, that reflection falls back to the object's type name, so passing it is the
+            // same value, and the validation resolver overwrites it per member as it walks the type.
+            ValidationContext = new System.ComponentModel.DataAnnotations.ValidationContext(
+                request, request.GetType().Name, context.RequestServices, items: null),
         };
 
         await typeInfo.ValidateAsync(request, validateContext, context.RequestAborted);

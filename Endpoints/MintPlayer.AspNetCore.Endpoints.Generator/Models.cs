@@ -25,8 +25,12 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         PathSpec? pathSpec = null, string? route = null,
         ImmutableArray<BoundProperty> boundProperties = default,
         string? knownMethods = null,
-        RequestValidationGap validationGap = RequestValidationGap.None)
+        RequestValidationGap validationGap = RequestValidationGap.None,
+        string? inaccessibleReason = null,
+        bool isInFileLocalType = false)
     {
+        InaccessibleReason = inaccessibleReason;
+        IsInFileLocalType = isInFileLocalType;
         ValidationGap = validationGap;
         KnownMethods = knownMethods;
         BoundProperties = boundProperties.IsDefault ? ImmutableArray<BoundProperty>.Empty : boundProperties;
@@ -108,6 +112,19 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public RequestValidationGap ValidationGap { get; }
 
     /// <summary>
+    /// Why generated code outside the endpoint cannot name it (MPEP024), or <see langword="null"/>
+    /// when it can. Such an endpoint is not mapped, linked or contracted.
+    /// </summary>
+    /// <remarks>See <see cref="GeneratedCodeAccess"/>.</remarks>
+    public string? InaccessibleReason { get; }
+
+    /// <summary>
+    /// True when the endpoint or a type it is nested in is a <c>file</c> type, so no generated
+    /// partial can join it.
+    /// </summary>
+    public bool IsInFileLocalType { get; }
+
+    /// <summary>
     /// True when the user's own base class already derives from one of the library's endpoint bases.
     /// </summary>
     /// <remarks>
@@ -168,6 +185,8 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         Route == other.Route &&
         KnownMethods == other.KnownMethods &&
         ValidationGap == other.ValidationGap &&
+        InaccessibleReason == other.InaccessibleReason &&
+        IsInFileLocalType == other.IsInFileLocalType &&
         // ImmutableArray's own equality compares the backing array by reference. Using it here
         // would make every run look like a change and kill incremental caching, silently.
         SequenceComparer<BoundProperty>.Instance.Equals(BoundProperties, other.BoundProperties);
@@ -179,8 +198,9 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
 internal sealed class GroupInfo : IEquatable<GroupInfo>
 {
     public GroupInfo(string fullyQualifiedName, string? parentGroupFqn,
-        LocationKey? location = null, string? prefix = null)
+        LocationKey? location = null, string? prefix = null, string? inaccessibleReason = null)
     {
+        InaccessibleReason = inaccessibleReason;
         FullyQualifiedName = fullyQualifiedName;
         ParentGroupFqn = parentGroupFqn;
         Location = location;
@@ -196,12 +216,20 @@ internal sealed class GroupInfo : IEquatable<GroupInfo>
     /// <inheritdoc cref="EndpointInfo.Location"/>
     public LocationKey? Location { get; }
 
+    /// <summary>
+    /// Why generated code cannot name the group (MPEP024), or <see langword="null"/> when it can.
+    /// Such a group is not mapped, and neither is anything that joins it, directly or through a
+    /// nested group.
+    /// </summary>
+    public string? InaccessibleReason { get; }
+
     public bool Equals(GroupInfo? other) =>
         other is not null &&
         FullyQualifiedName == other.FullyQualifiedName &&
         ParentGroupFqn == other.ParentGroupFqn &&
         LocationKeys.AreEqual(Location, other.Location) &&
-        Prefix == other.Prefix;
+        Prefix == other.Prefix &&
+        InaccessibleReason == other.InaccessibleReason;
 
     public override bool Equals(object? obj) => Equals(obj as GroupInfo);
     public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;

@@ -106,7 +106,32 @@ internal sealed class EndpointMappingPlan
         // other unusable shape; [MemberOf<T>] with AllowMultiple = false makes it CS0579 instead.)
         var unusable = new HashSet<string>(cyclic, StringComparer.Ordinal);
 
+        // A group generated code cannot name (MPEP024) is unusable too, and so is every group nested
+        // inside it: their MapGroup calls and prefixes would all have to name it. MPEP024 is reported
+        // on the inaccessible group only, which is the one declaration to fix.
+        var inaccessibleGroups = new HashSet<string>(
+            groups.Where(group => group.InaccessibleReason is not null).Select(group => group.FullyQualifiedName),
+            StringComparer.Ordinal);
+        foreach (var group in groups)
+        {
+            var visited = new HashSet<string>(StringComparer.Ordinal);
+            for (var current = (string?)group.FullyQualifiedName; current is not null && visited.Add(current);)
+            {
+                if (inaccessibleGroups.Contains(current))
+                {
+                    unusable.Add(group.FullyQualifiedName);
+                    break;
+                }
+
+                current = parentOf.TryGetValue(current, out var parent) ? parent : null;
+            }
+        }
+
+        // An endpoint generated code cannot name (MPEP024) is not mapped, linked or contracted: every
+        // one of those files would reference it by name and fail with CS0122. Its partial base class
+        // is still emitted where C# allows it (see DeclaredEndpoints), so nothing else cascades.
         var mappable = declared
+            .Where(endpoint => endpoint.InaccessibleReason is null)
             .Where(endpoint => endpoint.GroupTypeFqn is null || !unusable.Contains(endpoint.GroupTypeFqn))
             .ToList();
 

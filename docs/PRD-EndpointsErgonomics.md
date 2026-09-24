@@ -638,6 +638,29 @@ consumer reads one accurate error instead of a confusing one.
 > nested `class X` with no modifiers) is mapped anyway, and the generated `EndpointMapping.g.cs` /
 > `EndpointContracts.g.cs` then fail with CS0122. No diagnostic explains it.
 
+> **Fixed alongside M12 — MPEP024 (Error), "Endpoint or group is not accessible to generated code".**
+> The generated files are their own top-level types and reach an endpoint or group only by its fully
+> qualified name, so a type is usable only when it and every containing type is `public`, `internal`
+> or `protected internal`. A `private`, `protected` or `private protected` nested type, anything nested
+> inside one, and a `file` type (or anything nested in one — a `file` type cannot be named from another
+> file at all) now gets MPEP024 on its identifier, naming the offending modifier or container, and is
+> left out of the mapping, the descriptors, `Routes` and the contract. The partial base class and
+> binder are still emitted for a hidden nested endpoint — a partial inside the partial container can
+> reach it — so MPEP024 is the only error. For a `file`-local endpoint no partial is emitted either: a
+> `partial class` in the generated file cannot join a file type and would declare a second, unrelated
+> type that fails in generated code; so a *typed* file-local endpoint, like MPEP019's typed case,
+> leaves `CS0115`/`CS0535` after MPEP024 (pinned by a test). A hidden **group** gets MPEP024 too and is
+> unusable, like a cyclic one: neither it, nor a group nested inside it, nor any endpoint joining them is
+> mapped, and only the group is reported. `internal` and `protected internal` nested endpoints are
+> mapped with no diagnostic. The accessibility reason is a string on the value-equal `EndpointInfo` /
+> `GroupInfo`, computed in the transform; MPEP017 stays reserved, so this is the next free id.
+>
+> Found while verifying the README, fixed with it: an endpoint in the **global namespace** that needs a
+> partial (a typed endpoint, or any endpoint with bound properties) was emitted inside
+> `namespace <global namespace>` — `ToDisplayString()` of the global namespace — and did not compile.
+> It now gets no namespace block. The TestApp and the fixture corpus declare everything in a namespace,
+> which is why nothing caught it; a README snippet pasted into a file without one hits it at once.
+
 **R3.4 — Every diagnostic that aborts emission must emit a throwing stub.** Measured: a
 generator that bails on a bad input leaves the abstract member unimplemented, so the
 consumer reads `CS0534 … does not implement inherited abstract member BindRequestAsync`
@@ -966,6 +989,32 @@ gate (P11).
 > and the true residue is visible. Turning it on early would put ten warnings into a repo
 > whose convention is a warning-clean build, for no benefit.
 
+> **Resolved with M12: `IsAotCompatible` is on for both shipping runtime projects, on both TFMs.**
+> Measured with `-t:Rebuild -c Release -p:IsAotCompatible=true`, deduplicated by file, line, code and
+> TFM: **Abstractions 0 warnings; the runtime library 5 on net10.0 and 4 on net11.0.**
+> - `MapEndpoint<TEndpoint>` → `MapMethods(…, Delegate)`: IL2026 + IL3050 (both TFMs).
+>   `RequestDelegateFactory` binds the delegate by reflection.
+> - `MapGroupOf` → `MethodInfo.MakeGenericMethod`: IL2060 + IL3050 (both TFMs). The group's static
+>   abstract `Prefix`/`Configure` are reachable only through a generic parameter.
+> - net10.0 only, `RequestValidation`: IL2026 on `new ValidationContext(instance, services, items)`,
+>   the overload that discovers its display name by reflection.
+>
+> All three are handled honestly, with no suppression. The first two are inherent to the manual,
+> reflection-based path, so `MapEndpoint<T>` and `MapGroupOf` are annotated
+> `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` with one message saying why — the annotation *is*
+> the correct statement of that path, and a trimmed consumer calling it now gets the warning at their
+> call site (a deliberate, visible API change; no code in this repo outside the tests calls it). The
+> third is not inherent: the constructor with an explicit `displayName` is trim-safe, and passing
+> `request.GetType().Name` is the value the reflective one falls back to when no member name is set
+> (the validation resolver overwrites it per member). After the change: **0 warnings on both TFMs**,
+> with `EnableTrimAnalyzer`/`EnableAotAnalyzer` confirmed on.
+>
+> This remains a regression gate for the library's own code, not an AOT claim (R7.6 stands). What the
+> analyzer cannot see is unannotated rather than safe: the *generated* mapping calls the same
+> `Delegate` overload of `MapMethods` from the consumer's assembly; `BodyEndpoint` reads through MVC
+> input formatters (not trim-annotated) or `ReadFromJsonAsync<T>()` with whatever `JsonOptions` the app
+> configured. The README says exactly this.
+
 **R6.5 — `MintPlayer.SourceGenerators.Tools` is upgraded 10.16.0 → 10.21.0**, moving the
 generator's Roslyn floor from 4.14.0 to 5.x. Safe given the packages target
 `net10.0;net11.0` and `global.json` pins `11.0.100-rc.1.26425.128`, but it is a breaking
@@ -1258,6 +1307,20 @@ imperative `Configure` hook. This is a working, entirely undocumented feature.
 
 **R8.3 — The binding rule is stated once, in one sentence,** and the MPEP008/MPEP009
 messages teach it at the moment it matters.
+
+> **As built in M12:** the package README was rewritten from scratch for the as-built library (782 →
+> 621 lines, covering considerably more, no `IMemberOf`, no hand-written `BindRequestAsync` for route values). The binding rule is
+> one bold sentence at the top of "Route and query values"; R8.2's passthrough has its own section. It
+> documents what the library does not do — no automatic `[ValidatableType]`/`AddValidation()`
+> discovery, `[Range]` on a bound property not evaluated, no AOT-safe binding, no parameter
+> documentation on the manual path — and the full diagnostics table through MPEP024, with MPEP003/004
+> marked retired and MPEP017 reserved. Every C# block is compiled verbatim: a script extracts the
+> blocks into a scratch server project (both TFMs, local runtime project + generator as analyzer, the
+> OpenAPI package) and a scratch client project (`GenerateEndpointsClient`, `EndpointsServerReference`
+> to the scratch server), and both build with zero warnings and zero generator diagnostics. The sample
+> blocks form one coherent API (assembly `MyShop.Api`), so the `Routes.Api.Users.GetUser(...)` links and
+> the `ApiClient` calls in the text are the generated ones. `.Abstractions` and `.Generator` got short
+> package READMEs of their own.
 
 ## Acceptance criteria
 

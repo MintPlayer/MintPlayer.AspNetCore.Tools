@@ -23,6 +23,7 @@
 		<Authors>Pieterjan De Clippel</Authors>
 		<Company>MintPlayer</Company>
 		<Product>MintPlayer.AspNetCore.Endpoints</Product>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<GetTargetPathDependsOn>$(GetTargetPathDependsOn);GetDependencyTargetPaths</GetTargetPathDependsOn>
 	</PropertyGroup>
 
@@ -57,6 +58,7 @@
 	<ItemGroup>
 		<None Include="build\MintPlayer.AspNetCore.Endpoints.Generator.props" Pack="true" PackagePath="build\" />
 		<None Include="build\MintPlayer.AspNetCore.Endpoints.Generator.targets" Pack="true" PackagePath="build\" />
+		<None Include="README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
 	<!--

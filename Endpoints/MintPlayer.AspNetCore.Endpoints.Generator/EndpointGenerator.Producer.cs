@@ -198,6 +198,7 @@ partial class EndpointGenerator
         {
             if (!endpoint.IsPartial) return;                                // MPEP001 / MPEP014
             if (endpoint.PathSpec is { AllPartial: false }) return;         // MPEP019
+            if (endpoint.IsInFileLocalType) return;                         // MPEP024: a partial cannot join a file type
 
             var bindable = ShadowParameters.Bindable(endpoint);
 
@@ -220,8 +221,10 @@ partial class EndpointGenerator
             }
 
             // OpenPathSpec reopens every containing type, so a nested endpoint emits valid code. A
-            // flat namespace block used to produce a file that did not compile.
-            using (writer.OpenBlock($"namespace {endpoint.Namespace}"))
+            // flat namespace block used to produce a file that did not compile. An endpoint in the global
+            // namespace gets no namespace block at all: "namespace <global namespace>" is what
+            // ToDisplayString() gives for it, and that emitted a file that did not compile either.
+            using (endpoint.Namespace.Length > 0 ? writer.OpenBlock($"namespace {endpoint.Namespace}") : (IDisposable?)null)
             using (writer.OpenPathSpec(endpoint.PathSpec))
             {
                 if (bindable.Count == 0)

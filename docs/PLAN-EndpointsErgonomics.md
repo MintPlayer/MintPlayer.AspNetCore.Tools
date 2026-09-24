@@ -607,20 +607,20 @@ Scope and packaging shape set by S5.
 
 ## M12 — Documentation (R8.1–R8.3)
 
-- [ ] Rewrite the 646-line package README: `IMemberOf<T>` in ~20 places, five
+- [x] Rewrite the 646-line package README: `IMemberOf<T>` in ~20 places, five
       `BindRequestAsync` code blocks, the diagnostics table, the binding-failure table.
-- [ ] State the binding rule **once**, in one sentence.
-- [ ] New section: `[Authorize]`, `[Authorize(Policy=…)]`, `[EnableRateLimiting]`,
+- [x] State the binding rule **once**, in one sentence.
+- [x] New section: `[Authorize]`, `[Authorize(Policy=…)]`, `[EnableRateLimiting]`,
       `[Tags]` and `[ProducesResponseType]` already work as class attributes — verified
       end to end, and entirely undocumented today. (R8.2)
-- [ ] Document what the library does **not** do: no automatic `AddValidation()` discovery,
+- [x] Document what the library does **not** do: no automatic `AddValidation()` discovery,
       no AOT-safe generated binding, and why.
-- [ ] Add a README for `.Abstractions` and `.Generator`, which have none.
+- [x] Add a README for `.Abstractions` and `.Generator`, which have none.
 
 **Gate:**
 
-- [ ] Every code block in the README compiles when pasted into a scratch project.
-- [ ] No occurrence of `IMemberOf` remains anywhere outside this plan and the PRD.
+- [x] Every code block in the README compiles when pasted into a scratch project.
+- [x] No occurrence of `IMemberOf` remains anywhere outside this plan and the PRD.
 
 ---
 
@@ -678,7 +678,8 @@ appended blockquotes; this section records only where the work stands.)*
 | M8 typed links + `.WithName()` + MPEP012 | see `git log` ("M8: …") | generator 290, runtime 215 |
 | M9 contract + typed client, scoped store in the TestApp | see `git log` ("M9: …") | generator 305, runtime 269 (Tools.Tests whole project 1071) |
 | M10 contract snapshot + CI gate | uncommitted at time of writing | no new tests; swept together with M11 |
-| M11 `partial` code fix (MPEP001/014/019) | uncommitted at time of writing | generator 312, Tools.Tests 1071 (runtime 269) |
+| M11 `partial` code fix (MPEP001/014/019) | `dda6c70` (with M10) | generator 312, Tools.Tests 1071 (runtime 269) |
+| M12 README + MPEP024 + global-namespace fix + `IsAotCompatible` on | uncommitted at time of writing | generator 324, Tools.Tests 1071; `-t:Rebuild` 36 CS1591 (baseline), OpenAPI snapshot unchanged |
 
 "Runtime" means `Tests\MintPlayer.AspNetCore.Tools.Tests --filter "FullyQualifiedName~Endpoints"`.
 
@@ -788,23 +789,32 @@ note under R7.4a):
     target in the generator project feeds both packs, with the guards.
   - Not verified: the lightbulb in a real IDE (the harness applies the fix without MEF; the export
     attributes are asserted instead).
-  - Found, not fixed: a private nested endpoint is mapped anyway and fails with CS0122 in generated
-    code, with no diagnostic.
-- **M12 README rewrite** (646 lines) — must cover: the explicit binding rule and why not
-  convention (over-posting); the arity-1 asymmetry (`IGetEndpoint<TResponse>` is the response);
-  `[MemberOf<T>]` and inheritance; the already-working `[Authorize]`/`[EnableRateLimiting]`/
-  `[Tags]`/`[ProducesResponseType]` passthrough (R8.2); validation conditions — hand-written
-  `[ValidatableType]`, net10 `ASP0029` NoWarn, one `AddValidation()` call site per assembly on
-  net10 (CS8785), cross-assembly remedy, `[Range]` on a `[RouteParam]` is not evaluated; the
-  OpenAPI package opt-in and the manual-path documentation gap; no AOT-safe binding claim;
-  the diagnostics table (MPEP003/004 retired). Every code block must compile.
+  - Found here, **fixed with M12**: a private nested endpoint was mapped anyway and failed with
+    CS0122 in generated code, with no diagnostic — now MPEP024 (see M12 below).
+- **M12 — done** (details in the PRD's "As built in M12" note under R8.3, the "Fixed alongside M12"
+  note under R3.3a and the "Resolved with M12" note under R6.4):
+  - **README rewritten** (782 → 621 lines) for the as-built library, with every item this ledger
+    listed; `.Abstractions` and `.Generator` got short package READMEs (wired into their packs).
+    Every C# block compiles verbatim: `scratchpad\readme\extract.ps1` copies the blocks into a
+    scratch server (net10.0 + net11.0) and a scratch typed client, both build with 0 warnings.
+  - **MPEP024** (Error): an endpoint or group that is `private`/`protected`/`private protected`/
+    `file`-local, or nested in such a type, is not mapped, linked or contracted, and is reported on
+    its identifier. A hidden group takes its nested groups and members with it. 11 new generator
+    tests (`GeneratedCodeAccessDiagnosticTests`); the corpus zero-diagnostics test still passes.
+  - **Found and fixed while verifying the README:** a partial-needing endpoint in the global
+    namespace was emitted inside `namespace <global namespace>` and did not compile (+1 test).
+  - **`IsAotCompatible` turned on** for the runtime library and Abstractions (the deferred R6.4
+    item): measured residue 5 (net10.0) / 4 (net11.0) / 0 (Abstractions), fixed with honest
+    annotations — `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` on the reflective
+    `MapEndpoint<T>` path and the trim-safe `ValidationContext` constructor — now 0 on both TFMs.
+    Not an AOT claim; the README says why.
 - **M13 single sweep** — whole solution, both TFMs, identical test count per TFM, coverage not
   regressed, `-t:Rebuild` warnings deduplicated (baseline: 36 CS1591 from MustChangePassword
   and SitemapXml, none from Endpoints).
 - **M14 release gate** — **the user's decision; do not merge.** Merging to `master` publishes to
   nuget.org. Open the PR with a proposed version and flag it.
-- **Deferred to after M3 and still open:** turning on `IsAotCompatible` once the true residue is
-  visible (R6.4 correction).
+- ~~Deferred to after M3:~~ turning on `IsAotCompatible` once the true residue is visible (R6.4
+  correction) — **resolved with M12, turned on**; see above.
 
 ### Working rules that held throughout
 - One PR, never split; open it, never merge it.

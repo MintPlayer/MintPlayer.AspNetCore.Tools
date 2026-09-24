@@ -598,4 +598,42 @@ public class EndpointDiscoveryTests
 
         Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", source)));
     }
+
+    /// <summary>
+    /// A typed endpoint with a bound property in the global namespace — the shape a README snippet
+    /// pasted into a file with no namespace produces. Its partial used to be emitted inside
+    /// <c>namespace &lt;global namespace&gt;</c> (what <c>ToDisplayString()</c> gives), which did not
+    /// compile; it now gets no namespace block.
+    /// </summary>
+    [Fact]
+    public void TypedEndpointInTheGlobalNamespace_GetsItsPartial_AndCompiles()
+    {
+        const string source = """
+            using System.Threading;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using MintPlayer.AspNetCore.Endpoints;
+
+            public record ThingResponse(int Id);
+
+            public partial class GetThing : IGetEndpoint<ThingResponse>
+            {
+                public static string Path => "/things/{id}";
+
+                [RouteParam] public int Id { get; set; }
+
+                public override Task<IResult> HandleAsync(CancellationToken ct)
+                    => Task.FromResult(Results.Ok(new ThingResponse(Id)));
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run("Fixtures", source);
+        var generated = Generated(result);
+
+        Assert.Empty(result.Diagnostics);
+        Assert.DoesNotContain("<global namespace>", generated);
+        Assert.Contains("partial class GetThing : global::MintPlayer.AspNetCore.Endpoints.ResponseEndpoint", generated);
+        Assert.Contains("Map<global::GetThing", generated);
+        Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", source)));
+    }
 }

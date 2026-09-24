@@ -190,6 +190,20 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Binding assigns the property after construction, which an init-only or get-only property forbids. Without this diagnostic the property would silently never be bound.");
 
+    /// <remarks>
+    /// Reported on an endpoint and on a group. Without it the endpoint was mapped anyway and the
+    /// generated mapping, typed-link and contract files failed with CS0122 — errors in files the
+    /// consumer cannot edit, with nothing saying which declaration to change.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor TypeNotAccessibleToGeneratedCode = new(
+        id: "MPEP024",
+        title: "Endpoint or group is not accessible to generated code",
+        messageFormat: "{0} '{1}' cannot be mapped because {2}; the generated mapping code must be able to name it, so it and every type it is nested in must be declared at least 'internal'",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The generated Map...Endpoints() method, the typed links and the endpoint contract live in their own types, so they reach an endpoint or group only by its name. A private, protected or private protected nested type, or a type nested inside one, is inaccessible there (CS0122), and a file-local type cannot be named from another file at all. The endpoint (or the group, with everything that joins it) is left out of the mapping, the typed links and the contract.");
+
     // MPEP021-MPEP023 are reported by EndpointClientGenerator, in the CLIENT project, and have no
     // source location: what they describe lives in a referenced assembly's metadata.
 

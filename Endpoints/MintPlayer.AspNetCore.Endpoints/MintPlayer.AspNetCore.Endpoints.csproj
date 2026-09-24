@@ -5,6 +5,12 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<OutputType>Library</OutputType>
+		<!--
+		A regression gate for the library's own code, not an AOT claim (PRD R6.4, R7.6): the reflective
+		manual MapEndpoint<T>() path is annotated [RequiresUnreferencedCode]/[RequiresDynamicCode], and
+		the generated mapping still binds through the Delegate overload of MapMethods in the consumer.
+		-->
+		<IsAotCompatible>true</IsAotCompatible>
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints</PackageId>
