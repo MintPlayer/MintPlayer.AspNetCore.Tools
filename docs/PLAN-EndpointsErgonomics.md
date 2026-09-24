@@ -657,6 +657,93 @@ happened by looking at nuget.org afterwards.
 
 ---
 
+## Progress ledger
+
+*(Living status for whoever resumes this work. Decisions and corrections live in the PRD as
+appended blockquotes; this section records only where the work stands.)*
+
+### Done — committed on `feature/endpoints-ergonomics`
+
+| Milestone | Commit | Tests after (net10.0 and net11.0, all green) |
+|---|---|---|
+| Docs | `969deb4` | — |
+| M0 spikes | recorded in "M0 outcome" | S1, S2, S3, S5, S6 pass; S4 fails → R6.5 withdrawn |
+| M1 hygiene/packaging | `013f164` | — |
+| M2 route capture | `a9b71ee` | generator +35 |
+| M3 `[MemberOf<T>]` | `88e7f91` | generator 143, runtime Endpoints 95 |
+| M4 property binding + ladder | `2c29e54` | generator 187, runtime 128 |
+| M5 OpenAPI | `308d870` | generator 207, runtime 139 |
+| M6 route diagnostics + packaging (R6.5a) | `9dbe320` | generator 255, runtime 139 |
+| M7 validation | `3fdbf22` | generator 268, runtime 151 |
+
+"Runtime" means `Tests\MintPlayer.AspNetCore.Tools.Tests --filter "FullyQualifiedName~Endpoints"`.
+
+### In flight — M8 typed links (+ `.WithName()` + MPEP012)
+
+Delegated to an agent; not yet committed. Decisions fixed for it:
+- **One name per endpoint** — `EffectiveDescriptorName` — drives `.WithName()`, the OpenAPI
+  `operationId` and the typed-link method name. MPEP012 (Error) makes duplicates a build error;
+  the framework would throw on the first request.
+- **`internal static class Routes`** in `MintPlayer.AspNetCore.Endpoints.Generated`: a public type
+  with a fixed name collides (CS0433) once one endpoint project references another. Nested
+  classes mirror groups (trailing `Api`/`Group` stripped); one method per endpoint; parameters
+  from composed-route tokens (bound → property type, unbound → `string`, `{x?}`/`{x=1}` →
+  optional nullable) then optional `[QueryParam]`s; `{Name}Template` consts; endpoints with an
+  unrecoverable route are skipped.
+- **Runtime `EndpointRoute`**: `Path(LinkGenerator[, HttpContext])` delegating to
+  `GetPathByName` and throwing instead of returning null; `ToString()` + implicit `string`
+  conversion that must match `LinkGenerator` byte-for-byte (`UrlEncoder.Default`, never
+  `Uri.EscapeDataString`), pinned by a test against a real `LinkGenerator`.
+- The manual `MapEndpoint<T>()` path applies `.WithName()` too and documents that it cannot
+  prove uniqueness.
+
+### Remaining, with the constraints already learned
+
+- **M9 cross-assembly client** — shape set by S6: the client references the server assembly
+  **metadata-only** (`<Reference>` + `HintPath` + `<Private>false</Private>`), never
+  `ProjectReference` (NETSDK1082 on browser-wasm; four mitigations all fail). Emit
+  `[assembly: EndpointContract(...)]` from the server generator; the client generator reads it
+  via `Compilation.References` + `GetAssemblyOrModuleSymbol`, memoised on
+  `GetMetadataReference(...)`, and treats **zero contracts as an empty client, never an
+  error** (R7.4a). Client-side URL encoding must also follow `UrlEncoder.Default` semantics.
+  Ship the reference snippet as documentation or a targets file.
+- **M10 contract snapshot + CI** — committed OpenAPI document via
+  `Microsoft.Extensions.ApiDescription.Server`, `OpenApiVersion` pinned, `Program.cs` guarded
+  against `GetDocument.Insider`, CI fails on a dirty tree and on `oasdiff breaking`.
+- **M11 MPEP001 code fix** — shape set by S5: separate
+  `MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes` project (netstandard2.0, no
+  `EnforceExtendedAnalyzerRules`, Roslyn refs `PrivateAssets="all" ExcludeAssets="runtime"`
+  pinned to the generator's Roslyn), packed into the **same** analyzer folder as the generator
+  (`$(EndpointsAnalyzerPackPath)`), with `<Error>` guards. Test with
+  **`Microsoft.CodeAnalysis.CSharp.CodeFix.Testing` 1.1.2 + `DefaultVerifier`** — the `.XUnit`
+  package fails against xunit 2.9.3 — using `EmptyDiagnosticAnalyzer` and
+  `GetSourceGenerators()`, since MPEP001 comes from the generator.
+- **M12 README rewrite** (646 lines) — must cover: the explicit binding rule and why not
+  convention (over-posting); the arity-1 asymmetry (`IGetEndpoint<TResponse>` is the response);
+  `[MemberOf<T>]` and inheritance; the already-working `[Authorize]`/`[EnableRateLimiting]`/
+  `[Tags]`/`[ProducesResponseType]` passthrough (R8.2); validation conditions — hand-written
+  `[ValidatableType]`, net10 `ASP0029` NoWarn, one `AddValidation()` call site per assembly on
+  net10 (CS8785), cross-assembly remedy, `[Range]` on a `[RouteParam]` is not evaluated; the
+  OpenAPI package opt-in and the manual-path documentation gap; no AOT-safe binding claim;
+  the diagnostics table (MPEP003/004 retired). Every code block must compile.
+- **M13 single sweep** — whole solution, both TFMs, identical test count per TFM, coverage not
+  regressed, `-t:Rebuild` warnings deduplicated (baseline: 36 CS1591 from MustChangePassword
+  and SitemapXml, none from Endpoints).
+- **M14 release gate** — **the user's decision; do not merge.** Merging to `master` publishes to
+  nuget.org. Open the PR with a proposed version and flag it.
+- **Deferred to after M3 and still open:** turning on `IsAotCompatible` once the true residue is
+  visible (R6.4 correction).
+
+### Working rules that held throughout
+- One PR, never split; open it, never merge it.
+- Test runs batched per milestone, logged to files and grepped — never pipe the only copy.
+- Implementation delegated one agent at a time: concurrent builds of the generator lock DLLs.
+- A started TestApp is killed as a process tree and verified gone.
+- Generated code: zero `using` directives, `global::` types, static-form extension calls,
+  netstandard2.0 (no list patterns), value-equatable models (`ImmutableArray` via
+  `SequenceComparer`).
+- Corrections are appended to the PRD as blockquotes, never rewritten in place.
+
 ## M1–M14 outcome
 
 *(Written after the work. A `| Measure | Before (master) | After |` table covering consumer
