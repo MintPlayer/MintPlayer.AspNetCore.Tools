@@ -797,6 +797,45 @@ generator's Roslyn floor from 4.14.0 to 5.x. Safe given the packages target
 `net10.0;net11.0` and `global.json` pins `11.0.100-rc.1.26425.128`, but it is a breaking
 change for consumers on older SDKs and must be re-verified per R6.2.
 
+> **Withdrawn. Spike S4 disproved the premise, and the upgrade is dropped from this PR.**
+>
+> "Every SDK that can build net10.0 ships Roslyn 5.x" is true and irrelevant. **The real
+> boundary is 5.3, not 5.0**, and no published Tools version binds 5.0. Measured: SDK
+> 10.0.112 → Roslyn 5.0.0, SDK 10.0.401 → 5.9.0, the pinned 11.0.100-rc.1 → 5.11.0; and
+> `Tools` 10.19.0 onward all bind `Microsoft.CodeAnalysis 5.3.0.0`. On SDK 10.0.112 the
+> upgraded analyzer is **rejected**:
+>
+> ```
+> CSC : warning CS9057: Analyzer assembly '…Generator.dll' cannot be used because it
+>       references version '5.3.0.0' of the compiler, which is newer than the currently
+>       running version '5.0.0.0'.
+> Program.cs(3,5): error CS1061: 'WebApplication' does not contain a definition for
+>       'MapConsumerEndpoints'
+> ```
+>
+> The consumer does not see "unsupported SDK"; they see the library as broken.
+>
+> **Renaming the folder does not fix it.** `analyzers/dotnet/roslyn5.0/cs` was tested
+> directly and produced the identical CS9057 + CS1061: the folder name controls *selection*,
+> not *binding*. A 5.0 host selects the `roslyn5.0` folder and then rejects the 5.3-bound
+> assembly anyway. That folder name only becomes honest once Tools itself is built against
+> `Microsoft.CodeAnalysis 5.0.0` — a change that exists in the toolkit's working tree but
+> is **in no published package**.
+>
+> Since the upgrade is a "while we are here" item that nothing else in this PR depends on,
+> and since it would silently drop every SDK on the Roslyn 5.0–5.2 line, it is withdrawn.
+> Revisit when a Tools release binds 5.0.0.
+
+**R6.5a — The standalone Generator package runs its generator twice, and this predates the
+upgrade.** Found by S4 while testing folder layouts. `Tools`' own `build/*.props` packs
+copies of the analyzer into `analyzers/dotnet/roslyn4.0/cs` and `roslyn4.9/cs` *in addition
+to* the `analyzers/dotnet/cs` copy this repo's pack target places. The SDK resolves more
+than one as `@(Analyzer)`, the generator runs twice, and the consumer gets
+`error CS0101`/`CS0111` duplicate definitions. The 10.16.0 baseline package has the same
+three folders, so this is a live defect on the shipped package, not a consequence of
+anything in this PR. **Exactly one analyzer folder must ship**, so the Tools-props
+contributions have to be suppressed. Fix it here regardless of R6.5's withdrawal.
+
 **R6.6 — New attributes ship in the existing packages.** No `*.Attributes` split. The
 toolkit's own guidance carves out packages that ship runtime code *and* a generator as the
 case where they stay together; a fourth project adds a packaging surface where every

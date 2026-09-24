@@ -15,9 +15,10 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         string? groupTypeFqn, bool hasMultipleGroups,
         bool baseChainReachesEndpointBase = false,
         string? descriptorName = null, LocationKey? location = null,
-        PathSpec? pathSpec = null)
+        PathSpec? pathSpec = null, string? route = null)
     {
         PathSpec = pathSpec;
+        Route = route;
         FullyQualifiedName = fqn;
         Namespace = ns;
         ClassName = className;
@@ -62,6 +63,17 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     /// </para>
     /// </remarks>
     public PathSpec? PathSpec { get; }
+
+    /// <summary>
+    /// The group-relative route this endpoint declares, recovered at compile time, or
+    /// <see langword="null"/> when it could not be.
+    /// </summary>
+    /// <remarks>
+    /// <b>Null means "unknown", never "empty".</b> It is unrecoverable for a non-constant
+    /// expression and for any endpoint in a referenced assembly, both of which are legitimate, so
+    /// every check built on this must stay silent rather than guess. See <see cref="RouteLiteral"/>.
+    /// </remarks>
+    public string? Route { get; }
 
     /// <summary>
     /// True when the user's own base class already derives from one of the library's endpoint bases.
@@ -120,7 +132,8 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         BaseChainReachesEndpointBase == other.BaseChainReachesEndpointBase &&
         DescriptorName == other.DescriptorName &&
         LocationKeys.AreEqual(Location, other.Location) &&
-        PathSpecs.AreEqual(PathSpec, other.PathSpec);
+        PathSpecs.AreEqual(PathSpec, other.PathSpec) &&
+        Route == other.Route;
 
     public override bool Equals(object? obj) => Equals(obj as EndpointInfo);
     public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
@@ -128,17 +141,22 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
 
 internal sealed class GroupInfo : IEquatable<GroupInfo>
 {
-    public GroupInfo(string fullyQualifiedName, string? parentGroupFqn, bool hasMultipleParents, LocationKey? location = null)
+    public GroupInfo(string fullyQualifiedName, string? parentGroupFqn, bool hasMultipleParents,
+        LocationKey? location = null, string? prefix = null)
     {
         FullyQualifiedName = fullyQualifiedName;
         ParentGroupFqn = parentGroupFqn;
         HasMultipleParents = hasMultipleParents;
         Location = location;
+        Prefix = prefix;
     }
 
     public string FullyQualifiedName { get; }
     public string? ParentGroupFqn { get; }
     public bool HasMultipleParents { get; }
+
+    /// <inheritdoc cref="EndpointInfo.Route"/>
+    public string? Prefix { get; }
 
     /// <inheritdoc cref="EndpointInfo.Location"/>
     public LocationKey? Location { get; }
@@ -148,7 +166,8 @@ internal sealed class GroupInfo : IEquatable<GroupInfo>
         FullyQualifiedName == other.FullyQualifiedName &&
         ParentGroupFqn == other.ParentGroupFqn &&
         HasMultipleParents == other.HasMultipleParents &&
-        LocationKeys.AreEqual(Location, other.Location);
+        LocationKeys.AreEqual(Location, other.Location) &&
+        Prefix == other.Prefix;
 
     public override bool Equals(object? obj) => Equals(obj as GroupInfo);
     public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;

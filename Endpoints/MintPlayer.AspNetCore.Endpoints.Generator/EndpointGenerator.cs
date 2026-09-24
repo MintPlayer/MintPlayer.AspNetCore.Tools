@@ -211,7 +211,8 @@ public partial class EndpointGenerator : IncrementalGenerator
             baseChainReachesEndpointBase,
             GetDescriptorName(symbol),
             symbol.FromSymbol().AsKey(),
-            symbol.GetPathSpec(ct));
+            symbol.GetPathSpec(ct),
+            RouteLiteral.Read(symbol, "Path", context.SemanticModel, ct));
     }
 
     private static bool IsMoreDerived(INamedTypeSymbol candidate, INamedTypeSymbol? incumbent)
@@ -279,7 +280,8 @@ public partial class EndpointGenerator : IncrementalGenerator
             symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             parentGroupFqns.FirstOrDefault(),
             parentGroupFqns.Count > 1,
-            symbol.FromSymbol().AsKey());
+            symbol.FromSymbol().AsKey(),
+            RouteLiteral.Read(symbol, "Prefix", context.SemanticModel, ct));
     }
 
     private static bool ReachesEndpointBase(INamedTypeSymbol? type)

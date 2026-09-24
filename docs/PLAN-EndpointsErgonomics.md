@@ -174,6 +174,46 @@ if the server DLL is missing. Emitting the attributes into Contracts instead was
 produces nothing, since Contracts has no endpoint types and cannot reference Server without
 a cycle.
 
+**S3 — PASS.** `"MintPlayer.AspNetCore.Endpoints.MemberOfAttribute\`1"` matched 5 targets
+inside the real generator on both TFMs; the two wrong forms matched **0 with no error and
+no warning**, and a deliberately-broken negative control failed the assertion loudly, which
+is the property R1.3 requires. `attr.AttributeClass.TypeArguments[0]` reads the group;
+`GetAttributes()` returns nothing for a derived type; `GetAllBaseTypes()` walks two levels
+to find it. Two notes for M3: the helper is **self-inclusive and includes `System.Object`**,
+so R1.4's nearest-declaration-wins rule falls straight out of taking the first hit (proven
+— a derived type's own `[MemberOf<UsersApi>]` beat its base's `ProductsApi`); and an
+attribute on two partial parts fired the transform **twice for one symbol** with a
+different type argument each time, collapsing to 3 symbols from 5 fires under
+`SymbolEqualityComparer.Default`. Also proven across a package boundary.
+
+**S4 — FAIL, and R6.5 is withdrawn.** The upgrade builds and packs cleanly with identical
+Debug/Release `analyzers/**`, so the gate item as written passes — and the package is still
+broken. Published Tools 10.19.0+ bind Roslyn **5.3.0.0**, and SDK 10.0.112 (Roslyn 5.0.0)
+rejects the analyzer with `CS9057` then fails the consumer with `CS1061` on every generated
+call. The PRD's premise, "every SDK that can build net10.0 ships Roslyn 5.x", is true and
+irrelevant: the boundary is 5.3. Renaming to `analyzers/dotnet/roslyn5.0/cs` was tested
+directly and produced the identical failure, because the folder controls selection and not
+binding. Since nothing else in this PR depends on the upgrade, it is dropped.
+
+S4 also found a **live defect that predates it**: Tools' own props packs `roslyn4.0` and
+`roslyn4.9` copies beside this repo's `analyzers/dotnet/cs`, the SDK resolves more than one
+as `@(Analyzer)`, and the generator runs twice — `CS0101`/`CS0111` for the consumer. That
+is fixed here regardless (R6.5a).
+
+**S5 — PASS, +4.9 KB.** A code-fix assembly sits in `analyzers/dotnet/cs` without disturbing
+the generator: `csc` reads its metadata, finds no `[Generator]`, never resolves Workspaces,
+and emits not even a CS8033. Debug and Release payloads identical; the new `<Error>` guards
+fail the pack in both directions. Four shipping packages (CommunityToolkit.Mvvm,
+Meziantou.Analyzer, GraphQL.Analyzers, Avalonia) confirm Workspaces must **not** be packed
+beside it — the IDE host supplies it, and a copy would bind the wrong Roslyn.
+
+One correction to M11: `Microsoft.CodeAnalysis.CSharp.CodeFix.Testing.**XUnit**` does not
+work here. Its newest version is 1.1.2, built against xunit 2.4.x, and on this repo's xunit
+2.9.3 every assertion dies with `MissingMethodException: Xunit.Sdk.EqualException..ctor`.
+Use `Microsoft.CodeAnalysis.CSharp.CodeFix.Testing` 1.1.2 with `DefaultVerifier`, which has
+no xunit dependency at all. Since MPEP001 comes from a *generator*, the analyzer slot is
+`EmptyDiagnosticAnalyzer` and the diagnostic arrives via `GetSourceGenerators()`.
+
 Two consequences went into the PRD as R7.4 and R7.4a. M9 must ship the reference snippet
 as documentation or a targets file, because getting it wrong is an `MSB3245` + `CS1061`
 cascade rather than a clear message, and the server must be built before the client with a
@@ -212,8 +252,19 @@ decision.
       `.ProducesProblem()` and `.WithMetadata()` added in M5. Then **delete the `using`
       block** from the generated file. Types are already `global::`-qualified; extension
       calls are the one remaining dependency on the consumer's import set. (R6.9)
-- [ ] Upgrade `MintPlayer.SourceGenerators.Tools` 10.16.0 → 10.21.0. Update the test
-      csproj comment that records *"verified 4.14.0"* — it is now 5.x. (R6.5)
+- [ ] ~~Upgrade `MintPlayer.SourceGenerators.Tools` 10.16.0 → 10.21.0.~~ **Withdrawn by
+      spike S4** — every published Tools version from 10.19.0 binds Roslyn 5.3.0.0, which
+      SDK 10.0.112 (Roslyn 5.0.0) rejects with CS9057 and then CS1061 on every generated
+      `Map…Endpoints` call. Renaming the analyzer folder was tested and does not help.
+      The test csproj comment recording *"verified 4.14.0"* therefore stays correct. (R6.5)
+- [ ] Ship **exactly one** analyzer folder. `Tools`' own `build/*.props` contributes
+      `analyzers/dotnet/roslyn4.0/cs` and `roslyn4.9/cs` copies beside this repo's
+      `analyzers/dotnet/cs`, the SDK resolves more than one as `@(Analyzer)`, the generator
+      runs twice, and the consumer gets `CS0101`/`CS0111`. Pre-existing on the shipped
+      package. (R6.5a)
+- [ ] Make the pack path a `$(EndpointsAnalyzerPackPath)` property rather than the
+      hard-coded literal, so the folder is one property to change when a Tools release
+      binds 5.0.0 and R6.5 can be revisited.
 - [ ] **Do not touch** `coverlet.runsettings`. Its `DeterministicReport=false` is correct
       only because `ContinuousIntegrationBuild=true` sits on the pack step. If this
       milestone edits that file, the milestone is wrong.

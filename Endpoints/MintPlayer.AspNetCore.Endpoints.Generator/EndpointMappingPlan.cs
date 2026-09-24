@@ -25,8 +25,10 @@ internal sealed class EndpointMappingPlan
         Dictionary<string, List<EndpointInfo>> endpointsByGroup,
         Dictionary<string, int> factoryIndex,
         Dictionary<string, List<string>> groupChains,
-        HashSet<string> cyclicGroups)
+        HashSet<string> cyclicGroups,
+        Dictionary<string, string?> composedRoutes)
     {
+        ComposedRoutes = composedRoutes;
         DeclaredEndpoints = declared;
         MappableEndpoints = mappable;
         Groups = groups;
@@ -37,6 +39,17 @@ internal sealed class EndpointMappingPlan
         GroupChains = groupChains;
         CyclicGroups = cyclicGroups;
     }
+
+    /// <summary>
+    /// The full route each mappable endpoint answers on, keyed by fully qualified name, or
+    /// <see langword="null"/> where it could not be recovered at compile time.
+    /// </summary>
+    /// <remarks>
+    /// A null entry means "unknown", never "empty" — see <see cref="ComposedRoute"/>. An endpoint
+    /// whose <c>Path</c> is computed, or whose group's <c>Prefix</c> is, appears here as null and
+    /// must simply be skipped by anything reading this, rather than compared against.
+    /// </remarks>
+    public Dictionary<string, string?> ComposedRoutes { get; }
 
     /// <summary>Every discovered endpoint, deduplicated and ordered. Drives the partial base classes.</summary>
     public List<EndpointInfo> DeclaredEndpoints { get; }
@@ -129,9 +142,26 @@ internal sealed class EndpointMappingPlan
             endpoint => ChainOf(endpoint.GroupTypeFqn, parentOf),
             StringComparer.Ordinal);
 
+        // Composed once here rather than per diagnostic: the route template is parsed and compared
+        // by several consumers, and the framework's own route analyzer has a documented
+        // 1.5-minute execution-time defect (dotnet/aspnetcore#53899) from re-parsing.
+        var prefixOf = groups.ToDictionary(
+            group => group.FullyQualifiedName,
+            group => group.Prefix,
+            StringComparer.Ordinal);
+
+        var composedRoutes = mappable.ToDictionary(
+            endpoint => endpoint.FullyQualifiedName,
+            endpoint => ComposedRoute.Compose(
+                groupChains[endpoint.FullyQualifiedName]
+                    .Select(fqn => prefixOf.TryGetValue(fqn, out var prefix) ? prefix : null)
+                    .ToList(),
+                endpoint.Route),
+            StringComparer.Ordinal);
+
         return new EndpointMappingPlan(
             declared, mappable, groups, rootGroups, childGroups, endpointsByGroup,
-            factoryIndex, groupChains, cyclic);
+            factoryIndex, groupChains, cyclic, composedRoutes);
     }
 
     private static List<string> ChainOf(string? groupFqn, Dictionary<string, string?> parentOf)
