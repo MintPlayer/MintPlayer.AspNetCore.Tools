@@ -28,7 +28,8 @@ public abstract class EndpointBase<TRequest> : IDisposable, IAsyncDisposable
     public abstract Task<IResult> HandleAsync(TRequest request, CancellationToken cancellationToken);
 
     /// <summary>
-    /// Bridge: IEndpoint.HandleAsync(HttpContext) -> BindRequestAsync -> HandleAsync(TRequest, CT).
+    /// Bridge: IEndpoint.HandleAsync(HttpContext) -> BindParameters -> BindRequestAsync -> validation
+    /// -> HandleAsync(TRequest, CT).
     /// </summary>
     /// <remarks>
     /// A request that cannot be bound never reaches the typed handler: the handler's signature
@@ -55,8 +56,40 @@ public abstract class EndpointBase<TRequest> : IDisposable, IAsyncDisposable
         if (request is null)
             return await OnBindFailedAsync(httpContext, null);
 
+        // Only a request that bound gets here, so a malformed body is still a bind failure and is
+        // never reported as a validation failure as well.
+        var errors = await RequestValidation.ValidateAsync(request, httpContext);
+        if (errors is not null)
+            return await OnValidationFailedAsync(httpContext, errors);
+
         return await HandleAsync(request, httpContext.RequestAborted);
     }
+
+    /// <summary>
+    /// Produces the response for a bound request that failed validation. The default is a
+    /// <c>400 application/problem+json</c> carrying <paramref name="errors"/> as its
+    /// <c>errors</c> member. Override to log, reshape the problem details or change the status code.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Validation runs after parameter binding and body binding, and before the typed handler. It
+    /// covers the request <b>body</b> only, and only when the body type is marked
+    /// <c>[ValidatableType]</c> in hand-written code and the app called <c>AddValidation()</c>; in
+    /// any other app nothing is validated and this method is never called. <c>[RouteParam]</c> and
+    /// <c>[QueryParam]</c> properties of the endpoint are not validated — the binder enforces their
+    /// type, and business rules on them belong in the handler (PRD R5.1a).
+    /// </para>
+    /// <para>
+    /// The keys are member paths as <c>Microsoft.Extensions.Validation</c> reports them: <c>Name</c>,
+    /// <c>Inner.Name</c> for a nested member, and the empty string for an
+    /// <see cref="System.ComponentModel.DataAnnotations.IValidatableObject"/> result that names no
+    /// member. The shape is the same on every target framework.
+    /// </para>
+    /// </remarks>
+    /// <param name="context">The request being handled.</param>
+    /// <param name="errors">The validation errors, keyed by member path; never empty.</param>
+    protected virtual ValueTask<IResult> OnValidationFailedAsync(HttpContext context, IReadOnlyDictionary<string, string[]> errors)
+        => new(Results.ValidationProblem(errors));
 
     /// <summary>
     /// Assigns the endpoint's <c>[RouteParam]</c>/<c>[QueryParam]</c> properties. Overridden by generated

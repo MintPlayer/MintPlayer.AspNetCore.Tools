@@ -23,6 +23,17 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
+	<!--
+	On net10.0 Microsoft.Extensions.Validation is [Experimental("ASP0029")], and the compiler reports
+	that as an ERROR on the whole API RequestValidation.cs calls (ValidationOptions.Resolvers,
+	TryGetValidatableTypeInfo, IValidatableInfo, ValidateContext) — there is no Web-SDK exemption
+	(PRD R5.6). On net11.0 the API has graduated, so the suppression is scoped to net10.0 only: an
+	unconditioned NoWarn would also hide a genuinely new experimental API on the newer framework.
+	-->
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+		<NoWarn>$(NoWarn);ASP0029</NoWarn>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<None Include="README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>

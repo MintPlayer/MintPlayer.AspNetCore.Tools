@@ -188,11 +188,16 @@ internal static class EndpointGeneratorHarness
     /// <c>Microsoft.AspNetCore.OpenApi</c>, which is what makes the generator emit
     /// <c>EndpointOpenApi.g.cs</c>.
     /// </param>
+    /// <param name="includeValidation">
+    /// Pass <see langword="false"/> to model a consumer whose compilation cannot resolve
+    /// <c>Microsoft.Extensions.Validation</c> at all, which MPEP015 must stay silent for.
+    /// </param>
     public static CSharpCompilation CreateCompilation(
         string assemblyName,
         string[] sources,
         bool includeImplicitUsings = true,
-        bool includeOpenApi = false)
+        bool includeOpenApi = false,
+        bool includeValidation = true)
     {
         // LanguageVersion.Latest is required, not cosmetic: the fixtures use collection
         // expressions (C# 12) and static abstract interface members (C# 11).
@@ -208,7 +213,8 @@ internal static class EndpointGeneratorHarness
         return CSharpCompilation.Create(
             assemblyName,
             allSources.Select((source, index) => CSharpSyntaxTree.ParseText(source, parseOptions, path: $"Source{index}.cs")),
-            includeOpenApi ? allReferences.Value : references.Value,
+            (includeOpenApi ? allReferences.Value : references.Value)
+                .Where(reference => includeValidation || Path.GetFileName(reference.Display) != "Microsoft.Extensions.Validation.dll"),
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: NullableContextOptions.Enable));

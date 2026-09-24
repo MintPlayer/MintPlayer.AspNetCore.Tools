@@ -24,8 +24,10 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         string? descriptorName = null, LocationKey? location = null,
         PathSpec? pathSpec = null, string? route = null,
         ImmutableArray<BoundProperty> boundProperties = default,
-        string? knownMethods = null)
+        string? knownMethods = null,
+        RequestValidationGap validationGap = RequestValidationGap.None)
     {
+        ValidationGap = validationGap;
         KnownMethods = knownMethods;
         BoundProperties = boundProperties.IsDefault ? ImmutableArray<BoundProperty>.Empty : boundProperties;
         PathSpec = pathSpec;
@@ -100,6 +102,12 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public string? KnownMethods { get; }
 
     /// <summary>
+    /// Whether the request type has validation rules but no <c>[ValidatableType]</c> — the MPEP015
+    /// shape. Always <see cref="RequestValidationGap.None"/> for levels without a request body.
+    /// </summary>
+    public RequestValidationGap ValidationGap { get; }
+
+    /// <summary>
     /// True when the user's own base class already derives from one of the library's endpoint bases.
     /// </summary>
     /// <remarks>
@@ -159,6 +167,7 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         PathSpecs.AreEqual(PathSpec, other.PathSpec) &&
         Route == other.Route &&
         KnownMethods == other.KnownMethods &&
+        ValidationGap == other.ValidationGap &&
         // ImmutableArray's own equality compares the backing array by reference. Using it here
         // would make every run look like a change and kill incremental caching, silently.
         SequenceComparer<BoundProperty>.Instance.Equals(BoundProperties, other.BoundProperties);

@@ -7,6 +7,12 @@
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 
+	<!-- [ValidatableType] is [Experimental("ASP0029")] on net10.0, reported as an error; it graduated
+	     in net11.0, so the suppression is scoped to net10.0 only (PRD R5.6). -->
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+		<NoWarn>$(NoWarn);ASP0029</NoWarn>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints\MintPlayer.AspNetCore.Endpoints.csproj" />
 		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"

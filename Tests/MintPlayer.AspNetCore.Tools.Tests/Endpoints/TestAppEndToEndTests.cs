@@ -152,6 +152,31 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
     }
 
     /// <summary>
+    /// An invalid body for the sample's <c>[ValidatableType]</c> request is a 400 problem response
+    /// naming both fields, and the handler never runs.
+    /// </summary>
+    /// <remarks>
+    /// This is the whole of PRD P9 in one request: the sample calls <c>AddValidation()</c> and marks
+    /// <c>CreateUserRequest</c>, yet before M7 this returned 201 with an empty name, because the
+    /// framework cannot discover types through a generated <c>Map</c> call. It also pins that the
+    /// attributes on the record's <i>positional parameters</i> are honoured, which is where the
+    /// sample puts them.
+    /// </remarks>
+    [Fact]
+    public async Task PostTypedEndpoint_InvalidBody_Returns400ProblemWithFieldErrors()
+    {
+        var response = await Client.PostAsJsonAsync("/api/users/", new { name = "", email = "not-an-email" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+
+        using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var errors = document.RootElement.GetProperty("errors");
+        Assert.True(errors.TryGetProperty("Name", out _), errors.ToString());
+        Assert.True(errors.TryGetProperty("Email", out _), errors.ToString());
+    }
+
+    /// <summary>
     /// An empty POST body is a 400.
     /// </summary>
     /// <remarks>

@@ -60,6 +60,20 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
             {
                 yield return DiagnosticDescriptors.EndpointMustBePartial.Create(location, endpoint.ClassName);
             }
+
+            // MPEP015 — skipped under MPEP002, where the endpoint does not run through the library's
+            // base class at all and a validation warning would bury the real error.
+            var runsThroughEndpointBase = !endpoint.HasExistingBaseClass || endpoint.BaseChainReachesEndpointBase;
+            if (endpoint.ValidationGap != RequestValidationGap.None && runsThroughEndpointBase && endpoint.RequestTypeFqn is { } requestFqn)
+            {
+                var reason = endpoint.ValidationGap switch
+                {
+                    RequestValidationGap.ValidatableObject => "implements IValidatableObject",
+                    RequestValidationGap.ValidationAttributes => "carries validation attributes",
+                    _ => "carries validation attributes and implements IValidatableObject",
+                };
+                yield return DiagnosticDescriptors.RequestNotValidatable.Create(location, requestFqn.Replace("global::", ""), endpoint.ClassName, reason);
+            }
         }
 
         foreach (var group in plan.Groups)

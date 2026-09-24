@@ -841,6 +841,22 @@ Two remedies, both proven to produce an identical correct 400:
   the external type into the local resolver. Requires nothing of the other assembly. The
   anchor must be `public` or `internal` and must not be `file`-local (ASP0033).
 
+> **Corrected by M7: exactly one `AddValidation()` call site per assembly, or net10.0 loses
+> validation entirely.** When one compilation contains more than one `AddValidation()` call,
+> the net10.0 validation generator fails with **CS8785** (*"hintName
+> 'ValidatableInfoResolver.g.cs' … must be unique"*) and registers **no resolver at all** —
+> every `[ValidatableType]` in that assembly silently stops validating, and the only symptom
+> is a build warning. net11.0 does not have the defect. So the remedy above is safe only in
+> this form: the declaring assembly exposes its one-line `AddXxxValidation()` wrapper, and a
+> project that calls it must not *also* call `AddValidation()` directly in the same assembly.
+> The TestApp follows this — `Program.cs` calls `AddTestAppValidation()`, a single wrapper in
+> `Models/TestAppValidation.cs` — with a comment explaining why a direct call alongside it
+> would break net10. The README must say this in one sentence.
+>
+> Also confirmed in M7: DataAnnotations on a positional record **parameter**
+> (`record R([Required] string Name)`) are honoured, not only `[property: Required]`, on both
+> TFMs. MPEP015 therefore treats both spellings alike.
+
 **R5.6 — .NET 10 requires `<NoWarn>$(NoWarn);ASP0029</NoWarn>`, including in this
 library's own projects.** On net10.0 `ASP0029` is reported as an **error**, not a warning
 — *"'ValidatableTypeAttribute' is for evaluation purposes only"* — and it fires on

@@ -121,8 +121,26 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "The binding code is generated into a partial declaration of the endpoint. Without 'partial' the properties would silently keep their default values on every request.");
 
-    // MPEP015 (DataAnnotations without [ValidatableType]) and MPEP017 (generated and hand-written
-    // binder both present) stay reserved for their milestones in PRD R3.3.
+    /// <remarks>
+    /// Exactly the shape that silently returns 200 on invalid input (PRD R5.3). The library validates
+    /// a body only through the resolver <c>Microsoft.Extensions.Validation</c> generates for types
+    /// marked <c>[ValidatableType]</c> in hand-written code; the framework's own discovery can never
+    /// reach the generated <c>Map</c> calls (P9.1), and .NET 10 says nothing about it. .NET 11's
+    /// ASP0038 covers only a marked type with no <c>AddValidation()</c>, so the two never overlap.
+    /// Attributes on a positional record parameter count: the validation generator honours them
+    /// (measured on net10.0 and net11.0), so the fix is the same for both forms.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor RequestNotValidatable = new(
+        id: "MPEP015",
+        title: "Request type has validation rules that will never run",
+        messageFormat: "Request type '{0}' of endpoint '{1}' {2} but is not marked [ValidatableType], so its validation never runs and invalid requests reach HandleAsync; add [Microsoft.Extensions.Validation.ValidatableType] to '{0}' and call builder.Services.AddValidation() in the project that declares it",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Microsoft.Extensions.Validation discovers types from hand-written Map calls, which a generated mapping is not, so an unmarked request type is never validated and nothing reports it. The generator cannot add the attribute itself: generators do not see each other's output, and .NET 11 forbids it in generated code (ASP0037).");
+
+    // MPEP017 (generated and hand-written binder both present) stays reserved for its milestone in
+    // PRD R3.3.
 
     public static readonly DiagnosticDescriptor GroupNeverJoined = new(
         id: "MPEP016",

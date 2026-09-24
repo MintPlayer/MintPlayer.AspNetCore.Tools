@@ -219,7 +219,10 @@ public partial class EndpointGenerator : IncrementalGenerator
             symbol.GetPathSpec(ct),
             RouteLiteral.Read(symbol, "Path", context.SemanticModel, ct),
             BoundProperties.Collect(symbol, EndpointsNamespace, ct),
-            MethodsLiteral.Read(symbol, httpMethod, context.SemanticModel, ct));
+            MethodsLiteral.Read(symbol, httpMethod, context.SemanticModel, ct),
+            level is EndpointLevel.Typed or EndpointLevel.TypedWithResponse
+                ? RequestValidationGaps.Inspect(carrier!.TypeArguments[0], context.SemanticModel.Compilation)
+                : RequestValidationGap.None);
     }
 
     private static bool IsMoreDerived(INamedTypeSymbol candidate, INamedTypeSymbol? incumbent)
