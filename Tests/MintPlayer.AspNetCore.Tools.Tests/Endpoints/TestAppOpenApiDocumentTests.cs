@@ -78,6 +78,61 @@ public class TestAppOpenApiDocumentTests : IClassFixture<WebApplicationFactory<P
     /// are compared case-sensitively because a validator and Swagger UI do: <c>Id</c> against
     /// <c>{id}</c> does not match.
     /// </remarks>
+    /// <summary>
+    /// Every operation's <c>operationId</c> is its endpoint's name — the same name the generated
+    /// mapping passes to <c>WithName</c> and the typed links are called by.
+    /// </summary>
+    /// <remarks>
+    /// Before M8 no operation had an <c>operationId</c>, so a client generator invented one from the
+    /// path and verb, and every route change renamed a client method. Asserted as the full
+    /// path+verb → id map, so a missing id and a wrong one both fail.
+    /// </remarks>
+    [Fact]
+    public async Task EveryOperation_HasTheEndpointNameAsOperationId()
+    {
+        var document = await DocumentAsync();
+
+        var ids = Operations(document)
+            .Select(o => $"{o.Verb.ToUpperInvariant()} {o.Path} = {(o.Operation.TryGetProperty("operationId", out var id) ? id.GetString() : "(none)")}")
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            [
+                "DELETE /api/users/{id} = DeleteUser",
+                "GET /api/products = ListProducts",
+                "GET /api/users = ListUsers",
+                "GET /api/users/nested/{id} = NestedGetUser",
+                "GET /api/users/{id} = GetUser",
+                "GET /health = HealthCheck",
+                "HEAD /api/{path} = PreflightEndpointHead",
+                "OPTIONS /api/{path} = PreflightEndpointOptions",
+                "POST /api/users = CreateUser",
+                "PUT /api/users/{id} = UpdateUser",
+            ],
+            ids);
+    }
+
+    /// <summary>
+    /// <c>operationId</c>s are unique across the document, including for the endpoint that answers
+    /// two methods.
+    /// </summary>
+    /// <remarks>
+    /// The framework takes the id straight from the endpoint name, so <c>PreflightEndpoint</c> —
+    /// mapped once for <c>HEAD</c> and <c>OPTIONS</c> — would otherwise document two operations with
+    /// one id, which the OpenAPI specification forbids and which makes a client generator emit two
+    /// methods with the same name. The generated transformer suffixes the method in that case only.
+    /// </remarks>
+    [Fact]
+    public async Task OperationIds_AreUniqueAcrossTheDocument()
+    {
+        var ids = Operations(await DocumentAsync())
+            .Select(o => o.Operation.GetProperty("operationId").GetString())
+            .ToArray();
+
+        Assert.Equal(ids.Length, ids.Distinct(StringComparer.Ordinal).Count());
+    }
+
     [Fact]
     public async Task EveryPathToken_HasExactlyOneRequiredPathParameter_OfTheSameName()
     {

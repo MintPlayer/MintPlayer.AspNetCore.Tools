@@ -19,6 +19,9 @@ public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserRes
     {
         // Simulate creation
         var response = new CreateUserResponse(42, request.Name, request.Email);
-        return Task.FromResult(Results.Created($"/api/users/42", response));
+        // A typed link, not "/api/users/42": renaming the group prefix or the route token now
+        // breaks this line at compile time instead of silently pointing the Location header at
+        // nothing.
+        return Task.FromResult(Results.Created(Routes.Api.Users.GetUser(id: response.Id), response));
     }
 }

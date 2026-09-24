@@ -675,12 +675,31 @@ appended blockquotes; this section records only where the work stands.)*
 | M5 OpenAPI | `308d870` | generator 207, runtime 139 |
 | M6 route diagnostics + packaging (R6.5a) | `9dbe320` | generator 255, runtime 139 |
 | M7 validation | `3fdbf22` | generator 268, runtime 151 |
+| M8 typed links + `.WithName()` + MPEP012 | see `git log` ("M8: …") | generator 290, runtime 215 |
 
 "Runtime" means `Tests\MintPlayer.AspNetCore.Tools.Tests --filter "FullyQualifiedName~Endpoints"`.
 
-### In flight — M8 typed links (+ `.WithName()` + MPEP012)
+### M8 typed links (+ `.WithName()` + MPEP012) — done
 
-Delegated to an agent; not yet committed. Decisions fixed for it:
+As built, where it departs from the decisions below:
+- `Routes` lives in its own file, `EndpointRoutes.g.cs`, from a third producer
+  (`EndpointRoutesProducer`) over the same `EndpointMappingPlan`, so it cannot disagree with the
+  mapping.
+- Catch-all tokens become optional `string? path = null` parameters: `LinkGenerator` treats an
+  omitted `{**path}` as optional.
+- One name on a multi-method endpoint would give one `operationId` on several operations, which
+  OpenAPI forbids. The erasable hook `OnMultiMethodEndpointNamed{n}` (OpenAPI producer only)
+  suffixes the method, e.g. `PreflightEndpointHead`.
+- `ToString()` ports routing's `TemplateBinder` to meet the byte-for-byte rule (R7.2's "do not
+  hand-roll" is overridden). A 43-case battery against a real `LinkGenerator` passes on 10.0.12
+  and 11.0.0. It cannot see constraints, `LowercaseUrls`, `AppendTrailingSlash`, transformers
+  or a replaced `UrlEncoder`; the type's docs say so.
+- `WithName` is applied after the endpoint's `Configure`, so the name MPEP012 proved unique
+  wins. MPEP012 reports the later endpoint, which stays mapped without a name or link.
+- A link is omitted, never emitted wrong, for a non-constant route, a duplicate name, a
+  non-identifier name, or a member-name clash.
+
+Decisions fixed beforehand:
 - **One name per endpoint** — `EffectiveDescriptorName` — drives `.WithName()`, the OpenAPI
   `operationId` and the typed-link method name. MPEP012 (Error) makes duplicates a build error;
   the framework would throw on the first request.
@@ -698,6 +717,13 @@ Delegated to an agent; not yet committed. Decisions fixed for it:
   prove uniqueness.
 
 ### Remaining, with the constraints already learned
+
+- **Goal check (session goal, 2026-09-24)**: scoped constructor injection already works on both
+  mapping paths (the endpoint is built per request from `HttpContext.RequestServices`) and is
+  covered by `EndpointInvocationTests`. The TestApp should show it through the generated
+  `MapEndpoints()` with a scoped user store, and the README must state it. URL fragments
+  (`#…`) are never sent to the server (RFC 3986 §3.5), so they can't be bound; the PRD records
+  this as out of scope, with the reason.
 
 - **M9 cross-assembly client** — shape set by S6: the client references the server assembly
   **metadata-only** (`<Reference>` + `HintPath` + `<Private>false</Private>`), never

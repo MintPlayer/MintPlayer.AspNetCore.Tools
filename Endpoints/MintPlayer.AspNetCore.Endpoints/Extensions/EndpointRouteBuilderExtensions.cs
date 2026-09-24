@@ -34,6 +34,18 @@ public static class EndpointRouteBuilderExtensions
     /// <c>Produces&lt;TResponse&gt;</c> success response the generated mapping does. Use the
     /// generated <c>Map…Endpoints()</c> for anything that is documented.
     /// </para>
+    /// <para>
+    /// <b>The endpoint is named, and this path cannot prove the name is unique.</b> It applies
+    /// <c>WithName</c> with the same name the generated mapping uses — the
+    /// <see cref="EndpointDescriptorNameAttribute"/> value, else the class name — so the endpoint
+    /// gets the same route name and OpenAPI <c>operationId</c> either way. But ASP.NET Core only
+    /// checks endpoint names for uniqueness on the <i>first request</i>, where a duplicate throws
+    /// <c>InvalidOperationException: Duplicate endpoint name</c>, and this method sees one endpoint
+    /// at a time. The generator reports a duplicate at build time (MPEP012) because it sees every
+    /// endpoint at once; here, two endpoints with the same class name in different namespaces — or
+    /// one endpoint mapped both here and by the generated mapping — compile, start, and fail on the
+    /// first request. Disambiguate with <see cref="EndpointDescriptorNameAttribute"/>.
+    /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// The group nesting is cyclic. A cycle has no outermost group and so no prefix, and guessing
@@ -96,8 +108,25 @@ public static class EndpointRouteBuilderExtensions
         else if (HasBoundProperties(typeof(TEndpoint)))
             EndpointDocumentation.DeclareBindingFailure(builder);
 
+        // After Configure, as in the generated mapping: the name is the one typed links and the
+        // OpenAPI operationId rely on, so a WithName inside Configure does not replace it.
+        builder.WithName(EndpointNameOf(typeof(TEndpoint)));
+
         return app;
     }
+
+    /// <summary>
+    /// The endpoint's name: its <see cref="EndpointDescriptorNameAttribute"/>, else its class name —
+    /// the rule the generator applies (<c>EndpointInfo.EffectiveDescriptorName</c>).
+    /// </summary>
+    /// <remarks>
+    /// Read from the type itself only, not inherited: the attribute is <c>Inherited = false</c>, and
+    /// the generator reads it from the endpoint's own symbol. An empty name is ignored there too.
+    /// </remarks>
+    internal static string EndpointNameOf(Type endpointType) =>
+        endpointType.GetCustomAttribute<EndpointDescriptorNameAttribute>(inherit: false) is { Name.Length: > 0 } attribute
+            ? attribute.Name
+            : endpointType.Name;
 
     /// <summary>
     /// The request body type of a typed endpoint — the <c>TRequest</c> of the

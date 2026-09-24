@@ -71,6 +71,11 @@ public partial class EndpointGenerator : IncrementalGenerator
         context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
             new EndpointOpenApiProducer(model).Emit(productionContext));
 
+        // The third file: typed links (EndpointRoutes.g.cs). Same model, so the same caching, and the
+        // same plan, so it names exactly the endpoints the mapping names.
+        context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
+            new EndpointRoutesProducer(model).Emit(productionContext));
+
         // Diagnostics do go through the Tools pipeline, because turning a LocationKey back into a
         // Location needs the Compilation. They are recomputed per compilation; they are cheap, and
         // there is no correct way to hold a Location across one.

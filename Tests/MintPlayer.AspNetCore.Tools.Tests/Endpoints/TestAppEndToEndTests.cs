@@ -414,4 +414,71 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
         Assert.Contains("/api/products/", patterns);
         Assert.Contains("/api/{**path}", patterns);
     }
+
+    // ---------- names and typed links (M8) ----------
+
+    /// <summary>
+    /// Every generated endpoint carries its effective name as both endpoint name and route name —
+    /// the class name, or its <c>[EndpointDescriptorName]</c>.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints the sample maps by hand (<c>MapOpenApi</c>) are excluded by the absence of a
+    /// library type in their metadata rather than by name, so a generated endpoint that lost its
+    /// name cannot slip out of the assertion.
+    /// </remarks>
+    [Fact]
+    public void GeneratedEndpoints_CarryTheirEffectiveNames()
+    {
+        var generated = Endpoints()
+            .Where(endpoint => endpoint.RoutePattern.RawText != "/openapi/{documentName}.json")
+            .ToArray();
+
+        var names = generated
+            .Select(endpoint => endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName ?? "(unnamed)")
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            ["CreateUser", "DeleteUser", "GetUser", "HealthCheck", "ListProducts", "ListUsers", "NestedGetUser", "PreflightEndpoint", "UpdateUser"],
+            names);
+        Assert.All(generated, endpoint => Assert.Equal(
+            endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName,
+            endpoint.Metadata.GetMetadata<IRouteNameMetadata>()?.RouteName));
+    }
+
+    /// <summary>
+    /// The framework's own <see cref="LinkGenerator"/> resolves a generated endpoint by its name —
+    /// which is what <c>EndpointRoute.Path</c> and the typed links rely on.
+    /// </summary>
+    [Fact]
+    public void LinkGenerator_ResolvesGetUserByName()
+    {
+        var links = factory.Services.GetRequiredService<LinkGenerator>();
+
+        Assert.Equal("/api/users/42", links.GetPathByName("GetUser", new { id = 42 }));
+        Assert.Equal("/api/users/nested/7", links.GetPathByName("NestedGetUser", new { id = 7 }));
+    }
+
+    /// <summary>
+    /// <c>CreateUser</c>'s <c>Location</c> header now comes from <c>Routes.Api.Users.GetUser(id: …)</c>
+    /// rather than a magic string — and it points at a URL the app actually answers.
+    /// </summary>
+    /// <remarks>
+    /// Following the header, not just comparing it, is what makes this more than a restatement of
+    /// the literal it replaced: a typed link whose template drifted from the mapping would produce a
+    /// well-formed Location that 404s.
+    /// </remarks>
+    [Fact]
+    public async Task CreateUser_LocationHeader_IsTheTypedLink_AndResolves()
+    {
+        var client = Client;
+        var response = await client.PostAsJsonAsync("/api/users/", new { name = "Dave", email = "dave@example.com" });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal("/api/users/42", response.Headers.Location?.OriginalString);
+
+        var followed = await client.GetAsync(response.Headers.Location);
+        Assert.Equal(HttpStatusCode.OK, followed.StatusCode);
+        Assert.Contains("\"id\":42", await followed.Content.ReadAsStringAsync());
+    }
 }

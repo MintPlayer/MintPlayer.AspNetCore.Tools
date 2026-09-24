@@ -22,6 +22,7 @@ public class OpenApiEmissionTests
 {
     private const string MappingFile = "EndpointMapping.g.cs";
     private const string OpenApiFile = "EndpointOpenApi.g.cs";
+    private const string RoutesFile = "EndpointRoutes.g.cs";   // M8: typed links, emitted whether or not OpenAPI is referenced
 
     private const string Preamble = """
         using System;
@@ -194,7 +195,10 @@ public class OpenApiEmissionTests
         Assert.Equal(2, Regex.Matches(mapping, Regex.Escape($"{Documentation}.DeclareRequestBody(")).Count);   // Rename, Create
         Assert.Single(Regex.Matches(mapping, Regex.Escape($"{Documentation}.DeclareBindingFailure("))); // Search
         Assert.DoesNotContain("Accepts", mapping);
-        Assert.DoesNotContain("WithName", mapping);   // M6, with its uniqueness diagnostic
+        // M8 names every endpoint (MPEP012 proves the names unique); nothing else here is new.
+        Assert.Equal(
+            Regex.Matches(mapping, @"var b = Map<").Count,
+            Regex.Matches(mapping, Regex.Escape("RoutingEndpointConventionBuilderExtensions.WithName(b, ")).Count);
     }
 
     // ---------- the OpenAPI file, and its absence ----------
@@ -213,7 +217,7 @@ public class OpenApiEmissionTests
     {
         var files = Files(false, Source);
 
-        Assert.Equal([MappingFile], files.Keys.ToArray());
+        Assert.Equal([MappingFile, RoutesFile], files.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.DoesNotContain("Microsoft.AspNetCore.OpenApi", files[MappingFile]);
         Assert.DoesNotContain("Microsoft.OpenApi", files[MappingFile]);
         Assert.Contains("static partial void OnEndpointMapped", files[MappingFile]);   // non-vacuous: the hooks are there
@@ -256,7 +260,7 @@ public class OpenApiEmissionTests
     {
         var files = Files(true, Source);
 
-        Assert.Equal([MappingFile, OpenApiFile], files.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal([MappingFile, OpenApiFile, RoutesFile], files.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.All(files.Values, text => Assert.DoesNotMatch(UsingDirective, text));
         Assert.Contains("global::Microsoft.AspNetCore.Builder.OpenApiEndpointConventionBuilderExtensions.AddOpenApiOperationTransformer(builder,", files[OpenApiFile]);
 
@@ -311,7 +315,7 @@ public class OpenApiEmissionTests
 
         var files = Files(true, onlyStrings);
 
-        Assert.Equal([MappingFile], files.Keys.ToArray());
+        Assert.Equal([MappingFile, RoutesFile], files.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.DoesNotContain("OnEndpointMapped", files[MappingFile]);
         Assert.Empty(Errors(includeOpenApi: true, includeImplicitUsings: true, onlyStrings));
     }

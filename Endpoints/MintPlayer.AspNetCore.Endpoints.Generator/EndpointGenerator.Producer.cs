@@ -333,6 +333,20 @@ partial class EndpointGenerator
             if (shadow.Any(member => member.HasTypedSchema))
                 statements.Add($"{ShadowParameters.HookName(index)}(b);");
 
+            // One name, three uses: the route name the typed links in EndpointRoutes.g.cs generate
+            // from, the OpenAPI operationId, and the link method's name. Applied after the endpoint's
+            // own Configure (which runs inside Map), so the name the links rely on is the one that
+            // sticks. An MPEP012 duplicate gets none — see EndpointMappingPlan.DuplicateNames.
+            if (plan.IsNamed(endpoint))
+            {
+                statements.Add($"global::Microsoft.AspNetCore.Builder.RoutingEndpointConventionBuilderExtensions.WithName(b, {Literal(endpoint.EffectiveDescriptorName)});");
+
+                // Erased unless EndpointOpenApi.g.cs implements it: one name on several verbs would be
+                // one operationId on several operations, which OpenAPI forbids.
+                if (TypedLinkHooks.NeedsOperationIdPerMethod(endpoint))
+                    statements.Add($"{TypedLinkHooks.HookName(index)}(b);");
+            }
+
             if (statements.Count == 0)
             {
                 writer.WriteLine($"{map};");
@@ -460,6 +474,14 @@ partial class EndpointGenerator
                 if (!shadows[endpoint.FullyQualifiedName].Any(member => member.HasTypedSchema)) continue;
 
                 writer.WriteLine($"static partial void {ShadowParameters.HookName(plan.FactoryIndex[endpoint.FullyQualifiedName])}(global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder builder);");
+                any = true;
+            }
+
+            foreach (var endpoint in plan.MappableEndpoints)
+            {
+                if (!plan.IsNamed(endpoint) || !TypedLinkHooks.NeedsOperationIdPerMethod(endpoint)) continue;
+
+                writer.WriteLine($"static partial void {TypedLinkHooks.HookName(plan.FactoryIndex[endpoint.FullyQualifiedName])}(global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder builder);");
                 any = true;
             }
 

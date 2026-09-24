@@ -238,6 +238,13 @@ four are one attribute each.
   `RouteHandlerBuilder`, which would break `Configure(RouteHandlerBuilder)` — the
   library's most-used public hook — for a benefit nobody has asked for.
 - **Backward compatibility.** Explicitly waived by the requester.
+- **Binding URL fragments ("hash segments").** The part after `#` is never sent in an HTTP
+  request (RFC 3986 §3.5; browsers and `HttpClient` strip it), so no server can read it: it
+  is not in `HttpRequest.Path`, `QueryString` or any header. A value the server needs belongs in
+  the route (`[RouteParam]`) or the query (`[QueryParam]`). A client-side SPA router that keeps
+  state in the fragment has to copy it into one of those itself.
+  *(Added 2026-09-24 against the session goal, which listed hash segments with route and query
+  parameters.)*
 
 ## Requirements
 
@@ -1035,6 +1042,27 @@ generated method returning non-null is strictly better than what it wraps.
 duplicates throw `InvalidOperationException: Duplicate endpoint name … must be globally
 unique` on the **first request**, not at startup, contradicting the ASP.NET Core
 documentation. MPEP012 exists because only the generator sees every endpoint at once.
+
+> **As built in M8:**
+> - **`ToString()` substitutes after all, and R7.2's "do not hand-roll" now applies to *how*.**
+>   `EndpointRoute.ToString()` (and the implicit `string` conversion `Results.Created` goes through)
+>   has no `LinkGenerator`, so it ports routing's `TemplateBinder`/`UriBuildingContext` state
+>   machine and encodes with `UrlEncoder.Default`, the encoder routing uses. A test resolves every
+>   case of a 43-value battery through a real `LinkGenerator` and requires byte equality, on both
+>   TFMs. `Path(LinkGenerator)`/`Path(HttpContext)` delegate as R7.2 says and throw where the
+>   framework returns null. `Path(HttpContext)` passes only `PathBase`, not the request's ambient
+>   route values, so one link does not produce different URLs on different pages.
+> - **One name, three uses:** `WithName` is emitted after the endpoint's own `Configure`, so a
+>   `WithName` inside `Configure` no longer wins — `[EndpointDescriptorName]` is the way to name.
+> - **`operationId` needs the method for a multi-verb endpoint.** The framework copies the endpoint
+>   name into every operation of the endpoint, so a `MapMethods(["OPTIONS","HEAD"])` endpoint would
+>   put one id on two operations, which OpenAPI forbids. The generated OpenAPI file suffixes the
+>   method in that case only (`PreflightEndpointHead`).
+> - **A catch-all token is an optional link parameter**, as it is to `LinkGenerator`: an omitted
+>   `{**path}` generates the route without it.
+> - **A MPEP012 duplicate is mapped without a name and gets no link** (the earlier endpoint keeps
+>   both), so a consumer who demotes the diagnostic gets one unnamed endpoint instead of a
+>   first-request crash, and never a `CS0111` in generated code.
 
 **R7.4 — Cross-assembly contract travels as an assembly attribute.** `[assembly:
 EndpointContract(typeof(GetUser), "/api/users/{id}", …)]` emitted into the server's own

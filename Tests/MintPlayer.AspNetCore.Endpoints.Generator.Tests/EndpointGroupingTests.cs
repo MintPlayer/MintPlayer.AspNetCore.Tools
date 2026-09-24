@@ -359,20 +359,39 @@ public class EndpointGroupingTests
             .ThenBy(route => route.Methods, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(
-            new (string? Path, string Methods)[]
+        // The expected routes are the generated Routes.…Template constants, not a second copy of
+        // the strings: the mapping and the typed links must agree, and this is where both meet the
+        // route ASP.NET Core actually composed. Routes is internal, hence reflection.
+        string Template(string container, string endpoint)
+        {
+            var type = generated.GetType("MintPlayer.AspNetCore.Endpoints.Generated.Routes")!;
+            foreach (var name in container.Split('.', StringSplitOptions.RemoveEmptyEntries))
+                type = type.GetNestedType(name)!;
+            return (string)type.GetField(endpoint + "Template")!.GetRawConstantValue()!;
+        }
+
+        var expected = new (string? Path, string Methods)[]
             {
-                ("/api/products/", "GET"),
-                ("/api/users/", "GET"),
-                ("/api/users/", "POST"),
-                ("/api/users/{id}", "DELETE"),
-                ("/api/users/{id}", "GET"),
-                ("/api/users/{id}", "PUT"),
-                ("/api/users/{id}/patch", "PATCH"),
-                ("/api/{**path}", "OPTIONS,HEAD"),
-                ("/health", "GET"),
-            },
-            actual);
+                (Template("Api.Products", "ListProducts"), "GET"),
+                (Template("Api.Users", "ListUsers"), "GET"),
+                (Template("Api.Users", "CreateUser"), "POST"),
+                (Template("Api.Users", "DeleteUser"), "DELETE"),
+                (Template("Api.Users", "GetUser"), "GET"),
+                (Template("Api.Users", "UpdateUser"), "PUT"),
+                (Template("Api.Users", "PatchUser"), "PATCH"),
+                (Template("", "PreflightEndpoint"), "OPTIONS,HEAD"),
+                (Template("", "HealthCheck"), "GET"),
+            }
+            .OrderBy(route => route.Path, StringComparer.Ordinal)
+            .ThenBy(route => route.Methods, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, actual);
+
+        // And the constants are the routes they should be — without this, a Template that drifted
+        // together with the mapping would pass the assertion above.
+        Assert.Equal("/api/users/{id}/patch", Template("Api.Users", "PatchUser"));
+        Assert.Equal("/api/{**path}", Template("", "PreflightEndpoint"));
     }
 
     /// <summary>

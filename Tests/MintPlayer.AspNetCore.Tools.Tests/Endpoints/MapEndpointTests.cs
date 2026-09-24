@@ -52,7 +52,7 @@ public class MapEndpointTests
     private sealed class ConfiguredEndpoint : IGetEndpoint
     {
         public static string Path => "/configured";
-        public static void Configure(RouteHandlerBuilder builder) => builder.WithName("configured-by-hook");
+        public static void Configure(RouteHandlerBuilder builder) => builder.WithDisplayName("configured-by-hook");
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 
@@ -242,7 +242,49 @@ public class MapEndpointTests
     {
         var endpoint = Assert.Single(Map<ConfiguredEndpoint>());
 
-        Assert.Equal("configured-by-hook", endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName);
+        Assert.Equal("configured-by-hook", endpoint.DisplayName);
+    }
+
+    /// <summary>
+    /// The manual path names the endpoint by the generator's rule — the
+    /// <see cref="EndpointDescriptorNameAttribute"/>, else the class name — as both endpoint name and
+    /// route name, so <c>LinkGenerator</c> and the OpenAPI <c>operationId</c> see the same name
+    /// whichever way the endpoint was mapped.
+    /// </summary>
+    [Fact]
+    public void MapEndpoint_NamesTheEndpoint_LikeTheGenerator()
+    {
+        var described = Assert.Single(Map<HealthEndpoint>());
+        Assert.Equal("health", described.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName);
+        Assert.Equal("health", described.Metadata.GetMetadata<IRouteNameMetadata>()?.RouteName);
+
+        var plain = Assert.Single(Map<CountingEndpoint>());
+        Assert.Equal(nameof(CountingEndpoint), plain.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName);
+    }
+
+    /// <summary>
+    /// A <c>WithName</c> inside <c>Configure</c> does not replace the endpoint's name: the name is
+    /// applied after <c>Configure</c>, on both paths.
+    /// </summary>
+    /// <remarks>
+    /// The name is what the typed links generate from and what MPEP012 proves unique. If Configure
+    /// could replace it, a typed link would stop resolving and two endpoints could share a name the
+    /// generator never saw — which throws on the first request. <see cref="EndpointDescriptorNameAttribute"/>
+    /// is the way to choose the name.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_NameFromConfigure_IsReplacedByTheEndpointName()
+    {
+        var endpoint = Assert.Single(Map<RenamingEndpoint>());
+
+        Assert.Equal(nameof(RenamingEndpoint), endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName);
+    }
+
+    private sealed class RenamingEndpoint : IGetEndpoint
+    {
+        public static string Path => "/renaming";
+        public static void Configure(RouteHandlerBuilder builder) => builder.WithName("renamed-by-hook");
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 
     /// <summary>

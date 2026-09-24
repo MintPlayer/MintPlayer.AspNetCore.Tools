@@ -100,8 +100,20 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Nothing is wrong with a computed Path, which is why this is Info. It exists so that the absence of a duplicate-route or route-parameter diagnostic is not mistaken for proof that there is nothing to report.");
 
-    // MPEP012 (duplicate endpoint name) is reserved for M8: duplicate names only matter once
-    // .WithName() is emitted, and nothing emits it until typed links need a stable name.
+    /// <remarks>
+    /// An Error because the alternative is a crash the build cannot see: <c>WithName</c> duplicates
+    /// throw <c>InvalidOperationException: Duplicate endpoint name</c> on the <b>first request</b>,
+    /// not at startup (measured; the ASP.NET Core documentation says otherwise). Only the generator
+    /// sees every endpoint at once.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor DuplicateEndpointName = new(
+        id: "MPEP012",
+        title: "Two endpoints have the same endpoint name",
+        messageFormat: "Endpoint '{0}' has the endpoint name '{1}', which '{2}' already has; endpoint names must be unique. Give one of them a distinct name with [EndpointDescriptorName(\"...\")].",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The endpoint name is the ASP.NET Core route name, the OpenAPI operationId and the typed-link method name, so it must be unique across the assembly. It is the class name unless [EndpointDescriptorName] overrides it, so two endpoints with the same class name in different namespaces collide. The later endpoint is mapped without a name and gets no typed link.");
 
     public static readonly DiagnosticDescriptor BoundPropertyTypeUnsupported = new(
         id: "MPEP013",

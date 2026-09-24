@@ -53,8 +53,13 @@ partial class EndpointGenerator
                     documented.Add((plan.FactoryIndex[endpoint.FullyQualifiedName], members));
             }
 
+            var multiMethod = plan.MappableEndpoints
+                .Where(endpoint => plan.IsNamed(endpoint) && TypedLinkHooks.NeedsOperationIdPerMethod(endpoint))
+                .Select(endpoint => plan.FactoryIndex[endpoint.FullyQualifiedName])
+                .ToList();
+
             // No hook to implement means nothing to say; an empty file would only be noise.
-            if (documented.Count == 0) return;
+            if (documented.Count == 0 && multiMethod.Count == 0) return;
 
             writer.WriteLine(Header);
             writer.WriteLine("#nullable enable");
@@ -85,6 +90,15 @@ partial class EndpointGenerator
                     writer.WriteLine();
                 }
 
+                foreach (var index in multiMethod)
+                {
+                    using (writer.OpenBlock($"static partial void {TypedLinkHooks.HookName(index)}(global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder builder)"))
+                    {
+                        writer.WriteLine("OperationIdPerMethod(builder);");
+                    }
+                    writer.WriteLine();
+                }
+
                 foreach (var line in Helpers.Split('\n'))
                     writer.WriteLine(line.TrimEnd('\r'));
             }
@@ -95,6 +109,32 @@ partial class EndpointGenerator
         /// document ASP.NET Core 10 and 11 produce for the equivalent typed parameter.
         /// </summary>
         private const string Helpers = """
+            /// <summary>
+            /// Suffixes the operationId with the HTTP method when the endpoint answers several, so one
+            /// endpoint name does not become one operationId on several operations — which OpenAPI forbids.
+            /// </summary>
+            /// <remarks>
+            /// The method count is read from the endpoint's own metadata at run time, so an endpoint whose
+            /// Methods the generator could not read keeps its plain name when it turns out to answer one.
+            /// </remarks>
+            private static void OperationIdPerMethod(global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder builder)
+            {
+                global::Microsoft.AspNetCore.Builder.OpenApiEndpointConventionBuilderExtensions.AddOpenApiOperationTransformer(builder, (operation, context, cancellationToken) =>
+                {
+                    var methodCount = 0;
+                    foreach (var metadata in context.Description.ActionDescriptor.EndpointMetadata)
+                    {
+                        if (metadata is global::Microsoft.AspNetCore.Routing.HttpMethodMetadata methods)
+                            methodCount = methods.HttpMethods.Count;
+                    }
+
+                    if (methodCount > 1 && operation.OperationId is { Length: > 0 } id && context.Description.HttpMethod is { Length: > 0 } method)
+                        operation.OperationId = id + char.ToUpperInvariant(method[0]) + method.Substring(1).ToLowerInvariant();
+
+                    return global::System.Threading.Tasks.Task.CompletedTask;
+                });
+            }
+
             /// <summary>
             /// Replaces the string schema the framework documented for each shadow member with the schema of
             /// the type the endpoint really binds.

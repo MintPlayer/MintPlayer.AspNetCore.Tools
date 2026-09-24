@@ -125,7 +125,7 @@ public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserRes
     public override Task<IResult> HandleAsync(CreateUserRequest request, CancellationToken ct)
     {
         var response = new CreateUserResponse(42, request.Name, request.Email);
-        return Task.FromResult(Results.Created($"/api/users/42", response));
+        return Task.FromResult(Results.Created(Routes.Api.Users.GetUser(id: response.Id), response));
     }
 }
 ```
@@ -324,7 +324,7 @@ public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserRes
     {
         _logger.LogInformation("Creating user {Name}", request.Name);
         var user = await _userService.CreateAsync(request, ct);
-        return Results.Created($"/api/users/{user.Id}", user);
+        return Results.Created(Routes.Api.Users.GetUser(id: user.Id), user);
     }
 }
 ```
@@ -446,6 +446,26 @@ public class HealthCheckEndpoint : IGetEndpoint
 `EndpointDescriptor` compares by value, including its `Methods` list, so descriptors work as
 dictionary keys and in sets.
 
+## Endpoint names and typed links
+
+Every generated mapping is named with `.WithName(name)`, where the name is the class name or its
+`[EndpointDescriptorName("…")]`. That one name is the ASP.NET Core route name, the OpenAPI
+`operationId` (suffixed with the method for an endpoint that answers several), and the name of the
+endpoint's method on the generated `Routes` class:
+
+```csharp
+return Results.Created(Routes.Api.Users.GetUser(id: user.Id), user);   // "/api/users/42"
+```
+
+`Routes` is `internal`, with nested classes mirroring the groups (`UsersApi` → `Users`: one trailing
+`Api` or `Group` is dropped). Each method takes one parameter per route token — typed from its
+`[RouteParam]` property, `string` otherwise, optional for `{id?}`, `{n=1}` and catch-alls — then one
+optional parameter per `[QueryParam]`. It returns an `EndpointRoute`, which converts to its path
+implicitly; `Path(linkGenerator)` and `Path(httpContext)` ask the framework's `LinkGenerator`
+instead (honouring `PathBase`, constraints and `LowercaseUrls`) and throw where it would return null.
+A `{Name}Template` constant holds each composed route. An endpoint whose route is not a
+compile-time constant gets no link.
+
 ## Manual registration
 
 For one-off registrations without the source generator:
@@ -453,6 +473,9 @@ For one-off registrations without the source generator:
 ```csharp
 app.MapEndpoint<HealthCheck>();
 ```
+
+The endpoint is named exactly as the generated mapping would name it, but this path sees one
+endpoint at a time and cannot prove the name unique: a duplicate throws on the first request.
 
 Group membership is honoured, so an endpoint declaring `IMemberOf<UsersApi>` is mapped under its
 group's prefix — the same route the generated mapping gives it, including nested groups and the
@@ -480,6 +503,7 @@ The source generator emits diagnostics for common mistakes:
 | MPEP009 | Error | A `[RouteParam]` property names a parameter the composed route does not have, so every request is a 400 |
 | MPEP010 | Warning | `Path` already begins with its group's composed prefix, so the endpoint maps at the prefix twice |
 | MPEP011 | Info | `Path` is not a compile-time constant, so the route checks above are skipped for it |
+| MPEP012 | Error | Two endpoints have the same endpoint name (the class name, or `[EndpointDescriptorName]`) — ASP.NET Core would throw on the first request. The later one is mapped without a name and gets no typed link |
 | MPEP016 | Info | A declared group is never joined by any endpoint, so it is not mapped |
 | MPEP018 | Info | The single type argument of `IGetEndpoint<T>`/`IDeleteEndpoint<T>` (the response) is named like a request (`*Request`, `*Body`, `*Command`) |
 
@@ -609,7 +633,7 @@ public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserRes
     public override Task<IResult> HandleAsync(CreateUserRequest request, CancellationToken ct)
     {
         var response = new CreateUserResponse(42, request.Name, request.Email);
-        return Task.FromResult(Results.Created($"/api/users/42", response));
+        return Task.FromResult(Results.Created(Routes.Api.Users.GetUser(id: response.Id), response));
     }
 }
 

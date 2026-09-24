@@ -27,8 +27,10 @@ internal sealed class EndpointMappingPlan
         Dictionary<string, List<string>> groupChains,
         HashSet<string> cyclicGroups,
         Dictionary<string, string?> composedRoutes,
-        List<string> unjoinedGroups)
+        List<string> unjoinedGroups,
+        Dictionary<string, EndpointInfo> duplicateNames)
     {
+        DuplicateNames = duplicateNames;
         ComposedRoutes = composedRoutes;
         UnjoinedGroups = unjoinedGroups;
         DeclaredEndpoints = declared;
@@ -170,10 +172,37 @@ internal sealed class EndpointMappingPlan
                 endpoint.Route),
             StringComparer.Ordinal);
 
+        // Ordinal, like the framework's own name lookup and like C# method names — the endpoint name
+        // is both. The first endpoint in plan order keeps the name.
+        var firstWithName = new Dictionary<string, EndpointInfo>(StringComparer.Ordinal);
+        var duplicateNames = new Dictionary<string, EndpointInfo>(StringComparer.Ordinal);
+        foreach (var endpoint in mappable)
+        {
+            if (firstWithName.TryGetValue(endpoint.EffectiveDescriptorName, out var earlier))
+                duplicateNames[endpoint.FullyQualifiedName] = earlier;
+            else
+                firstWithName[endpoint.EffectiveDescriptorName] = endpoint;
+        }
+
         return new EndpointMappingPlan(
             declared, mappable, groups, rootGroups, childGroups, endpointsByGroup,
-            factoryIndex, groupChains, cyclic, composedRoutes, unjoined);
+            factoryIndex, groupChains, cyclic, composedRoutes, unjoined, duplicateNames);
     }
+
+    /// <summary>
+    /// Mappable endpoints whose effective name an earlier endpoint in plan order already has, keyed
+    /// by fully qualified name, to that earlier endpoint. MPEP012 is reported for each.
+    /// </summary>
+    /// <remarks>
+    /// These endpoints are still mapped, but without <c>WithName</c> and without a typed link. The
+    /// build already fails on MPEP012; the point is what happens if a consumer demotes it. Naming both
+    /// would compile and then throw on the first request, and two link methods with one name in one
+    /// class would bury MPEP012 under a CS0111 in a file the consumer cannot edit.
+    /// </remarks>
+    public Dictionary<string, EndpointInfo> DuplicateNames { get; }
+
+    /// <summary>True when the endpoint is mapped with <c>WithName</c> — every mappable endpoint but an MPEP012 duplicate.</summary>
+    public bool IsNamed(EndpointInfo endpoint) => !DuplicateNames.ContainsKey(endpoint.FullyQualifiedName);
 
     private static List<string> ChainOf(string? groupFqn, Dictionary<string, string?> parentOf)
     {

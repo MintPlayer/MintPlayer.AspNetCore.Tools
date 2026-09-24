@@ -93,6 +93,20 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
         foreach (var diagnostic in RouteDiagnostics(plan, compilation))
             yield return diagnostic;
 
+        // MPEP012 — on the later endpoint in plan order, naming the earlier one. Fully qualified in
+        // the message, because the common cause is the same class name in two namespaces, where the
+        // bare names would read "GetUser has the name of GetUser".
+        foreach (var endpoint in plan.MappableEndpoints)
+        {
+            if (!plan.DuplicateNames.TryGetValue(endpoint.FullyQualifiedName, out var earlier)) continue;
+
+            yield return DiagnosticDescriptors.DuplicateEndpointName.Create(
+                endpoint.Location.ToLocation(compilation),
+                endpoint.FullyQualifiedName.Replace("global::", ""),
+                endpoint.EffectiveDescriptorName,
+                earlier.FullyQualifiedName.Replace("global::", ""));
+        }
+
         if (model.Assembly.MethodNameWasSanitised)
             yield return DiagnosticDescriptors.MappingMethodNameWasSanitised.Create(
                 Location.None,
