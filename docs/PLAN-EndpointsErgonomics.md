@@ -811,8 +811,15 @@ note under R7.4a):
 - **M13 single sweep** — whole solution, both TFMs, identical test count per TFM, coverage not
   regressed, `-t:Rebuild` warnings deduplicated (baseline: 36 CS1591 from MustChangePassword
   and SitemapXml, none from Endpoints).
+  **Done with the M12 sweep (`fafbe7d`):** solution `-t:Rebuild -c Release` exit 0, 36 CS1591
+  baseline only; generator 324 and Tools.Tests 1071 on **both** net10.0 and net11.0; OpenAPI
+  snapshot byte-identical. Coverage is measured by the PR's CI upload rather than locally.
 - **M14 release gate** — **the user's decision; do not merge.** Merging to `master` publishes to
   nuget.org. Open the PR with a proposed version and flag it.
+  **Proposed:** `11.1.0-rc.0` for the three Endpoints packages (breaking API change on top of
+  `11.0.1-rc.0`; the other packages keep their versions). A major bump would break the
+  convention that the major version tracks .NET. The version is set in the PR; change it before
+  merging if you want a different one.
 - ~~Deferred to after M3:~~ turning on `IsAotCompatible` once the true residue is visible (R6.4
   correction) — **resolved with M12, turned on**; see above.
 

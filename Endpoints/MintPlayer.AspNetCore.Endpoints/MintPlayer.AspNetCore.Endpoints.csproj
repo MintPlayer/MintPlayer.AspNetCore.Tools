@@ -14,7 +14,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints</PackageId>
-		<Version>11.0.1-rc.0</Version>
+		<Version>11.1.0-rc.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>Class-per-endpoint mapping library for ASP.NET Core with constructor injection, content negotiation, and source-generated endpoint discovery.</Description>
