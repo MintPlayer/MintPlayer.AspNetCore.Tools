@@ -13,12 +13,16 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// <c>PUT /api/users/abc</c> is rejected without the body ever being read.
 /// </remarks>
 [MemberOf<UsersApi>]
-public partial class UpdateUser : IPutEndpoint<UpdateUserBody>
+public partial class UpdateUser(IUserStore users) : IPutEndpoint<UpdateUserBody>
 {
     public static string Path => "/{id}";
 
     [RouteParam] public int Id { get; set; }
 
     public override Task<IResult> HandleAsync(UpdateUserBody request, CancellationToken ct)
-        => Task.FromResult(Results.Ok(new { id = Id, name = request.Name, email = request.Email }));
+    {
+        // An upsert: PUT creates the user at this id when there is none.
+        var user = users.Upsert(Id, request.Name, request.Email);
+        return Task.FromResult(Results.Ok(new { id = user.Id, name = user.Name, email = user.Email }));
+    }
 }

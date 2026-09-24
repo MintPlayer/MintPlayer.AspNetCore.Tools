@@ -24,7 +24,12 @@ partial class EndpointGenerator
         public EndpointMappingProducer(EndpointModel model) : base(model, FileName) { }
 
         protected override void ProduceSource(IndentedTextWriter writer, CancellationToken cancellationToken)
-            => Write(writer, EndpointMappingPlan.From(Model), Model.Assembly, cancellationToken);
+        {
+            // A typed-client project runs this generator too, and has no ASP.NET Core to map onto.
+            if (!Model.Assembly.CanMapEndpoints) return;
+
+            Write(writer, EndpointMappingPlan.From(Model), Model.Assembly, cancellationToken);
+        }
 
         private static void Write(IndentedTextWriter writer, EndpointMappingPlan plan, AssemblyInfo assembly, CancellationToken cancellationToken)
         {

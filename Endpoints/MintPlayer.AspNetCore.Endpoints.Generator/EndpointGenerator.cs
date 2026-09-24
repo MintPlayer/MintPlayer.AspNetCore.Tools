@@ -76,6 +76,11 @@ public partial class EndpointGenerator : IncrementalGenerator
         context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
             new EndpointRoutesProducer(model).Emit(productionContext));
 
+        // The fourth: the cross-assembly contract (EndpointContracts.g.cs) a typed client reads from
+        // this assembly's metadata (M9). Same model, same plan, same caching.
+        context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
+            new EndpointContractsProducer(model).Emit(productionContext));
+
         // Diagnostics do go through the Tools pipeline, because turning a LocationKey back into a
         // Location needs the Compilation. They are recomputed per compilation; they are cheap, and
         // there is no correct way to hold a Location across one.
@@ -319,7 +324,11 @@ public partial class EndpointGenerator : IncrementalGenerator
             }
         }
 
-        return new AssemblyInfo(assemblyName, methodNameOverride, HasOpenApiTransformers(compilation));
+        return new AssemblyInfo(
+            assemblyName,
+            methodNameOverride,
+            HasOpenApiTransformers(compilation),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.IEndpointRouteBuilder") is not null);
     }
 
     /// <summary>

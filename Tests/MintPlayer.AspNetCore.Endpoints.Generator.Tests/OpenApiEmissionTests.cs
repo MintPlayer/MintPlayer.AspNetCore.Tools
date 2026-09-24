@@ -23,6 +23,7 @@ public class OpenApiEmissionTests
     private const string MappingFile = "EndpointMapping.g.cs";
     private const string OpenApiFile = "EndpointOpenApi.g.cs";
     private const string RoutesFile = "EndpointRoutes.g.cs";   // M8: typed links, emitted whether or not OpenAPI is referenced
+    private const string ContractsFile = "EndpointContracts.g.cs";   // M9: cross-assembly contracts, likewise
 
     private const string Preamble = """
         using System;
@@ -217,7 +218,7 @@ public class OpenApiEmissionTests
     {
         var files = Files(false, Source);
 
-        Assert.Equal([MappingFile, RoutesFile], files.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal([ContractsFile, MappingFile, RoutesFile], files.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.DoesNotContain("Microsoft.AspNetCore.OpenApi", files[MappingFile]);
         Assert.DoesNotContain("Microsoft.OpenApi", files[MappingFile]);
         Assert.Contains("static partial void OnEndpointMapped", files[MappingFile]);   // non-vacuous: the hooks are there
@@ -260,7 +261,7 @@ public class OpenApiEmissionTests
     {
         var files = Files(true, Source);
 
-        Assert.Equal([MappingFile, OpenApiFile, RoutesFile], files.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal([ContractsFile, MappingFile, OpenApiFile, RoutesFile], files.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.All(files.Values, text => Assert.DoesNotMatch(UsingDirective, text));
         Assert.Contains("global::Microsoft.AspNetCore.Builder.OpenApiEndpointConventionBuilderExtensions.AddOpenApiOperationTransformer(builder,", files[OpenApiFile]);
 
@@ -315,7 +316,7 @@ public class OpenApiEmissionTests
 
         var files = Files(true, onlyStrings);
 
-        Assert.Equal([MappingFile, RoutesFile], files.Keys.Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal([ContractsFile, MappingFile, RoutesFile], files.Keys.Order(StringComparer.Ordinal).ToArray());
         Assert.DoesNotContain("OnEndpointMapped", files[MappingFile]);
         Assert.Empty(Errors(includeOpenApi: true, includeImplicitUsings: true, onlyStrings));
     }

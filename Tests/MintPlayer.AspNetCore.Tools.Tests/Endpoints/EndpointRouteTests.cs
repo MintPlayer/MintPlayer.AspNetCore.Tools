@@ -158,6 +158,28 @@ public class EndpointRouteTests
     }
 
     /// <summary>
+    /// The same battery against the URL builder the typed-client generator emitted into
+    /// <c>MintPlayer.AspNetCore.Endpoints.TestApp.Client</c> (M9) — a copy of the runtime's
+    /// <c>EndpointTemplateBinder</c> source compiled in a project without ASP.NET Core.
+    /// </summary>
+    /// <remarks>
+    /// This is what makes "the client builds URLs exactly as <see cref="LinkGenerator"/> does" a
+    /// measured fact rather than an inference from sharing a file: it runs the generated copy.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(CaseLabels))]
+    public void GeneratedClientUrlBuilder_MatchesLinkGenerator(string label)
+    {
+        var @case = Cases.Single(candidate => candidate.Label == label);
+        var template = Templates.Single(t => t.Name == @case.Name).Template;
+        var values = @case.Values.Select(pair => new KeyValuePair<string, object?>(pair.Key, pair.Value)).ToList();
+
+        var generated = MintPlayer.AspNetCore.Endpoints.Generated.EndpointTemplateBinder.Bind(template, values) ?? "(fails)";
+
+        Assert.Equal(Describe(() => Route(label).Path(Links())), generated);
+    }
+
+    /// <summary>
     /// Writes the whole battery as a table — label, template, what <see cref="LinkGenerator"/>
     /// produced, what <see cref="EndpointRoute.ToString"/> produced — and asserts they all agree.
     /// </summary>

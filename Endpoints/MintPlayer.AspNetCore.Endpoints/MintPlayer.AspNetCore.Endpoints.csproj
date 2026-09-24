@@ -36,6 +36,8 @@
 
 	<ItemGroup>
 		<None Include="README.md" Pack="true" PackagePath="\" />
+		<!-- Makes GenerateEndpointsClient visible to the typed-client generator this package carries (M9). -->
+		<None Include="build\MintPlayer.AspNetCore.Endpoints.props" Pack="true" PackagePath="build\" />
 	</ItemGroup>
 
 	<ItemGroup>

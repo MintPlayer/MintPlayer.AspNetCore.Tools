@@ -329,6 +329,12 @@ public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserRes
 }
 ```
 
+**Scoped services work as they do in a controller.** The endpoint is created for every request from
+`HttpContext.RequestServices` — on the generated `Map…Endpoints()` path and on `MapEndpoint<T>()` alike —
+so a service registered with `AddScoped` is resolved from the request's scope: one instance per request,
+shared with everything else in that request, and never the root provider's. Primary constructors work too;
+the TestApp's user endpoints take a scoped `IUserStore` that way (`public partial class GetUser(IUserStore users) : IGetEndpoint<UserResponse>`).
+
 Endpoints also support `IDisposable` and `IAsyncDisposable` for cleanup. Both registration paths
 prefer `IAsyncDisposable`, and the base class's `DisposeAsync` forwards to `Dispose()`, so overriding
 either one is enough:
@@ -466,6 +472,72 @@ instead (honouring `PathBase`, constraints and `LowercaseUrls`) and throw where 
 A `{Name}Template` constant holds each composed route. An endpoint whose route is not a
 compile-time constant gets no link.
 
+## Typed client in another project
+
+Every endpoint that has a typed link is also described in the endpoint assembly's own metadata, as an
+`[assembly: EndpointContract(…)]` attribute: its name, verbs, composed route, route and query parameters
+with their types, and its request and response types. A client project — a Blazor WebAssembly app, a
+console tool, another service — can generate a typed `HttpClient` wrapper from that, without seeing the
+server's source and without referencing ASP.NET Core.
+
+The client references the **analyzer-only** package (it carries no `FrameworkReference`, so it builds
+for `browser-wasm`), turns the client on, and names the server project:
+
+```xml
+<ItemGroup>
+  <PackageReference Include="MintPlayer.AspNetCore.Endpoints.Generator" Version="…" PrivateAssets="all" />
+  <!-- Shared request/response types, if you keep them in their own assembly (recommended). -->
+  <ProjectReference Include="..\MyShop.Contracts\MyShop.Contracts.csproj" />
+
+  <!-- Builds the server first and references its assembly metadata-only: nothing is copied. -->
+  <EndpointsServerReference Include="..\MyShop.Api\MyShop.Api.csproj" />
+</ItemGroup>
+
+<PropertyGroup>
+  <GenerateEndpointsClient>true</GenerateEndpointsClient>
+</PropertyGroup>
+```
+
+That generates one `internal sealed partial class {LastNameSegment}Client` per server assembly
+(`MyShop.Api` → `ApiClient`) with one `…Async` method per endpoint (one per verb for a multi-verb
+endpoint):
+
+```csharp
+var client = new ApiClient(httpClient);            // httpClient.BaseAddress = the server
+ProductResponse? product = await client.GetProductAsync(id: 42);
+ProductResponse? created = await client.CreateProductAsync(new CreateProductRequest("Tea"));
+using HttpResponseMessage response = await client.SearchProductsAsync(term: "a b", page: 2);
+```
+
+- URLs are built by the same code as `EndpointRoute.ToString()` — its source is emitted into the client —
+  so they match `LinkGenerator` byte for byte (`UrlEncoder.Default`: `/` → `%2F`, `@` kept).
+- A `[RouteParam]`'s type types its argument; an optional token and every `[QueryParam]` are optional.
+- The body is sent as JSON; a declared response type is read as JSON, a non-success status throws
+  `HttpRequestException` (with `StatusCode`), and 204 returns `default`. An endpoint without a response
+  type returns the `HttpResponseMessage` for you to inspect and dispose.
+- Removing or renaming a server endpoint breaks the **client's** build, not its first request.
+
+**Never use a `ProjectReference` to the server.** It carries the server's
+`FrameworkReference Microsoft.AspNetCore.App` into the client, and a Blazor WebAssembly client then fails
+with `NETSDK1082` — no `ProjectReference` metadata prevents it. `EndpointsServerReference` (from the
+package's `build` targets) does the safe thing for you. Without the package targets, the equivalent is:
+
+```xml
+<!-- Build the server first, in the same Configuration; the path is configuration- and TFM-specific. -->
+<Reference Include="MyShop.Api">
+  <HintPath>..\MyShop.Api\bin\$(Configuration)\net10.0\MyShop.Api.dll</HintPath>
+  <Private>false</Private>
+</Reference>
+<ItemGroup>
+  <CompilerVisibleProperty Include="GenerateEndpointsClient" />
+</ItemGroup>
+```
+
+Keep request and response types in a contracts assembly both projects reference: a type declared in the
+server assembly itself compiles in the client but is not deployed with it (MPEP022). If nothing is found —
+no contracts, or an IDE that momentarily sees no referenced assemblies — no client is generated and nothing
+is reported; code that uses the client then fails to compile, which is the signal.
+
 ## Manual registration
 
 For one-off registrations without the source generator:
@@ -506,6 +578,9 @@ The source generator emits diagnostics for common mistakes:
 | MPEP012 | Error | Two endpoints have the same endpoint name (the class name, or `[EndpointDescriptorName]`) — ASP.NET Core would throw on the first request. The later one is mapped without a name and gets no typed link |
 | MPEP016 | Info | A declared group is never joined by any endpoint, so it is not mapped |
 | MPEP018 | Info | The single type argument of `IGetEndpoint<T>`/`IDeleteEndpoint<T>` (the response) is named like a request (`*Request`, `*Body`, `*Command`) |
+| MPEP021 | Warning | *(client project)* An endpoint contract cannot become a client method — a type in it cannot be resolved or is not public, or it was written by a newer generator — so that method is left out |
+| MPEP022 | Warning | *(client project)* A client method uses a type declared in the server assembly itself, which a metadata-only reference does not deploy |
+| MPEP023 | Warning | *(client project)* `GenerateEndpointsClient` is set but the project lacks `System.Net.Http.Json` or `System.Text.Encodings.Web` |
 
 The route checks (MPEP007–MPEP010) only run where the route can be read at compile time — a
 constant `Path` and constant group `Prefix`es. Anything else is skipped silently, never guessed.

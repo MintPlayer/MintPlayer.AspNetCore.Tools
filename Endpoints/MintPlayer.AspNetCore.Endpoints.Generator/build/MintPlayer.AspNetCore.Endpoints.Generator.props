@@ -1,0 +1,12 @@
+<Project>
+
+	<!--
+	Makes <GenerateEndpointsClient>true</GenerateEndpointsClient> visible to the typed-client generator
+	(EndpointClientGenerator) as build_property.GenerateEndpointsClient. Without this item the property
+	never reaches the compiler, and no client is generated.
+	-->
+	<ItemGroup>
+		<CompilerVisibleProperty Include="GenerateEndpointsClient" />
+	</ItemGroup>
+
+</Project>

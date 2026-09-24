@@ -1118,6 +1118,66 @@ rationale: `IAssemblySymbol` identity is **not** unstable *within* a shared
 `ReferenceEquals(sym1, sym2) == true`. The Akka.NET advice still holds for the case where
 the reference set changes, but the PRD should not overstate it.
 
+> **As built in M9 (R7.4, R7.4a):**
+> - **The attribute class is generated into the server assembly, not shipped in Abstractions.**
+>   Measured: an attribute whose class lives in an assembly the client does not reference is an
+>   error type to Roslyn, and its arguments decode to *nothing* (0 constructor arguments, 0 named).
+>   Abstractions is a Web SDK package, so the client cannot reference it (NETSDK1082, as for the
+>   server). `EndpointContracts.g.cs` therefore declares `internal sealed class
+>   EndpointContractAttribute` in `MintPlayer.AspNetCore.Endpoints.Generated` next to the
+>   `[assembly: …]` usages: the contract is self-contained in the one assembly the client does
+>   reference. Internal, so two endpoint assemblies referencing each other do not see each other's
+>   copy; an internal attribute still survives into reference assemblies and decodes in full (both
+>   measured). The one edge left is `InternalsVisibleTo` between two endpoint assemblies, which would
+>   give CS0436 (a warning).
+> - **Shape:** `EndpointContract(Type endpoint, string name, string route, string[] methods)` plus named
+>   `Version`, `RequestType`, `ResponseType`, `RouteParameterNames`/`RouteParameterTypes` (every token,
+>   template order) and `QueryParameterNames`/`QueryParameterTypes`; empty ones are omitted. Versioning:
+>   new facts are new named arguments, which an older client ignores; a change an older client would
+>   misread raises `Version` (1 today), and such a client skips the contract with MPEP021. There is no
+>   `SuccessStatusCode` — the client needs none. Contracts cover exactly the typed-link endpoints (known
+>   route, named, not an MPEP012 duplicate) that also have compile-time-known verbs.
+> - **Opt-in is an MSBuild property, `<GenerateEndpointsClient>true</GenerateEndpointsClient>`**, made
+>   compiler-visible by `build/*.props` in both packages. Not an assembly attribute: the client has no
+>   package of ours with a `lib` folder to take the attribute type from, and a generator-injected one
+>   would land in every server compilation too. Without opt-in, a host project referencing its endpoint
+>   modules would grow unrequested clients.
+> - **The client generator ships in the analyzer-only `MintPlayer.AspNetCore.Endpoints.Generator`
+>   package** (no `FrameworkReference`), in the same assembly as the endpoint generator. That generator
+>   now writes nothing — and MPEP006 stays silent — where `IEndpointRouteBuilder` does not resolve.
+> - **The metadata-only reference ships as a targets file, not only a snippet**:
+>   `<EndpointsServerReference Include="…\Server.csproj" />` builds the server in the client's
+>   Configuration and TargetFramework (per-item `SetTargetFramework` override) through an MSBuild task
+>   call, which is not a ProjectReference and so carries no FrameworkReference, then adds its output
+>   assembly as `<Reference … Private="false">`. Chosen because a hand-written `HintPath` has to get the
+>   configuration, TFM and build order right by hand. Forced references measured on the sample client
+>   (`TestApp.Client`, net10.0): **168 compile references = 167 `Microsoft.NETCore.App.Ref` + the server
+>   assembly**; none of the server's own dependencies; its `bin` holds only its own assembly. The raw
+>   `<Reference>` snippet is documented as the fallback.
+> - **URLs:** the client cannot reference the runtime library (Web SDK) for `EndpointRoute`, so the
+>   substitution moved into `EndpointTemplateBinder.cs`, written in generated-code style, which the
+>   runtime compiles and the generator embeds and emits into the client with only its namespace changed.
+>   One source: the 43-case `LinkGenerator` battery now also runs against the emitted copy in the
+>   client assembly.
+> - **Client shape:** `internal sealed partial class {LastAssemblyNameSegment}Client` (full name on a
+>   collision), ctor `(HttpClient, JsonSerializerOptions? = null)`, one `{Name}Async` per endpoint
+>   (`{Name}{Verb}Async` per verb for a multi-verb one); parameters: route tokens typed as on the server
+>   (optional for `{x?}`, `{x=1}`, catch-alls), then `body` (the request type, as JSON), then optional
+>   query parameters, then a `CancellationToken`. A declared response type is read as JSON after
+>   `EnsureSuccessStatusCode()` (204 → `default`); without one the `HttpResponseMessage` is returned
+>   unchecked.
+> - **Memoisation** is a `ConditionalWeakTable<MetadataReference, …>` holding strings only (a symbol
+>   would pin its compilation). A result with an unresolvable type is never cached, so adding the missing
+>   reference takes effect; accessibility is judged without `InternalsVisibleTo` so a cached answer does
+>   not depend on which client asked.
+> - **R7.4a held:** zero contracts is no file and no diagnostic. New diagnostics, client-side and without
+>   a source location: MPEP021 (contract skipped — unresolvable or non-public type, newer format),
+>   MPEP022 (a signature type is declared in the server assembly, which a metadata-only reference does
+>   not deploy), MPEP023 (`System.Net.Http.Json`/`System.Text.Encodings.Web` missing).
+> - A slash in a string route value is encoded `%2F` exactly as `LinkGenerator` does, but cannot
+>   round-trip: ASP.NET Core does not decode `%2F` back into a route value. Framework behaviour, recorded
+>   so nobody "fixes" the client.
+
 **R7.5 — The contract snapshot is a committed OpenAPI document plus `oasdiff`, not a
 reimplementation of `PublicApiAnalyzers`.** `OpenApiVersion` must be pinned explicitly —
 the default moved 3.0 → 3.1 → 3.2 across three releases and an unpinned snapshot churns

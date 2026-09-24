@@ -107,7 +107,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
                 earlier.FullyQualifiedName.Replace("global::", ""));
         }
 
-        if (model.Assembly.MethodNameWasSanitised)
+        if (model.Assembly.CanMapEndpoints && model.Assembly.MethodNameWasSanitised)
             yield return DiagnosticDescriptors.MappingMethodNameWasSanitised.Create(
                 Location.None,
                 model.Assembly.GetMethodName(),

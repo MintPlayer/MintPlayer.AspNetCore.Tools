@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using MintPlayer.AspNetCore.Endpoints.TestApp.Models;
 
 namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 
@@ -18,12 +19,16 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// </remarks>
 [MemberOf<UsersApi>]
 [ProducesResponseType(StatusCodes.Status204NoContent)]
-public partial class DeleteUser : IDeleteEndpoint
+public partial class DeleteUser(IUserStore users) : IDeleteEndpoint
 {
     public static string Path => "/{id}";
 
     [RouteParam] public int Id { get; set; }
 
+    // Idempotent: deleting a user that is not there is still 204.
     public Task<IResult> HandleAsync(HttpContext httpContext)
-        => Task.FromResult(Results.NoContent());
+    {
+        users.Remove(Id);
+        return Task.FromResult(Results.NoContent());
+    }
 }

@@ -372,11 +372,19 @@ public class ParameterBindingPipelineTests : IClassFixture<WebApplicationFactory
     [InlineData("GET", "/api/users?page=xyz")]
     public async Task ManualMapEndpoint_BindsRawEndpointsIdenticallyToTheGeneratedMapping(string method, string url)
     {
-        using var manualHost = await StartHost(endpoints =>
-        {
-            endpoints.MapEndpoint<TestAppEndpoints.DeleteUser>();
-            endpoints.MapEndpoint<TestAppEndpoints.ListUsers>();
-        });
+        // The sample's user endpoints take a scoped IUserStore in their constructors (since M9's goal
+        // check), so this host registers it exactly as the TestApp's Program.cs does.
+        using var manualHost = await StartHost(
+            endpoints =>
+            {
+                endpoints.MapEndpoint<TestAppEndpoints.DeleteUser>();
+                endpoints.MapEndpoint<TestAppEndpoints.ListUsers>();
+            },
+            services =>
+            {
+                services.AddSingleton<MintPlayer.AspNetCore.Endpoints.TestApp.Models.UserData>();
+                services.AddScoped<MintPlayer.AspNetCore.Endpoints.TestApp.Models.IUserStore, MintPlayer.AspNetCore.Endpoints.TestApp.Models.InMemoryUserStore>();
+            });
 
         using var manualRequest = new HttpRequestMessage(new HttpMethod(method), url);
         using var generatedRequest = new HttpRequestMessage(new HttpMethod(method), url);

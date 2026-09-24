@@ -16,6 +16,12 @@ builder.Services.AddOpenApi();
 // call site in the compilation, which the net10.0 validation generator requires (see TestAppValidation).
 builder.Services.AddTestAppValidation();
 
+// The user endpoints take IUserStore in their primary constructors. It is scoped — one per request,
+// which the generated mapping honours because it builds each endpoint from the request's services —
+// over a singleton UserData, so what one request writes the next can read.
+builder.Services.AddSingleton<UserData>();
+builder.Services.AddScoped<IUserStore, InMemoryUserStore>();
+
 var app = builder.Build();
 
 app.MapOpenApi();

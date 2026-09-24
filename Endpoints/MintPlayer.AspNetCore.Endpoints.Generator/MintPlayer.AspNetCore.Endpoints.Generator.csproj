@@ -36,6 +36,30 @@
 	</ItemGroup>
 
 	<!--
+	The typed client's URL builder is the runtime library's own EndpointTemplateBinder.cs, embedded as
+	text and emitted into client projects (EndpointClientUrl.g.cs). One source file, so a client URL
+	and an EndpointRoute link cannot drift apart; the runtime's LinkGenerator battery pins both. A
+	client cannot reference the runtime library instead: it is a Web SDK package (NETSDK1082 on
+	browser-wasm, PRD R7.4).
+	-->
+	<ItemGroup>
+		<EmbeddedResource Include="..\MintPlayer.AspNetCore.Endpoints\EndpointTemplateBinder.cs"
+		                  LogicalName="MintPlayer.AspNetCore.Endpoints.Generator.EndpointTemplateBinder.cs"
+		                  Link="Embedded\EndpointTemplateBinder.cs" />
+	</ItemGroup>
+
+	<!--
+	build\*.props makes GenerateEndpointsClient visible to the compiler; build\*.targets provides
+	EndpointsServerReference, the metadata-only server reference a typed client needs (M9). A client
+	references this package, not MintPlayer.AspNetCore.Endpoints, because this one carries no
+	FrameworkReference.
+	-->
+	<ItemGroup>
+		<None Include="build\MintPlayer.AspNetCore.Endpoints.Generator.props" Pack="true" PackagePath="build\" />
+		<None Include="build\MintPlayer.AspNetCore.Endpoints.Generator.targets" Pack="true" PackagePath="build\" />
+	</ItemGroup>
+
+	<!--
 	One mechanism packs the analyzer here and in MintPlayer.AspNetCore.Endpoints: GetTargetPath,
 	whose TargetPathWithTargetPlatformMoniker output already carries this assembly *and* every
 	dependency GetDependencyTargetPaths adds below. The two hard-coded globs this replaces

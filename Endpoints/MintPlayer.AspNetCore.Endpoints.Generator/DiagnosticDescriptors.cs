@@ -189,4 +189,34 @@ internal static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "Binding assigns the property after construction, which an init-only or get-only property forbids. Without this diagnostic the property would silently never be bound.");
+
+    // MPEP021-MPEP023 are reported by EndpointClientGenerator, in the CLIENT project, and have no
+    // source location: what they describe lives in a referenced assembly's metadata.
+
+    public static readonly DiagnosticDescriptor ClientContractSkipped = new(
+        id: "MPEP021",
+        title: "Endpoint contract cannot become a client method",
+        messageFormat: "No client method is generated for endpoint '{0}' of '{1}': {2}",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "The typed client leaves an endpoint out rather than generating a call that does not compile or cannot work: a type in its contract cannot be resolved or is not public in the client, or the contract was written by a newer generator than the client's.");
+
+    public static readonly DiagnosticDescriptor ClientUsesServerAssemblyType = new(
+        id: "MPEP022",
+        title: "Client method uses a type declared in the server assembly",
+        messageFormat: "Client method '{0}' uses '{1}', which is declared in the server assembly '{2}' itself; a metadata-only reference does not deploy that assembly, so the call fails at run time unless the client ships it too. Move the type to a contracts assembly both projects reference.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "The recommended client shape references the server assembly for its contracts only (Private=false), so the server assembly is never copied next to the client. A request or response type declared there compiles in the client and throws FileNotFoundException the first time the method runs.");
+
+    public static readonly DiagnosticDescriptor ClientPrerequisiteMissing = new(
+        id: "MPEP023",
+        title: "Typed client cannot be generated in this project",
+        messageFormat: "GenerateEndpointsClient is set, but the typed client needs '{0}', which this project cannot resolve; no client is generated",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "The generated client is built on HttpClient, System.Net.Http.Json and System.Text.Encodings.Web, all in the .NET shared framework from .NET 5 on. A netstandard2.0 or .NET Framework project needs the corresponding packages.");
 }

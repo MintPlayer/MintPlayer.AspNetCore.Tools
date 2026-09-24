@@ -1,3 +1,5 @@
+using MintPlayer.AspNetCore.Endpoints.TestApp.Models;
+
 namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 
 /// <summary>
@@ -9,20 +11,12 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// assigns it only when a value is present.
 /// </remarks>
 [MemberOf<UsersApi>]
-public partial class ListUsers : IGetEndpoint
+public partial class ListUsers(IUserStore users) : IGetEndpoint
 {
     public static string Path => "/";
 
     [QueryParam] public int Page { get; set; } = 1;
 
     public Task<IResult> HandleAsync(HttpContext httpContext)
-        => Task.FromResult(Results.Ok(new
-        {
-            page = Page,
-            users = new[]
-            {
-                new { Id = 1, Name = "Alice", Email = "alice@example.com" },
-                new { Id = 2, Name = "Bob", Email = "bob@example.com" },
-            },
-        }));
+        => Task.FromResult(Results.Ok(new { page = Page, users = users.List() }));
 }

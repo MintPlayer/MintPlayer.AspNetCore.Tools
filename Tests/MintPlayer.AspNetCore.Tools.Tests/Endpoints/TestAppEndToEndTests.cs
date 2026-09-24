@@ -79,11 +79,58 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
     [Fact]
     public async Task GetTypedEndpoint_BindsRouteValueAndReturnsPayload()
     {
-        var response = await Client.GetAsync("/api/users/7");
+        // Since the sample reads users from its scoped IUserStore, only a stored id answers 200: 1 is
+        // the seeded Alice, and no test in this class renames or deletes her.
+        var response = await Client.GetAsync("/api/users/1");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("\"id\":7", await response.Content.ReadAsStringAsync());
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"id\":1", body);
+        Assert.Contains("Alice", body);
     }
+
+    /// <summary>An id the store does not hold is a 404 from the handler — binding succeeded.</summary>
+    [Fact]
+    public async Task GetTypedEndpoint_UnknownId_Returns404()
+    {
+        Assert.Equal(HttpStatusCode.NotFound, (await Client.GetAsync("/api/users/987654")).StatusCode);
+    }
+
+    /// <summary>
+    /// The goal check for scoped injection: the <c>IUserStore</c> in an endpoint's primary
+    /// constructor is the request's scoped instance, created afresh for every request, through the
+    /// generated <c>MapTestAppEndpoints()</c>.
+    /// </summary>
+    /// <remarks>
+    /// Within a request the constructor's instance and <c>RequestServices</c>' instance are one object,
+    /// so the endpoint was built from the request scope, not the root provider (which would also throw
+    /// for a scoped service with scope validation on). Across two requests the instances differ, so it
+    /// is not cached as if it were a singleton. And the data behind the store — a singleton — survives:
+    /// a user created in one request is found by the next.
+    /// </remarks>
+    [Fact]
+    public async Task ScopedService_IsInjectedPerRequest_ThroughTheGeneratedMapping()
+    {
+        var client = Client;
+
+        var first = await client.GetFromJsonAsync<StoreScope>("/api/users/store-scope");
+        var second = await client.GetFromJsonAsync<StoreScope>("/api/users/store-scope");
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.NotEqual(Guid.Empty, first.ConstructorInstance);
+        Assert.Equal(first.ConstructorInstance, first.RequestInstance);
+        Assert.Equal(second.ConstructorInstance, second.RequestInstance);
+        Assert.NotEqual(first.ConstructorInstance, second.ConstructorInstance);
+
+        var created = await client.PostAsJsonAsync("/api/users/", new { name = "Scoped", email = "scoped@example.com" });
+        var id = (await created.Content.ReadFromJsonAsync<CreatedUser>())!.Id;
+        Assert.Contains("Scoped", await client.GetStringAsync($"/api/users/{id}"));
+    }
+
+    private sealed record StoreScope(Guid ConstructorInstance, Guid RequestInstance);
+
+    private sealed record CreatedUser(int Id, string Name, string Email);
 
     /// <summary>
     /// A non-numeric route value is a 400 naming the parameter, the value and the expected type
@@ -256,11 +303,13 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
     [Fact]
     public async Task PutTypedEndpoint_IdInBody_IsIgnored_RouteWins()
     {
-        var response = await Client.PutAsJsonAsync("/api/users/1", new { id = 999, name = "Updated", email = "u@example.com" });
+        // Id 8, not the seeded 1: PUT now writes to the shared store (an upsert), and renaming Alice
+        // would change what the other tests in this class read.
+        var response = await Client.PutAsJsonAsync("/api/users/8", new { id = 999, name = "Updated", email = "u@example.com" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("\"id\":1", body);
+        Assert.Contains("\"id\":8", body);
         Assert.DoesNotContain("999", body);
     }
 
@@ -439,7 +488,7 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
             .ToArray();
 
         Assert.Equal(
-            ["CreateUser", "DeleteUser", "GetUser", "HealthCheck", "ListProducts", "ListUsers", "NestedGetUser", "PreflightEndpoint", "UpdateUser"],
+            ["CreateUser", "DeleteUser", "FindUserByName", "GetUser", "HealthCheck", "ListProducts", "ListUsers", "NestedGetUser", "PreflightEndpoint", "UpdateUser", "UserStoreScope"],
             names);
         Assert.All(generated, endpoint => Assert.Equal(
             endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName,
@@ -475,10 +524,16 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
         var response = await client.PostAsJsonAsync("/api/users/", new { name = "Dave", email = "dave@example.com" });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        Assert.Equal("/api/users/42", response.Headers.Location?.OriginalString);
+
+        // The id comes from the store now (it used to be a fixed 42), so the header is compared with
+        // the id the response reports, and following it must find the user just created.
+        var created = (await response.Content.ReadFromJsonAsync<CreatedUser>())!;
+        Assert.Equal($"/api/users/{created.Id}", response.Headers.Location?.OriginalString);
 
         var followed = await client.GetAsync(response.Headers.Location);
         Assert.Equal(HttpStatusCode.OK, followed.StatusCode);
-        Assert.Contains("\"id\":42", await followed.Content.ReadAsStringAsync());
+        var body = await followed.Content.ReadAsStringAsync();
+        Assert.Contains($"\"id\":{created.Id}", body);
+        Assert.Contains("Dave", body);
     }
 }

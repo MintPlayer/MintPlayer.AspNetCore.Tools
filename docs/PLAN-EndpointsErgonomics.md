@@ -676,6 +676,7 @@ appended blockquotes; this section records only where the work stands.)*
 | M6 route diagnostics + packaging (R6.5a) | `9dbe320` | generator 255, runtime 139 |
 | M7 validation | `3fdbf22` | generator 268, runtime 151 |
 | M8 typed links + `.WithName()` + MPEP012 | see `git log` ("M8: …") | generator 290, runtime 215 |
+| M9 contract + typed client, scoped store in the TestApp | uncommitted at time of writing | generator 305, runtime 269 (Tools.Tests whole project 1071) |
 
 "Runtime" means `Tests\MintPlayer.AspNetCore.Tools.Tests --filter "FullyQualifiedName~Endpoints"`.
 
@@ -716,23 +717,50 @@ Decisions fixed beforehand:
 - The manual `MapEndpoint<T>()` path applies `.WithName()` too and documents that it cannot
   prove uniqueness.
 
+### M9 cross-assembly contract and typed client — done
+
+As built, where it departs from the plan (details and measurements in the PRD's "As built in M9"
+note under R7.4a):
+- **The attribute class is generated into each server assembly** (`internal sealed class
+  EndpointContractAttribute` in `…Endpoints.Generated`, in the new `EndpointContracts.g.cs` from a
+  fourth producer on the same model), **not defined in Abstractions.** Measured: an attribute whose
+  class the client cannot resolve decodes to zero arguments, and the client cannot reference
+  Abstractions (Web SDK → NETSDK1082). Ctor `(Type endpoint, string name, string route, string[] methods)`
+  plus named `Version`, `RequestType`, `ResponseType`, route/query parameter names and types; no
+  `SuccessStatusCode`.
+- **Client generator** `EndpointClientGenerator` (plain `IIncrementalGenerator`, same analyzer assembly,
+  shipped to clients in the analyzer-only Generator package). Opt-in `<GenerateEndpointsClient>true`
+  via `build/*.props` `CompilerVisibleProperty`. `EndpointGenerator` now writes nothing where
+  `IEndpointRouteBuilder` does not resolve (`AssemblyInfo.CanMapEndpoints`), so it is silent in a client.
+- **A targets file after all**: `<EndpointsServerReference Include="…csproj" />` builds the server and adds
+  its assembly as a `Private=false` reference; the raw `<Reference>` snippet is in the README as fallback.
+  Sample client `TestApp.Client` (plain SDK, in the solution, excluded from coverage): 168 references =
+  167 framework + TestApp; its bin holds only itself.
+- **URL building is shared source**: `EndpointRoute`'s substitution moved to `EndpointTemplateBinder.cs`
+  (generated-code style), embedded in the generator and emitted as `EndpointClientUrl.g.cs`. The
+  43-case battery runs against both copies.
+- **New diagnostics** MPEP021 (contract skipped), MPEP022 (signature type declared in the server
+  assembly — suppressed in `TestApp.Client`, whose models live in the TestApp), MPEP023 (client
+  prerequisites missing). All Warning, client-side, no location.
+- **TestApp**: scoped `IUserStore` over a singleton `UserData`; new `FindUserByName`
+  (`/api/users/by-name/{name}`, the escaped-route-value case) and `UserStoreScope`
+  (`/api/users/store-scope`). Changed expectations: GET `/api/users/7` → `/api/users/1` (only stored
+  ids answer 200), the PUT id-in-body test uses id 8 (PUT is now an upsert and would rename Alice),
+  `CreateUser`'s Location is `/api/users/{assigned id}` instead of the fixed 42, the endpoint-name and
+  `operationId` lists gain the two new endpoints, the manual-mapping comparison host registers the store,
+  and `OpenApiEmissionTests` expects the new `EndpointContracts.g.cs`.
+
 ### Remaining, with the constraints already learned
 
-- **Goal check (session goal, 2026-09-24)**: scoped constructor injection already works on both
-  mapping paths (the endpoint is built per request from `HttpContext.RequestServices`) and is
-  covered by `EndpointInvocationTests`. The TestApp should show it through the generated
-  `MapEndpoints()` with a scoped user store, and the README must state it. URL fragments
+- **Goal check (session goal, 2026-09-24) — done with M9**: scoped constructor injection already
+  worked on both mapping paths; the TestApp now shows it through the generated `MapTestAppEndpoints()`
+  (a scoped `IUserStore`/`InMemoryUserStore` over a singleton `UserData`, injected by primary
+  constructors into the user endpoints), `TestAppEndToEndTests.ScopedService_IsInjectedPerRequest_ThroughTheGeneratedMapping`
+  proves one instance per request from the request scope, and the README states it. URL fragments
   (`#…`) are never sent to the server (RFC 3986 §3.5), so they can't be bound; the PRD records
   this as out of scope, with the reason.
 
-- **M9 cross-assembly client** — shape set by S6: the client references the server assembly
-  **metadata-only** (`<Reference>` + `HintPath` + `<Private>false</Private>`), never
-  `ProjectReference` (NETSDK1082 on browser-wasm; four mitigations all fail). Emit
-  `[assembly: EndpointContract(...)]` from the server generator; the client generator reads it
-  via `Compilation.References` + `GetAssemblyOrModuleSymbol`, memoised on
-  `GetMetadataReference(...)`, and treats **zero contracts as an empty client, never an
-  error** (R7.4a). Client-side URL encoding must also follow `UrlEncoder.Default` semantics.
-  Ship the reference snippet as documentation or a targets file.
+- **M9 cross-assembly client — done**, see its section above.
 - **M10 contract snapshot + CI** — committed OpenAPI document via
   `Microsoft.Extensions.ApiDescription.Server`, `OpenApiVersion` pinned, `Program.cs` guarded
   against `GetDocument.Insider`, CI fails on a dirty tree and on `oasdiff breaking`.

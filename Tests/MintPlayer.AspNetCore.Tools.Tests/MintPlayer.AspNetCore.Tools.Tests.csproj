@@ -86,6 +86,10 @@
 		     coverage by assembly name in coverlet.runsettings — it is IsPackable=false and
 		     must not enter the denominator. -->
 		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints.TestApp\MintPlayer.AspNetCore.Endpoints.TestApp.csproj" />
+
+		<!-- The typed client generated from the TestApp's contracts (M9), driven against the real app by
+		     TestAppTypedClientTests. Sample code like the TestApp, and excluded from coverage the same way. -->
+		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints.TestApp.Client\MintPlayer.AspNetCore.Endpoints.TestApp.Client.csproj" />
 	</ItemGroup>
 
 </Project>

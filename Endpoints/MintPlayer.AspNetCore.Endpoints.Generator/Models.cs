@@ -209,15 +209,28 @@ internal sealed class GroupInfo : IEquatable<GroupInfo>
 
 internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
 {
-    public AssemblyInfo(string assemblyName, string? methodNameOverride, bool hasOpenApiTransformers = false)
+    public AssemblyInfo(string assemblyName, string? methodNameOverride, bool hasOpenApiTransformers = false, bool canMapEndpoints = true)
     {
         AssemblyName = assemblyName;
         MethodNameOverride = methodNameOverride;
         HasOpenApiTransformers = hasOpenApiTransformers;
+        CanMapEndpoints = canMapEndpoints;
     }
 
     public string AssemblyName { get; }
     public string? MethodNameOverride { get; }
+
+    /// <summary>
+    /// True when the compilation can resolve <c>IEndpointRouteBuilder</c>, which every line of
+    /// <c>EndpointMapping.g.cs</c> needs.
+    /// </summary>
+    /// <remarks>
+    /// False in a typed-client project (M9): the client references the generator package for
+    /// <see cref="EndpointClientGenerator"/>, but it has no ASP.NET Core — a Blazor WebAssembly
+    /// client cannot have it (NETSDK1082, PRD R7.4). The mapping file would be nothing but errors
+    /// there, so nothing is emitted and MPEP006 stays silent.
+    /// </remarks>
+    public bool CanMapEndpoints { get; }
 
     /// <summary>
     /// True when the consumer's compilation can register an OpenAPI operation transformer — it
@@ -316,7 +329,8 @@ internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
         other is not null &&
         AssemblyName == other.AssemblyName &&
         MethodNameOverride == other.MethodNameOverride &&
-        HasOpenApiTransformers == other.HasOpenApiTransformers;
+        HasOpenApiTransformers == other.HasOpenApiTransformers &&
+        CanMapEndpoints == other.CanMapEndpoints;
 
     public override bool Equals(object? obj) => Equals(obj as AssemblyInfo);
     public override int GetHashCode() => AssemblyName?.GetHashCode() ?? 0;

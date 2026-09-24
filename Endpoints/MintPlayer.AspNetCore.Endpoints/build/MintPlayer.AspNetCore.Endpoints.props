@@ -1,0 +1,13 @@
+<Project>
+
+	<!--
+	This package carries the endpoint generator, which includes the typed-client generator. An endpoint
+	project that also wants a client for another endpoint project sets
+	<GenerateEndpointsClient>true</GenerateEndpointsClient>; this item makes the property visible to it.
+	A browser or other non-ASP.NET Core client references MintPlayer.AspNetCore.Endpoints.Generator instead.
+	-->
+	<ItemGroup>
+		<CompilerVisibleProperty Include="GenerateEndpointsClient" />
+	</ItemGroup>
+
+</Project>

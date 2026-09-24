@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+	The typed-client shape of M9 (PRD R7.4), as a real project: a PLAIN Microsoft.NET.Sdk library with no
+	ASP.NET Core and no source access to the TestApp's endpoints, whose client is generated from the
+	contracts in the TestApp assembly's metadata. MintPlayer.AspNetCore.Tools.Tests drives the generated
+	TestAppClient against the real TestApp.
+
+	What a consumer writes with the packages is two things: a PackageReference to
+	MintPlayer.AspNetCore.Endpoints.Generator (analyzer-only, no FrameworkReference), and the two lines
+	marked below. The Import elements and the analyzer ProjectReference are this repository's stand-in for
+	that package's build\ folder.
+	-->
+
+	<PropertyGroup>
+		<TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<IsPackable>false</IsPackable>
+
+		<!-- Consumer line 1 of 2: turn the client on. -->
+		<GenerateEndpointsClient>true</GenerateEndpointsClient>
+
+		<!--
+		MPEP022 warns that a request or response type lives in the server assembly itself, which a
+		metadata-only reference does not deploy. That is true of the TestApp (its models are in the app) and
+		deliberately left so: the only process that runs this client, the test host, references the TestApp
+		and so ships it. A real client would move the models to a contracts assembly instead.
+		-->
+		<NoWarn>$(NoWarn);MPEP022</NoWarn>
+	</PropertyGroup>
+
+	<Import Project="..\MintPlayer.AspNetCore.Endpoints.Generator\build\MintPlayer.AspNetCore.Endpoints.Generator.props" />
+
+	<ItemGroup>
+		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
+		                  OutputItemType="Analyzer"
+		                  ReferenceOutputAssembly="false" />
+
+		<!-- Consumer line 2 of 2: the metadata-only server reference (build\...Generator.targets). -->
+		<EndpointsServerReference Include="..\MintPlayer.AspNetCore.Endpoints.TestApp\MintPlayer.AspNetCore.Endpoints.TestApp.csproj" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- The generated client is internal (every client project generates its own). -->
+		<InternalsVisibleTo Include="MintPlayer.AspNetCore.Tools.Tests" />
+	</ItemGroup>
+
+	<Import Project="..\MintPlayer.AspNetCore.Endpoints.Generator\build\MintPlayer.AspNetCore.Endpoints.Generator.targets" />
+
+</Project>
