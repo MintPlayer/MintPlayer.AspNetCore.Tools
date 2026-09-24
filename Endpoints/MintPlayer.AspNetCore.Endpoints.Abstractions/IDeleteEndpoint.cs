@@ -1,8 +1,8 @@
 namespace MintPlayer.AspNetCore.Endpoints;
 
 /// <summary>
-/// A <see cref="IEndpoint"/> routed on <c>DELETE</c>. Implementing this saves declaring
-/// <c>Methods</c>; it adds nothing else.
+/// A raw <see cref="IEndpoint"/> routed on <c>DELETE</c>. Also the natural shape for a delete that
+/// answers <c>204 No Content</c> with no body: there is no response type to declare.
 /// </summary>
 public interface IDeleteEndpoint : IEndpoint
 {
@@ -10,24 +10,26 @@ public interface IDeleteEndpoint : IEndpoint
 }
 
 /// <summary>
-/// A <see cref="IEndpoint{TRequest}"/> routed on <c>DELETE</c>. The generator bases the class on
-/// <c>DeleteEndpoint&lt;TRequest&gt;</c>, which leaves <c>BindRequestAsync</c> abstract: a DELETE is
-/// treated as body-less, so the endpoint must read <typeparamref name="TRequest"/> out of the route,
-/// query string, or headers itself.
+/// A <c>DELETE</c> with a typed response and no request body.
 /// </summary>
-/// <typeparam name="TRequest">The bound request.</typeparam>
-public interface IDeleteEndpoint<TRequest> : IEndpoint<TRequest>
+/// <remarks>
+/// <b>The single type argument is the response</b>, as for <see cref="IGetEndpoint{TResponse}"/>. A
+/// DELETE that returns a body — the deleted resource, or a confirmation — is common; one that
+/// <i>takes</i> a body is rare. Making the single argument the response keeps GET and DELETE
+/// agreeing, and means the common case never needs a placeholder request. For a delete that
+/// returns nothing, implement <see cref="IDeleteEndpoint"/> and declare no type at all.
+/// </remarks>
+/// <typeparam name="TResponse">The success response body.</typeparam>
+public interface IDeleteEndpoint<TResponse> : IResponseEndpoint<TResponse>
 {
     static IEnumerable<string> IEndpointBase.Methods => HttpVerbs.Delete;
 }
 
 /// <summary>
-/// A <see cref="IEndpoint{TRequest, TResponse}"/> routed on <c>DELETE</c>: the binding is the
-/// endpoint's own (see <see cref="IDeleteEndpoint{TRequest}"/>) and the response type reaches
-/// OpenAPI. A delete that answers <c>204 No Content</c> should say so by overriding
-/// <c>SuccessStatusCode</c>, otherwise OpenAPI advertises a 200 with a body.
+/// A <c>DELETE</c> that takes a request body anyway, and declares a typed response. The body is bound
+/// like a POST's.
 /// </summary>
-/// <typeparam name="TRequest">The bound request.</typeparam>
+/// <typeparam name="TRequest">The type the request body is deserialized into.</typeparam>
 /// <typeparam name="TResponse">The success response body.</typeparam>
 public interface IDeleteEndpoint<TRequest, TResponse> : IEndpoint<TRequest, TResponse>
 {

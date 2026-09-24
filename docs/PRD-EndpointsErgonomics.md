@@ -347,6 +347,23 @@ because `RouteValueDictionary` and `IQueryCollection` are both ordinal-ignore-ca
 attribute is written only to override the source or the name. Measured: convention ties
 attribute-per-member on consumer lines and beats it by one concept.
 
+> **Reversed while implementing M4: binding is explicit, not convention-first.** Only
+> properties carrying `[RouteParam]` or `[QueryParam]` are bound. Convention was measured on
+> the *request type*, where it is harmless; R2.1 then moved binding onto the *endpoint*, and
+> there it is not.
+>
+> - **Query convention would be a mass-assignment hole.** Every settable property on an
+>   endpoint — including state set from DI or used internally — could be overwritten by a
+>   client appending `?thatProperty=…` to the URL. That is the classic over-posting defect,
+>   and the library would be shipping it as the default.
+> - **Route convention would bind or not depending on how `Path` is spelled.** Matching `Id`
+>   to `{id}` needs the route literal, which is unrecoverable for a computed `Path` and for
+>   every endpoint in a referenced assembly (R3.1). The same declaration would silently bind
+>   in one project and silently not in another.
+>
+> The price is one attribute per bound value. protoC measured an attribute at **zero** extra
+> lines and one concept; that is a better trade than either hazard above.
+
 **R2.4 — The library ships its own attributes, implementing the framework's interfaces.**
 `RouteParamAttribute : Attribute, IFromRouteMetadata` and `QueryParamAttribute :
 IFromQueryMetadata` in `MintPlayer.AspNetCore.Endpoints`. Binding and ApiExplorer match on
@@ -354,6 +371,16 @@ the **interface**, not the concrete type, so these receive identical framework t
 to `Microsoft.AspNetCore.Mvc`'s — proven. Because the match is interface-based, a consumer
 who writes `[FromRoute]` with the MVC import gets identical behaviour for free, at no cost
 to us.
+
+> **Corrected while implementing M4: the attributes do not implement the framework interfaces,
+> and MVC's `[FromRoute]` is not accepted.** Under R2.1 the endpoint's properties are never
+> framework-bound — the shadow parameter (R4) is what the framework sees, and the generator
+> writes that itself. `IFromRouteMetadata` on `RouteParamAttribute` would therefore be purely
+> decorative, suggesting a framework integration that does not happen, so it is left off. The
+> generator matches the library's attributes by name and namespace. Accepting MVC's
+> `[FromRoute]` as an alias was considered and rejected: two spellings for one thing is the
+> problem R1.2 removed from group membership, and `[FromRoute]` would read as though ASP.NET
+> Core were doing the binding.
 
 > **Why not simply reuse MVC's attributes.** They work verbatim, on properties and on
 > positional-record parameters. But `Microsoft.AspNetCore.Mvc` is not an implicit global
@@ -441,6 +468,13 @@ nothing at all. A raw endpoint has no base class to override, so binding is reac
 through a new `IParameterBinder` interface implemented **explicitly** so it stays off the
 consumer's public surface; `EndpointBase<TRequest>` implements it and forwards to
 `OnBindFailedAsync`, so both rungs share one customisation point.
+
+> **Implementation note (M4): a raw endpoint's parameter-binding failure is not
+> customisable.** Typed levels route parameter failures through `OnBindFailedAsync`, the same
+> hook a malformed body uses. A raw endpoint has no library base class and therefore no such
+> hook; its failures go straight to `ParameterBinding.Failure` — a `problem+json` 400 with the
+> same message. A raw endpoint that needs a different failure shape can bind by hand from
+> `HttpContext`, which is what the raw level is for.
 
 **R2.14 — The interface ladder loses `TRequest` on body-less verbs rather than gaining a
 placeholder.** A GET with a typed response and no body must not be written
@@ -551,6 +585,13 @@ generator that bails on a bad input leaves the abstract member unimplemented, so
 consumer reads `CS0534 … does not implement inherited abstract member BindRequestAsync`
 *after* the real diagnostic and acts on the wrong one. MPEP007-017 must not produce a
 cascade.
+
+> **One exception, measured in M4: MPEP019 on a *typed* endpoint cannot be cascade-free.** When
+> a typed endpoint is nested in a non-`partial` type, emission is skipped — but the endpoint
+> still needs its generated base class, and C# offers no way to add one to a type nested in a
+> non-partial container. The consumer sees MPEP019 first, then CS0115 on their `override` and
+> CS0535 on `IEndpoint.HandleAsync(HttpContext)`. A test pins that MPEP019 comes first and that
+> exactly those two follow. The raw-endpoint case of MPEP019 is fully clean.
 
 **R3.5 — Route templates are parsed once per pipeline run and cached.** The framework's
 own route analyzer has a documented 1.5-minute execution-time defect

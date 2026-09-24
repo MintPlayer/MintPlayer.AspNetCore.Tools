@@ -73,18 +73,18 @@ public class HttpMethodInterfaceTests
     private sealed record Req(int Id);
     private sealed record Res(string Name);
 
-    private sealed class GetTyped : GetEndpoint<Req>, IGetEndpoint<Req>
+    // Since M4 the arity-1 GET/DELETE is the response-only rung: the type argument is the
+    // response, and the handler takes no request.
+    private sealed class GetTyped : ResponseEndpoint, IGetEndpoint<Res>
     {
         public static string Path => "/";
-        protected override ValueTask<Req?> BindRequestAsync(HttpContext context) => new(new Req(1));
-        public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
+        public override Task<IResult> HandleAsync(CancellationToken cancellationToken)
             => Task.FromResult(Results.Ok());
     }
 
     private sealed class GetTypedWithResponse : GetEndpoint<Req>, IGetEndpoint<Req, Res>
     {
         public static string Path => "/";
-        protected override ValueTask<Req?> BindRequestAsync(HttpContext context) => new(new Req(1));
         public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
             => Task.FromResult(Results.Ok());
     }
@@ -117,11 +117,10 @@ public class HttpMethodInterfaceTests
             => Task.FromResult(Results.Ok());
     }
 
-    private sealed class DeleteTyped : DeleteEndpoint<Req>, IDeleteEndpoint<Req>
+    private sealed class DeleteTyped : ResponseEndpoint, IDeleteEndpoint<Res>
     {
         public static string Path => "/";
-        protected override ValueTask<Req?> BindRequestAsync(HttpContext context) => new(new Req(1));
-        public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
+        public override Task<IResult> HandleAsync(CancellationToken cancellationToken)
             => Task.FromResult(Results.Ok());
     }
 
@@ -142,7 +141,6 @@ public class HttpMethodInterfaceTests
     private sealed class DeleteTypedWithResponse : DeleteEndpoint<Req>, IDeleteEndpoint<Req, Res>
     {
         public static string Path => "/";
-        protected override ValueTask<Req?> BindRequestAsync(HttpContext context) => new(new Req(1));
         public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
             => Task.FromResult(Results.Ok());
     }
@@ -187,6 +185,33 @@ public class HttpMethodInterfaceTests
     [Fact]
     public void SuccessStatusCode_HonoursExplicitOverride()
         => Assert.Equal(201, StatusOf<Created, Req, Res>());
+
+    /// <summary>
+    /// The response-only rung declares its own <c>SuccessStatusCode</c> on
+    /// <c>IResponseEndpoint&lt;TResponse&gt;</c>, defaulting to 200 and overridable the same way.
+    /// </summary>
+    /// <remarks>
+    /// It is a different static virtual from <c>IEndpoint&lt;TRequest, TResponse&gt;.SuccessStatusCode</c>;
+    /// an override written against the wrong interface would not compile, but a default that
+    /// drifted from 200 would silently change every GET's documented status.
+    /// </remarks>
+    private static int ResponseStatusOf<TEndpoint, TResponse>()
+        where TEndpoint : IResponseEndpoint<TResponse> => TEndpoint.SuccessStatusCode;
+
+    private sealed class Accepted : ResponseEndpoint, IDeleteEndpoint<Res>
+    {
+        public static string Path => "/";
+        static int IResponseEndpoint<Res>.SuccessStatusCode => 202;
+        public override Task<IResult> HandleAsync(CancellationToken cancellationToken)
+            => Task.FromResult(Results.Accepted());
+    }
+
+    [Fact]
+    public void ResponseOnlySuccessStatusCode_DefaultsTo200_AndHonoursOverride()
+    {
+        Assert.Equal(200, ResponseStatusOf<GetTyped, Res>());
+        Assert.Equal(202, ResponseStatusOf<Accepted, Res>());
+    }
 
     /// <summary>
     /// <c>Methods</c> returns the same cached instance on every access.
@@ -237,12 +262,11 @@ public class HttpMethodInterfaceTests
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 
-    private sealed class MultiVerbTypedGet : GetEndpoint<Req>, IGetEndpoint<Req>
+    private sealed class MultiVerbTypedGet : ResponseEndpoint, IGetEndpoint<Res>
     {
         public static string Path => "/";
         public static IEnumerable<string> Methods => ["GET", "HEAD"];
-        protected override ValueTask<Req?> BindRequestAsync(HttpContext context) => new(new Req(1));
-        public override Task<IResult> HandleAsync(Req request, CancellationToken cancellationToken)
+        public override Task<IResult> HandleAsync(CancellationToken cancellationToken)
             => Task.FromResult(Results.Ok());
     }
 

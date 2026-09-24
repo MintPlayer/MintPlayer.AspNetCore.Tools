@@ -415,24 +415,27 @@ public class EndpointDiscoveryTests
             }
 
             [MemberOf<UsersApi>]
-            public abstract class UsersEndpointBase : GetEndpoint<UserRequest>, IGetEndpoint<UserRequest, UserResponse>
+            public abstract class UsersEndpointBase : ResponseEndpoint, IGetEndpoint<UserResponse>
             {
                 public static string Path => "/{id}";
 
-                protected override ValueTask<UserRequest?> BindRequestAsync(HttpContext context)
-                    => ValueTask.FromResult<UserRequest?>(new UserRequest(1));
+                [RouteParam] public int Id { get; set; }
             }
 
             public partial class GetUser : UsersEndpointBase
             {
-                public override Task<IResult> HandleAsync(UserRequest request, CancellationToken ct)
-                    => Task.FromResult(Results.Ok(new UserResponse(request.Id, "Alice")));
+                public override Task<IResult> HandleAsync(CancellationToken ct)
+                    => Task.FromResult(Results.Ok(new UserResponse(Id, "Alice")));
             }
             """;
 
         var result = EndpointGeneratorHarness.Run("Fixtures", source);
         Assert.Empty(result.Diagnostics);
         Assert.Contains("Map<global::Fixtures.GetUser>", Generated(result));
+        // M4: the [RouteParam] is inherited, and the binder that assigns it is emitted into the
+        // concrete endpoint — an abstract base never gets a partial of its own.
+        Assert.Contains("protected override void BindParameters(", Generated(result));
+        Assert.Contains("this.Id = global::MintPlayer.AspNetCore.Endpoints.ParameterBinding.Parsable<int>(context, global::MintPlayer.AspNetCore.Endpoints.ParameterSource.Route, \"Id\");", Generated(result));
         Assert.Empty(Errors(EndpointGeneratorHarness.RunAndCompile("Fixtures", source)));
 
         const string assemblyName = "Fixtures.InheritedVerbAndMembership";

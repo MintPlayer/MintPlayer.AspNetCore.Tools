@@ -111,6 +111,84 @@ public class EndpointGeneratorIncrementalTests
     }
 
     /// <summary>
+    /// A handler-body edit in a compilation whose endpoints carry <c>[RouteParam]</c>/<c>[QueryParam]</c>
+    /// properties still hits the cache — at the per-endpoint step as well as the model step.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Since M4, <c>EndpointInfo.Equals</c> also compares an <c>ImmutableArray&lt;BoundProperty&gt;</c>.
+    /// <c>ImmutableArray</c>'s own equality is by backing-array reference, and every transform builds
+    /// a fresh array, so comparing it that way would make every endpoint with a bound property
+    /// report <c>Modified</c> on every keystroke. The fixture above has no bound properties and
+    /// cannot see that; this one uses the corpus, which has a route-bound GET, a route-bound PUT and
+    /// PATCH, a raw route-bound DELETE and a raw list endpoint with a defaulted query parameter.
+    /// </para>
+    /// <para>
+    /// The replacement keeps the text length identical on purpose: the model stores source
+    /// locations, and a length change would legitimately move every endpoint declared after the
+    /// edit, which is a different question from the one asked here.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void EditingAHandlerBody_WithBoundPropertiesPresent_DoesNotRebuildTheModel()
+    {
+        var before = FixtureSources.Corpus;
+        var after = before.Replace("new UserResponse(Id, \"Alice\")", "new UserResponse(Id, \"Carol\")");
+        Assert.NotEqual(before, after);
+        Assert.Contains("[RouteParam]", before);
+        Assert.Contains("[QueryParam]", before);
+
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [before]);
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+
+        var edited = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Last(),
+            EndpointGeneratorHarness.CreateCompilation("Fixtures", [after]).SyntaxTrees.Last());
+
+        var result = driver.RunGenerators(edited).GetRunResult();
+
+        foreach (var step in new[] { "Endpoints", TrackedModelStep })
+        {
+            var reasons = ReasonsFor(result, step);
+
+            Assert.NotEmpty(reasons);
+            Assert.All(reasons, reason =>
+                Assert.True(
+                    reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                    $"expected step '{step}' to be cached, was {reason}"));
+        }
+    }
+
+    /// <summary>
+    /// Renaming a bound property's route key <i>does</i> rebuild the model — the counterpart that keeps
+    /// the test above honest.
+    /// </summary>
+    /// <remarks>
+    /// A <c>BoundProperty</c> comparison that ignored its members, or an <c>EndpointInfo.Equals</c>
+    /// that left the array out, would pass the cache-hit test and then keep emitting a binder that
+    /// reads the old key.
+    /// </remarks>
+    [Fact]
+    public void ChangingABoundPropertyKey_RebuildsTheModel()
+    {
+        var before = FixtureSources.Corpus;
+        var after = before.Replace("[QueryParam] public int Page", "[QueryParam(\"p\")] public int Page");
+        Assert.NotEqual(before, after);
+
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [before]);
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+
+        var edited = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Last(),
+            EndpointGeneratorHarness.CreateCompilation("Fixtures", [after]).SyntaxTrees.Last());
+
+        var result = driver.RunGenerators(edited).GetRunResult();
+
+        Assert.Contains(IncrementalStepRunReason.Modified, ReasonsFor(result, TrackedModelStep));
+        Assert.Contains("ParameterSource.Query, \"p\"", Text(result));
+    }
+
+    /// <summary>
     /// A change that <i>does</i> affect the model rebuilds it, so the caching is not simply stuck.
     /// </summary>
     /// <remarks>
@@ -183,7 +261,7 @@ public class EndpointGeneratorIncrementalTests
     public void EditingAHandlerBody_EmitsIdenticalSource()
     {
         var before = FixtureSources.Corpus;
-        var after = before.Replace("new UserResponse(request.Id, \"Alice\")", "new UserResponse(request.Id, \"Bob\")");
+        var after = before.Replace("new UserResponse(Id, \"Alice\")", "new UserResponse(Id, \"Bob\")");
         Assert.NotEqual(before, after);
 
         var first = EndpointGeneratorHarness.Run("Fixtures", before);

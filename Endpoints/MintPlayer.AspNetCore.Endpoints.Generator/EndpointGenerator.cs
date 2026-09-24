@@ -156,19 +156,29 @@ public partial class EndpointGenerator : IncrementalGenerator
                 ? verbInterface ?? typedInterface
                 : typedInterface;
 
-        var level = (carrier?.TypeArguments.Length ?? 0) switch
-        {
-            >= 2 => EndpointLevel.TypedWithResponse,
-            1 => EndpointLevel.Typed,
-            _ => EndpointLevel.Raw
-        };
+        // IGetEndpoint<TResponse> / IDeleteEndpoint<TResponse> carry one type argument that is the
+        // RESPONSE. Reading them by arity alone would classify them as Typed and try to bind a body
+        // into the response type, so the response-only rung is recognised by its interface first.
+        var responseOnly = symbol.AllInterfaces.FirstOrDefault(i =>
+            i.Name == "IResponseEndpoint" &&
+            i.TypeArguments.Length == 1 &&
+            i.ContainingNamespace?.ToDisplayString() == EndpointsNamespace);
 
-        var requestTypeFqn = level == EndpointLevel.Raw
-            ? null
-            : carrier!.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-        var responseTypeFqn = level == EndpointLevel.TypedWithResponse
-            ? carrier!.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+        var carrierArity = carrier?.TypeArguments.Length ?? 0;
+        var level = carrierArity >= 2 ? EndpointLevel.TypedWithResponse
+            : responseOnly is not null ? EndpointLevel.ResponseOnly
+            : carrierArity == 1 ? EndpointLevel.Typed
+            : EndpointLevel.Raw;
+
+        var requestTypeFqn = level is EndpointLevel.Typed or EndpointLevel.TypedWithResponse
+            ? carrier!.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
             : null;
+        var responseTypeFqn = level switch
+        {
+            EndpointLevel.TypedWithResponse => carrier!.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            EndpointLevel.ResponseOnly => responseOnly!.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            _ => null,
+        };
 
         // Both of these are properties of the *symbol*, not of one declaration. Reading them from
         // the single ClassDeclarationSyntax that triggered this callback makes a partial class split
@@ -200,7 +210,8 @@ public partial class EndpointGenerator : IncrementalGenerator
             GetDescriptorName(symbol),
             symbol.FromSymbol().AsKey(),
             symbol.GetPathSpec(ct),
-            RouteLiteral.Read(symbol, "Path", context.SemanticModel, ct));
+            RouteLiteral.Read(symbol, "Path", context.SemanticModel, ct),
+            BoundProperties.Collect(symbol, EndpointsNamespace, ct));
     }
 
     private static bool IsMoreDerived(INamedTypeSymbol candidate, INamedTypeSymbol? incumbent)
@@ -271,7 +282,7 @@ public partial class EndpointGenerator : IncrementalGenerator
     }
 
     private static bool IsOurBaseClass(string name) => name is
-        "EndpointBase" or "BodyEndpoint" or "NonBodyEndpoint" or
+        "EndpointBase" or "BodyEndpoint" or "ResponseEndpoint" or
         "PostEndpoint" or "PutEndpoint" or "PatchEndpoint" or
         "GetEndpoint" or "DeleteEndpoint";
 

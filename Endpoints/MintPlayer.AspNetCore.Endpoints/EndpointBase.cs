@@ -41,6 +41,10 @@ public abstract class EndpointBase<TRequest> : IDisposable, IAsyncDisposable
         TRequest? request;
         try
         {
+            // Parameters before the body, and inside the same try: a malformed route value is
+            // rejected without the body ever being read, and both failures reach the one
+            // OnBindFailedAsync customisation point.
+            BindParameters(httpContext);
             request = await BindRequestAsync(httpContext);
         }
         catch (EndpointBindingException failure)
@@ -53,6 +57,12 @@ public abstract class EndpointBase<TRequest> : IDisposable, IAsyncDisposable
 
         return await HandleAsync(request, httpContext.RequestAborted);
     }
+
+    /// <summary>
+    /// Assigns the endpoint's <c>[RouteParam]</c>/<c>[QueryParam]</c> properties. Overridden by generated
+    /// code; the default binds nothing. Runs before <see cref="BindRequestAsync"/>.
+    /// </summary>
+    protected virtual void BindParameters(HttpContext context) { }
 
     /// <summary>
     /// Produces the response for a request the endpoint could not bind. Override to customise the

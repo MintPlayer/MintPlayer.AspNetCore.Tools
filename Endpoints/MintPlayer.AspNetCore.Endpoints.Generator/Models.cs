@@ -4,7 +4,14 @@ using MintPlayer.SourceGenerators.Tools;
 
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
 
-internal enum EndpointLevel { Raw, Typed, TypedWithResponse }
+/// <summary>How much the endpoint declares, which decides its generated base class.</summary>
+/// <remarks>
+/// <see cref="ResponseOnly"/> is <c>IGetEndpoint&lt;TResponse&gt;</c>/<c>IDeleteEndpoint&lt;TResponse&gt;</c>:
+/// a typed response and no request body. It is recognised from <c>IResponseEndpoint&lt;T&gt;</c>
+/// rather than from arity, because its single type argument is the <i>response</i> — reading it by
+/// arity would take the response type for a request and try to bind a body into it.
+/// </remarks>
+internal enum EndpointLevel { Raw, Typed, TypedWithResponse, ResponseOnly }
 internal enum HttpMethodKind { Custom, Get, Post, Put, Delete, Patch }
 
 internal sealed class EndpointInfo : IEquatable<EndpointInfo>
@@ -15,8 +22,10 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         string? groupTypeFqn,
         bool baseChainReachesEndpointBase = false,
         string? descriptorName = null, LocationKey? location = null,
-        PathSpec? pathSpec = null, string? route = null)
+        PathSpec? pathSpec = null, string? route = null,
+        ImmutableArray<BoundProperty> boundProperties = default)
     {
+        BoundProperties = boundProperties.IsDefault ? ImmutableArray<BoundProperty>.Empty : boundProperties;
         PathSpec = pathSpec;
         Route = route;
         FullyQualifiedName = fqn;
@@ -74,6 +83,12 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public string? Route { get; }
 
     /// <summary>
+    /// The endpoint's <c>[RouteParam]</c>/<c>[QueryParam]</c> properties, own and inherited, nearest
+    /// declaration first and de-duplicated by name.
+    /// </summary>
+    public ImmutableArray<BoundProperty> BoundProperties { get; }
+
+    /// <summary>
     /// True when the user's own base class already derives from one of the library's endpoint bases.
     /// </summary>
     /// <remarks>
@@ -102,6 +117,7 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public string? GetBaseClassName()
     {
         if (Level == EndpointLevel.Raw) return null;
+        if (Level == EndpointLevel.ResponseOnly) return "global::MintPlayer.AspNetCore.Endpoints.ResponseEndpoint";
         var name = HttpMethod switch
         {
             HttpMethodKind.Post => "PostEndpoint",
@@ -130,7 +146,10 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         DescriptorName == other.DescriptorName &&
         LocationKeys.AreEqual(Location, other.Location) &&
         PathSpecs.AreEqual(PathSpec, other.PathSpec) &&
-        Route == other.Route;
+        Route == other.Route &&
+        // ImmutableArray's own equality compares the backing array by reference. Using it here
+        // would make every run look like a change and kill incremental caching, silently.
+        SequenceComparer<BoundProperty>.Instance.Equals(BoundProperties, other.BoundProperties);
 
     public override bool Equals(object? obj) => Equals(obj as EndpointInfo);
     public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;

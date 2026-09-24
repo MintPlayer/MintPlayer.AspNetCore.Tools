@@ -52,6 +52,10 @@ public class EndpointMetadataEmissionTests
     [InlineData("IPutEndpoint<UserRequest, UserResponse>", "PutEndpoint<global::Fixtures.UserRequest>")]
     [InlineData("IPatchEndpoint<UserRequest, UserResponse>", "PatchEndpoint<global::Fixtures.UserRequest>")]
     [InlineData("IEndpoint<UserRequest, UserResponse>", "EndpointBase<global::Fixtures.UserRequest>")]
+    // R2.14a: a body-less verb that declares a request anyway takes a body, so it gets a base that
+    // binds one like a POST — not the deleted abstract NonBodyEndpoint.
+    [InlineData("IGetEndpoint<UserRequest, UserResponse>", "GetEndpoint<global::Fixtures.UserRequest>")]
+    [InlineData("IDeleteEndpoint<UserRequest, UserResponse>", "DeleteEndpoint<global::Fixtures.UserRequest>")]
     public void TypedEndpoint_GetsThePartialBaseClassForItsVerb(string endpointInterface, string expectedBaseClass)
     {
         var source = $$"""
@@ -75,16 +79,28 @@ public class EndpointMetadataEmissionTests
     }
 
     /// <summary>
-    /// GET and DELETE get a non-body base, which leaves <c>BindRequestAsync</c> abstract — the user
-    /// must supply it. Asserted through the corpus, which does exactly that.
+    /// The body-less verbs in the corpus, as M4 reshaped them: <c>GetUser : IGetEndpoint&lt;UserResponse&gt;</c>
+    /// gets the response-only <c>ResponseEndpoint</c> base plus a <c>BindParameters</c> override,
+    /// and the raw <c>DeleteUser : IDeleteEndpoint</c> gets no base class at all — only an explicit
+    /// <c>IParameterBinder</c> for its <c>[RouteParam]</c>.
     /// </summary>
+    /// <remarks>
+    /// Rewritten deliberately for M4. It used to assert that GET and DELETE received the
+    /// <c>GetEndpoint&lt;TRequest&gt;</c>/<c>DeleteEndpoint&lt;TRequest&gt;</c> bases with an abstract
+    /// <c>BindRequestAsync</c> the user had to write; that rung no longer exists (PRD R2.14,
+    /// R2.14b). The failure it now catches is an arity-1 GET or DELETE being routed back to a
+    /// request-typed base, which would make the consumer's <c>HandleAsync(CancellationToken)</c>
+    /// override a CS0115.
+    /// </remarks>
     [Fact]
-    public void NonBodyEndpoints_GetTheNonBodyBaseClasses()
+    public void BodylessEndpoints_GetTheResponseOnlyBaseOrARawBinder()
     {
         var generated = Generated("Fixtures", FixtureSources.Corpus);
 
-        Assert.Contains("partial class GetUser : global::MintPlayer.AspNetCore.Endpoints.GetEndpoint<global::Fixtures.GetUserRequest> { }", generated);
-        Assert.Contains("partial class DeleteUser : global::MintPlayer.AspNetCore.Endpoints.DeleteEndpoint<global::Fixtures.GetUserRequest> { }", generated);
+        Assert.Contains("partial class GetUser : global::MintPlayer.AspNetCore.Endpoints.ResponseEndpoint", generated);
+        Assert.Contains("partial class DeleteUser : global::MintPlayer.AspNetCore.Endpoints.IParameterBinder", generated);
+        Assert.DoesNotContain("Endpoints.GetEndpoint<", generated);
+        Assert.DoesNotContain("Endpoints.DeleteEndpoint<", generated);
     }
 
     /// <summary>

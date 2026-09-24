@@ -43,9 +43,18 @@ public static class EndpointRouteBuilderExtensions
             TEndpoint.Methods,
             async (HttpContext ctx) =>
             {
+                // Constructed inside the delegate, per request. Bound properties make an endpoint
+                // stateful, so hoisting this out of the lambda would turn it into a process-wide
+                // singleton leaking one request's route values into the next (PRD R2.12).
                 var endpoint = factory(ctx.RequestServices, null);
                 try
                 {
+                    // A raw endpoint has no base class to bind its [RouteParam]/[QueryParam]
+                    // properties, so the mapper does it. Every other level binds inside its own
+                    // HandleAsync(HttpContext). Must match the generated Map<TEndpoint> exactly.
+                    if (endpoint is IParameterBinder binder && binder.BindParameters(ctx) is { } failed)
+                        return failed;
+
                     return await endpoint.HandleAsync(ctx);
                 }
                 finally

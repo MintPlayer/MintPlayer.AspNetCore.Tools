@@ -21,6 +21,29 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
         {
             var location = endpoint.Location.ToLocation(compilation);
 
+            foreach (var property in endpoint.BoundProperties)
+            {
+                var source = property.Source == BoundSource.Route ? "route" : "query string";
+                var propertyLocation = property.Location.ToLocation(compilation);
+
+                if (property.Kind == BoundKind.Unsupported)
+                    yield return DiagnosticDescriptors.BoundPropertyTypeUnsupported.Create(propertyLocation, property.Name, source, property.DeclaredTypeDisplay);
+                else if (!property.IsSettable)
+                    yield return DiagnosticDescriptors.BoundPropertyNotSettable.Create(propertyLocation, property.Name, source);
+            }
+
+            if (endpoint.PathSpec is { AllPartial: false } pathSpec)
+            {
+                var offender = pathSpec.Parents.FirstOrDefault(parent => !parent.IsPartial)?.Name ?? "?";
+                yield return DiagnosticDescriptors.ContainingTypeNotPartial.Create(location, endpoint.ClassName, offender);
+            }
+
+            // A typed endpoint with no base class of its own already gets MPEP001 for a missing
+            // 'partial', which is the same fix; reporting MPEP014 as well would say it twice.
+            var mpep001Applies = endpoint.Level != EndpointLevel.Raw && !endpoint.HasExistingBaseClass;
+            if (!endpoint.IsPartial && endpoint.BoundProperties.Length > 0 && !mpep001Applies)
+                yield return DiagnosticDescriptors.BoundPropertiesNeedPartial.Create(location, endpoint.ClassName);
+
             if (endpoint.Level == EndpointLevel.Raw)
                 continue;
 

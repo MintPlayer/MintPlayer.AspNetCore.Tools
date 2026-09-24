@@ -76,22 +76,7 @@ partial class EndpointGenerator
             foreach (var endpoint in plan.DeclaredEndpoints)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                if (endpoint.Level == EndpointLevel.Raw) continue;
-                if (!endpoint.IsPartial || endpoint.HasExistingBaseClass) continue;
-
-                var baseClass = endpoint.GetBaseClassName();
-                if (baseClass is null) continue;
-
-                // OpenPathSpec reopens every containing type, so an endpoint nested inside another
-                // class emits valid code. A flat namespace block silently produced a file that did
-                // not compile — see EndpointInfo.PathSpec.
-                using (writer.OpenBlock($"namespace {endpoint.Namespace}"))
-                using (writer.OpenPathSpec(endpoint.PathSpec))
-                {
-                    writer.WriteLine($"partial class {endpoint.ClassName} : {baseClass} {{ }}");
-                }
-                writer.WriteLine();
+                EmitPartial(writer, endpoint);
             }
 
             // --- Task B: Mapping extension ---
@@ -180,6 +165,141 @@ partial class EndpointGenerator
             }
         }
 
+        /// <summary>
+        /// Emits the endpoint's generated partial: its base class and/or its parameter binder.
+        /// </summary>
+        /// <remarks>
+        /// Three shapes, decided by what the endpoint needs and what the consumer already wrote:
+        /// <list type="bullet">
+        /// <item>
+        /// <b>A typed level with no base class of its own</b> gets <c>: {Base}</c>, plus a
+        /// <c>BindParameters</c> override if it has bound properties.
+        /// </item>
+        /// <item>
+        /// <b>A typed level whose own base class already reaches a library base</b> gets no base
+        /// clause — two partials cannot each name one — and only the override, if there is anything
+        /// to bind.
+        /// </item>
+        /// <item>
+        /// <b>A raw endpoint</b> has no library base to override, so it gets an explicit
+        /// <c>IParameterBinder</c> implementation which the mapper calls — only when it has bound
+        /// properties. A raw endpoint without them still needs no <c>partial</c> and gets nothing.
+        /// </item>
+        /// </list>
+        /// Every shape requires every containing type to be <c>partial</c> too; otherwise emission is
+        /// skipped and MPEP019 says why, instead of the consumer reading a CS0260 about a partial
+        /// declaration they never wrote.
+        /// </remarks>
+        private static void EmitPartial(IndentedTextWriter writer, EndpointInfo endpoint)
+        {
+            if (!endpoint.IsPartial) return;                                // MPEP001 / MPEP014
+            if (endpoint.PathSpec is { AllPartial: false }) return;         // MPEP019
+
+            var bindable = endpoint.BoundProperties
+                .Where(property => property.Kind != BoundKind.Unsupported && property.IsSettable)
+                .ToList();
+
+            string? baseClause;
+            if (endpoint.Level == EndpointLevel.Raw)
+            {
+                if (bindable.Count == 0) return;
+                baseClause = " : global::MintPlayer.AspNetCore.Endpoints.IParameterBinder";
+            }
+            else if (!endpoint.HasExistingBaseClass)
+            {
+                baseClause = endpoint.GetBaseClassName() is { } baseClass ? $" : {baseClass}" : null;
+                if (baseClause is null) return;
+            }
+            else
+            {
+                if (!endpoint.BaseChainReachesEndpointBase) return;         // MPEP002
+                if (bindable.Count == 0) return;                           // nothing to add
+                baseClause = "";
+            }
+
+            // OpenPathSpec reopens every containing type, so a nested endpoint emits valid code. A
+            // flat namespace block used to produce a file that did not compile.
+            using (writer.OpenBlock($"namespace {endpoint.Namespace}"))
+            using (writer.OpenPathSpec(endpoint.PathSpec))
+            {
+                if (bindable.Count == 0)
+                {
+                    writer.WriteLine($"partial class {endpoint.ClassName}{baseClause} {{ }}");
+                }
+                else
+                {
+                    using (writer.OpenBlock($"partial class {endpoint.ClassName}{baseClause}"))
+                    {
+                        if (endpoint.Level == EndpointLevel.Raw)
+                            EmitRawBinder(writer, bindable);
+                        else
+                            EmitBinderOverride(writer, bindable);
+                    }
+                }
+            }
+            writer.WriteLine();
+        }
+
+        private static void EmitBinderOverride(IndentedTextWriter writer, List<BoundProperty> properties)
+        {
+            using (writer.OpenBlock("protected override void BindParameters(global::Microsoft.AspNetCore.Http.HttpContext context)"))
+            {
+                EmitAssignments(writer, properties);
+            }
+        }
+
+        private static void EmitRawBinder(IndentedTextWriter writer, List<BoundProperty> properties)
+        {
+            using (writer.OpenBlock("global::Microsoft.AspNetCore.Http.IResult? global::MintPlayer.AspNetCore.Endpoints.IParameterBinder.BindParameters(global::Microsoft.AspNetCore.Http.HttpContext context)"))
+            {
+                using (writer.OpenBlock("try"))
+                {
+                    EmitAssignments(writer, properties);
+                    writer.WriteLine("return null;");
+                }
+                using (writer.OpenBlock("catch (global::MintPlayer.AspNetCore.Endpoints.EndpointBindingException failure)"))
+                {
+                    writer.WriteLine("return global::MintPlayer.AspNetCore.Endpoints.ParameterBinding.Failure(failure);");
+                }
+            }
+        }
+
+        /// <summary>
+        /// One statement per property. A property with an initializer keeps that value unless the
+        /// request supplies one, so it gets the <c>Try…</c> form; a nullable one binds absent to
+        /// null; anything else is required.
+        /// </summary>
+        private static void EmitAssignments(IndentedTextWriter writer, List<BoundProperty> properties)
+        {
+            const string Binding = "global::MintPlayer.AspNetCore.Endpoints.ParameterBinding";
+
+            for (var i = 0; i < properties.Count; i++)
+            {
+                var property = properties[i];
+                var source = property.Source == BoundSource.Route
+                    ? "global::MintPlayer.AspNetCore.Endpoints.ParameterSource.Route"
+                    : "global::MintPlayer.AspNetCore.Endpoints.ParameterSource.Query";
+                var key = Literal(property.Key);
+                var type = property.ConversionTypeFqn;
+
+                var family = property.Kind switch
+                {
+                    BoundKind.String => ("String", "OptionalString", "TryString", false),
+                    BoundKind.Enum => ("Enum", "OptionalEnum", "TryEnum", true),
+                    BoundKind.ParsableReference => ("Parsable", "OptionalParsableReference", "TryParsable", true),
+                    _ => ("Parsable", "OptionalParsable", "TryParsable", true),
+                };
+                var generic = family.Item4 ? $"<{type}>" : "";
+
+                if (property.HasInitializer)
+                    writer.WriteLine($"if ({Binding}.{family.Item3}{generic}(context, {source}, {key}, out var __v{i})) this.{property.Name} = __v{i};");
+                else if (property.IsOptional)
+                    writer.WriteLine($"this.{property.Name} = {Binding}.{family.Item2}{generic}(context, {source}, {key});");
+                else
+                    writer.WriteLine($"this.{property.Name} = {Binding}.{family.Item1}{generic}(context, {source}, {key});");
+            }
+        }
+
         private static void EmitEndpointMapping(IndentedTextWriter writer, EndpointInfo endpoint, EndpointMappingPlan plan, string routesVar)
         {
             var factoryField = $"_f{plan.FactoryIndex[endpoint.FullyQualifiedName]}";
@@ -190,6 +310,14 @@ partial class EndpointGenerator
                 {
                     writer.WriteLine($"var b = Map<{endpoint.FullyQualifiedName}>({routesVar}, {factoryField});");
                     writer.WriteLine($"Produces<{endpoint.FullyQualifiedName}, {endpoint.RequestTypeFqn}, {endpoint.ResponseTypeFqn}>(b);");
+                }
+            }
+            else if (endpoint.Level == EndpointLevel.ResponseOnly)
+            {
+                using (writer.OpenBlock(""))
+                {
+                    writer.WriteLine($"var b = Map<{endpoint.FullyQualifiedName}>({routesVar}, {factoryField});");
+                    writer.WriteLine($"ProducesResponse<{endpoint.FullyQualifiedName}, {endpoint.ResponseTypeFqn}>(b);");
                 }
             }
             else
@@ -204,9 +332,14 @@ partial class EndpointGenerator
             {
                 using (writer.OpenBlock("var builder = global::Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapMethods(routes, TEndpoint.Path, TEndpoint.Methods, async (global::Microsoft.AspNetCore.Http.HttpContext ctx) =>"))
                 {
+                    // Constructed INSIDE the delegate, per request. Bound properties make an endpoint
+                    // stateful; hoisting this out of the lambda would turn it into a process-wide
+                    // singleton that leaks one request's route values into the next (PRD R2.12).
                     writer.WriteLine("var ep = factory(ctx.RequestServices, null);");
                     using (writer.OpenBlock("try"))
                     {
+                        // Raw endpoints only: every other level binds inside its own HandleAsync.
+                        writer.WriteLine("if (ep is global::MintPlayer.AspNetCore.Endpoints.IParameterBinder binder && binder.BindParameters(ctx) is { } failed) return failed;");
                         writer.WriteLine("return await ep.HandleAsync(ctx);");
                     }
                     using (writer.OpenBlock("finally"))
@@ -231,6 +364,12 @@ partial class EndpointGenerator
             writer.WriteLine();
 
             using (writer.OpenBlock("private static void Produces<TEndpoint, TRequest, TResponse>(global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder builder) where TEndpoint : global::MintPlayer.AspNetCore.Endpoints.IEndpoint<TRequest, TResponse>"))
+            {
+                writer.WriteLine("global::Microsoft.AspNetCore.Http.OpenApiRouteHandlerBuilderExtensions.Produces<TResponse>(builder, TEndpoint.SuccessStatusCode);");
+            }
+            writer.WriteLine();
+
+            using (writer.OpenBlock("private static void ProducesResponse<TEndpoint, TResponse>(global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder builder) where TEndpoint : global::MintPlayer.AspNetCore.Endpoints.IResponseEndpoint<TResponse>"))
             {
                 writer.WriteLine("global::Microsoft.AspNetCore.Http.OpenApiRouteHandlerBuilderExtensions.Produces<TResponse>(builder, TEndpoint.SuccessStatusCode);");
             }

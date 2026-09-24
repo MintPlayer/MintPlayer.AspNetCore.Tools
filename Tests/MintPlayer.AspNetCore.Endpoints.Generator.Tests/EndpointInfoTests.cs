@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Xunit;
 
 namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
@@ -23,7 +24,8 @@ public class EndpointInfoTests
         string? groupTypeFqn = null,
         bool baseChainReachesEndpointBase = false,
         string? descriptorName = null,
-        string? route = null)
+        string? route = null,
+        ImmutableArray<BoundProperty> boundProperties = default)
         => new(
             "global::Fixtures.MyEndpoint", "Fixtures", "MyEndpoint",
             isPartial, hasExistingBaseClass,
@@ -31,7 +33,12 @@ public class EndpointInfoTests
             requestTypeFqn, responseTypeFqn,
             groupTypeFqn,
             baseChainReachesEndpointBase, descriptorName,
-            route: route);
+            route: route,
+            boundProperties: boundProperties);
+
+    private static BoundProperty Bound(string name = "Id", string key = "Id", bool hasInitializer = false)
+        => new(name, key, BoundSource.Route, BoundKind.Parsable, "global::System.Int32", "int",
+            isOptional: false, hasInitializer: hasInitializer, isSettable: true, location: null);
 
     /// <summary>A raw endpoint needs no base class — it handles <c>HttpContext</c> itself.</summary>
     [Fact]
@@ -116,6 +123,53 @@ public class EndpointInfoTests
     {
         Assert.Equal("MyEndpoint", Info(EndpointLevel.Raw, HttpMethodKind.Get).EffectiveDescriptorName);
         Assert.Equal("Named", Info(EndpointLevel.Raw, HttpMethodKind.Get, descriptorName: "Named").EffectiveDescriptorName);
+    }
+
+    /// <summary>
+    /// The response-only rung (<c>IGetEndpoint&lt;TResponse&gt;</c>, <c>IDeleteEndpoint&lt;TResponse&gt;</c>)
+    /// has no request type, so it cannot use a per-verb <c>…Endpoint&lt;TRequest&gt;</c> base; it gets
+    /// the non-generic <c>ResponseEndpoint</c>.
+    /// </summary>
+    /// <remarks>
+    /// Before M4 the arity-1 GET meant "request" and mapped to <c>GetEndpoint&lt;TRequest&gt;</c>. A
+    /// regression to that mapping would feed the response type in as a request and make the
+    /// consumer's <c>override HandleAsync(CancellationToken)</c> a CS0115.
+    /// </remarks>
+    [Fact]
+    public void GetBaseClassName_ForResponseOnlyEndpoint_IsResponseEndpoint()
+    {
+        var info = Info(EndpointLevel.ResponseOnly, HttpMethodKind.Get, requestTypeFqn: null, responseTypeFqn: "global::Fixtures.Response");
+
+        Assert.Equal("global::MintPlayer.AspNetCore.Endpoints.ResponseEndpoint", info.GetBaseClassName());
+    }
+
+    /// <summary>
+    /// Bound properties are part of the cached model and are compared <b>by sequence</b>, not by
+    /// array reference.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ImmutableArray{T}"/>'s own <c>Equals</c> compares the backing array by reference,
+    /// so two runs over an unchanged compilation — which always build fresh arrays — would never be
+    /// equal, and every keystroke would re-emit. The opposite mistake, leaving the array out of the
+    /// comparison, would keep a stale binder after a property is renamed. Both are silent.
+    /// </remarks>
+    [Fact]
+    public void Equals_ComparesBoundPropertiesBySequence()
+    {
+        var info = Info(EndpointLevel.ResponseOnly, HttpMethodKind.Get, boundProperties: [Bound()]);
+
+        // A distinct array holding distinct-but-equal elements.
+        Assert.Equal(info, Info(EndpointLevel.ResponseOnly, HttpMethodKind.Get, boundProperties: [Bound()]));
+
+        Assert.NotEqual(info, Info(EndpointLevel.ResponseOnly, HttpMethodKind.Get));
+        Assert.NotEqual(info, Info(EndpointLevel.ResponseOnly, HttpMethodKind.Get, boundProperties: [Bound(key: "userId")]));
+        Assert.NotEqual(info, Info(EndpointLevel.ResponseOnly, HttpMethodKind.Get, boundProperties: [Bound(hasInitializer: true)]));
+        Assert.NotEqual(info, Info(EndpointLevel.ResponseOnly, HttpMethodKind.Get, boundProperties: [Bound(), Bound("Page", "Page")]));
+
+        // default and empty are the same "no bound properties".
+        Assert.Equal(
+            Info(EndpointLevel.Raw, HttpMethodKind.Get),
+            Info(EndpointLevel.Raw, HttpMethodKind.Get, boundProperties: ImmutableArray<BoundProperty>.Empty));
     }
 
     [Fact]

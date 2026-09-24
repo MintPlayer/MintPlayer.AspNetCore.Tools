@@ -1,29 +1,21 @@
-using MintPlayer.AspNetCore.Endpoints.TestApp.Models;
-
 namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 
 /// <summary>
-/// DELETE with typed request — must provide explicit BindRequestAsync.
-/// DELETE /api/users/{id}
+/// DELETE /api/users/{id} — answers <c>204 No Content</c>, so there is no response type to declare.
 /// </summary>
+/// <remarks>
+/// A raw endpoint with a bound property. A raw endpoint writes <c>HandleAsync(HttpContext)</c>
+/// itself, so there is no library base class to bind <see cref="Id"/>; the generated partial
+/// implements <c>IParameterBinder</c> and the mapper calls it first. That is the one reason this
+/// class is <c>partial</c> — a raw endpoint with nothing to bind need not be.
+/// </remarks>
 [MemberOf<UsersApi>]
-public partial class DeleteUser : IDeleteEndpoint<GetUserRequest>
+public partial class DeleteUser : IDeleteEndpoint
 {
     public static string Path => "/{id}";
 
-    protected override ValueTask<GetUserRequest?> BindRequestAsync(HttpContext context)
-    {
-        // A hand-written binder says what a malformed request is; the library cannot guess. Left as a
-        // bare int.Parse this is a 500, because a FormatException out of user code could equally be a
-        // bug and the library will not swallow it.
-        if (!int.TryParse(context.Request.RouteValues["id"]?.ToString(), out var id))
-            throw new EndpointBindingException(StatusCodes.Status400BadRequest, "The id must be an integer.");
+    [RouteParam] public int Id { get; set; }
 
-        return ValueTask.FromResult<GetUserRequest?>(new GetUserRequest(id));
-    }
-
-    public override Task<IResult> HandleAsync(GetUserRequest request, CancellationToken ct)
-    {
-        return Task.FromResult(Results.NoContent());
-    }
+    public Task<IResult> HandleAsync(HttpContext httpContext)
+        => Task.FromResult(Results.NoContent());
 }

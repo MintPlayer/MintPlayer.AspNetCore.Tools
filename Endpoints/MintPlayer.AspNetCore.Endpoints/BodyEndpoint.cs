@@ -9,8 +9,8 @@ using Microsoft.Extensions.Options;
 namespace MintPlayer.AspNetCore.Endpoints;
 
 /// <summary>
-/// Base class for endpoints whose request comes from the body (POST, PUT, PATCH). The counterpart of
-/// <see cref="NonBodyEndpoint{TRequest}"/>: this one <i>does</i> supply a working
+/// Base class for every endpoint that declares a request type. The request is the body, on every
+/// verb: a GET or DELETE that declares one is saying it takes a body anyway. This class supplies a working
 /// <see cref="BindRequestAsync"/>, so a subclass need not write any binding at all — the body is
 /// content-negotiated through MVC's input formatters where they are registered, and deserialized as
 /// JSON where they are not.

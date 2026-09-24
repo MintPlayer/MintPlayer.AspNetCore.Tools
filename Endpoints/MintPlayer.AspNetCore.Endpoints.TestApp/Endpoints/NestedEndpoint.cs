@@ -29,19 +29,13 @@ public static partial class NestedContainer
     /// inside a containing type so the nesting is exercised end to end.
     /// </summary>
     [MemberOf<UsersApi>]
-    public partial class NestedGetUser : IGetEndpoint<GetUserRequest, UserResponse>
+    public partial class NestedGetUser : IGetEndpoint<UserResponse>
     {
         public static string Path => "/nested/{id}";
 
-        protected override ValueTask<GetUserRequest?> BindRequestAsync(HttpContext context)
-        {
-            if (!int.TryParse(context.Request.RouteValues["id"]?.ToString(), out var id))
-                throw new EndpointBindingException(StatusCodes.Status400BadRequest, "The id must be an integer.");
+        [RouteParam] public int Id { get; set; }
 
-            return ValueTask.FromResult<GetUserRequest?>(new GetUserRequest(id));
-        }
-
-        public override Task<IResult> HandleAsync(GetUserRequest request, CancellationToken ct)
-            => Task.FromResult(Results.Ok(new UserResponse(request.Id, "Nested", "nested@example.com")));
+        public override Task<IResult> HandleAsync(CancellationToken ct)
+            => Task.FromResult(Results.Ok(new UserResponse(Id, "Nested", "nested@example.com")));
     }
 }
