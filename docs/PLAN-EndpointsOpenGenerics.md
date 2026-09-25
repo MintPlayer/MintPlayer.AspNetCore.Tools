@@ -46,8 +46,10 @@ Rules: netstandard2.0 without list patterns, ranges or `Index`; value-equatable 
 code fully qualified, extension methods in static form, zero `using`s; no `CompilationProvider`
 combine that defeats caching.
 
-## Phase 4 — Docs, version, sweep, PR: done except the PR
+## Phase 4 — Docs, version, sweep, PR: done
 
 README "Generic endpoints" section (compiled) and diagnostics rows; version `11.2.0-rc.0` (a proposal);
 one sweep on both TFMs (generator tests, `Tools.Tests`, solution `-t:Rebuild`, 36 CS1591 baseline);
 PR closing #34, not merged.
+
+PR [#35](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/35) opened 2026-09-25, CI green, and the oasdiff gate ran for the first time: "No breaking changes to report, but the specs are different" (the three added closed paths). Not merged; version 11.2.0-rc.0 is proposed and the release is the owner's decision.

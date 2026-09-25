@@ -367,3 +367,5 @@ release remains the owner's decision.
 ## Version
 
 Created 2026-09-25 from issue #34. Branch `fix/endpoints-open-generics` (from `master` at `c04ffac`).
+
+Implemented on `fix/endpoints-open-generics`; PR [#35](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/35), CI green, awaiting the release decision (proposed `11.2.0-rc.0`).
