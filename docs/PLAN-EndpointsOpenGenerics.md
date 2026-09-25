@@ -85,3 +85,24 @@ Investigated 2026-09-25 by three agents (upstream #185, downstream map, end-to-e
 10. **Sweep:** once, in Release, on net10.0 and net11.0. Generator tests (baseline 375) and Tools.Tests (1085). Solution `-t:Rebuild` warnings deduplicated (36). `dotnet list package --outdated` must be empty. List both nupkgs.
 11. **Upstream:** file the MintPlayer.Dotnet.Tools issue(s) for the MSB4018 `IncludeRuntimeDependency`, the public `JoinMethods.g.cs` type, and the contradicted load-time claim.
 12. **Commit and push to PR #35,** and update the PR description.
+
+> **Phase 5 targets 12.0.1** (PRD D26), not 12.0.0. The only consumer-visible change is the equality output file name `GeneratedEquality.g.cs`. MintPlayer.SourceGenerators(.Attributes) also moves to 12.0.1 for MustChangePassword and SitemapXml.
+
+## Phase 6 — Generator performance and robustness (PRD addendum 2, D19–D26)
+
+Baseline measured 2026-09-25 by agent B. Benchmark: `scratchpadench\ZzGeneratorBenchmark.cs` plus `benchun.sh`; numbers in PRD addendum 2. Run it before and after, with the same N and scenarios.
+
+0. **Owner decisions first:** D24 (typed client in one file) and D25 (analyzer folder).
+1. **Red first:**
+   - D22 group-through-base-class test;
+   - D23 fixed-file-set guard for both generators (the client case fails today unless D24 decides otherwise);
+   - the D20 line-shift test (fails today);
+   - tracking of the `openEndpointNames` step.
+2. **D21:** build `EndpointMappingPlan` once and share it with the producers and the reporter; cache `ShadowParameters` in it.
+3. **D20:** a location-free projection feeds the producers, and the reporter keeps the located model.
+4. **D19:** syntactic fast path for `Path`/`Prefix`/`Methods`; reuse the transform's `SemanticModel`; the interface map only when the member is not declared on the class or is `new`. Every route/diagnostic test and the OpenAPI snapshot stay byte-identical.
+5. **D22 fix** if reproduced.
+6. **D24:** the typed client writes one `EndpointClients.g.cs` (if chosen). Update the client tests that read `ApiClient.g.cs`.
+7. **Benchmark after:** at least 3× faster on the N=500 body edit (acceptance 18). Record every scenario in the PRD.
+8. **Docs:** README "What the generator emits" (client file name); PRD as-built notes.
+9. **One sweep** together with Phase 5, then commit and push to PR #35. Delete the benchmark file from any tree before committing.

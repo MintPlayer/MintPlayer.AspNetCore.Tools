@@ -562,6 +562,146 @@ Findings:
     and the public `JoinMethods.g.cs` type. A third item goes in the same issue or its own: the
     load-time claim contradicted by S's measurement.
 
+## Addendum 2 — Generator performance, following MintPlayer.Dotnet.Tools #183 / #185 / #186
+
+*(Added 2026-09-25. Same PR #35.)* #186, published as 12.0.1, made the equality generator write one fixed
+`GeneratedEquality.g.cs` instead of a file per model, and added `FixedFileSetGuardTests`. Together with
+#183 (caching) and #185 (generated equality), it sets the rules Dotnet.Tools' generators now follow. The
+owner asked for this repo's generators to be checked against them. Three agents did this: **U** built
+an upstream checklist, **A** audited this repo read-only, and **B** benchmarked it in a worktree. B's
+benchmark source is `scratchpad\bench\ZzGeneratorBenchmark.cs` and its logs are `bench\final.log` and
+`bench\breakdown.log`.
+
+### What the upstream rules require (U), and where this repo stands (A, B)
+
+| # | Upstream rule | This repo |
+|---|---|---|
+| 1 | Outputs through `ProduceCode`, with no `Compilation` in any output step | Done (commit `7e280e6`) |
+| 2 | `IConditionalDiagnosticReporter`, diagnostics computed without the compilation | Done. B confirmed the reporter does not run on unrelated edits |
+| 3 | Models value-equal under the default comparer, via `[GenerateEquality]` | Planned: Phase 5, D10–D18 |
+| 4 | A step that builds a collection returns `EquatableArray<T>` | Planned: D12 (`openEndpointNamesProvider`) |
+| 5 | No Roslyn objects in models (MINT001/MINT005) | Clean (A) |
+| 6 | A model carries a location only when it reports a diagnostic | **Not met.** `EndpointInfo`, `BoundProperty` and `GroupInfo` carry `LocationKey`s into the producers' model, so a line shift above an endpoint re-runs all four producers (A) |
+| 7 | A fixed set of output files, never a hint name derived from the input | **Server met:** 4 constant names, the same at N=10/100/500 (B). **Client not met:** one `<ServerName>Client.g.cs` per referenced server, unbounded in length and renamed when the server is (A). Dotnet.Tools' own PRD names this exception |
+| 8 | Caching proven per output step over real keystrokes, with a coverage guard | Partly: 16 incremental tests and the client cache test. There is no file-set guard, no line-shift test, and the `openEndpointNames` step is untracked |
+| 9 | Robust producers (cancellation, MPSG001) | Inherited from `Producer` |
+| 10 | Cheap discovery (`ForAttributeWithMetadataName`; heavy work after filtering) | Endpoints are found by interface, so `CreateSyntaxProvider` is required. The broad predicate costs **nothing measurable** (B, S3). **The transform's semantic work is the hotspot** (see below) |
+| 11 | Settings from the parse/config options, never from walking the syntax trees | Inherited |
+| 12 | Deterministic output, generated code verified to compile | Met |
+| 13 | CI allocation benchmark gate (head against base, allocations only) | Not present |
+| 14 | Package the generator in the **versioned** `analyzers/dotnet/roslyn5.9/cs` folder, never the unversioned `analyzers/dotnet/cs` (an older host would load it and fail with CS8032) | **Conflicts** with this repo's deliberate choice of the unversioned folder, made so that an older SDK *names* the problem (CS9057) instead of silently skipping the generator |
+
+### Measurements (B; Release, net10.0, median of 9 runs after warm-up)
+
+| Scenario | N=10 | N=100 | N=500 |
+|---|---|---|---|
+| Cold | 5.0 ms | 23.8 ms | ≈130–230 ms, 33 MB |
+| Method-body edit | 5.0 ms | 17.8 ms | 80.6 ms, 16.8 MB |
+| Unrelated class with a base list added | 4.6 ms | 15.7 ms | 74.8 ms |
+| One `Path` literal changed | 5.0 ms | 23.7 ms | 105.5 ms, 32.8 MB |
+| Client cold / unrelated-edit rerun | 1.8 / 0.59 ms | 3.5 / 0.62 ms | 18.2 / 0.70 ms |
+
+- **Unrelated edits:** every step downstream of the syntax providers is Cached or Unchanged, and every
+  output is skipped.
+- **Hotspot: the per-endpoint `Endpoints` transform re-runs for every endpoint on every edit.** A new
+  `Compilation` re-runs a semantic `CreateSyntaxProvider` transform on every node; value equality then
+  saves the model, but not the time.
+  - It is 85–90% of every rerun: about 0.14 ms per endpoint, 69 of 81 ms at N=500.
+  - The per-component breakdown (first pass / warm, over 500 endpoints):
+    - `RouteLiteral.ReadImplementation` 88–96 / 19–22 ms. Most of it is `FindImplementationForInterfaceMember`
+      (45 ms) plus a new `GetSemanticModel` + `GetConstantValue` per endpoint (31 ms). A syntactic literal
+      read takes 2.2 ms.
+    - `MethodsLiteral.Read` 27–40 ms.
+    - `BoundProperties.Collect` 20–27 ms.
+    - `ConstructedGroupChain` 12–23 ms.
+    - Everything else ≤15 ms.
+- **Output volume:** 1.45 MB at N=500 (about 2.9 KB per endpoint; `EndpointMapping.g.cs` 783 KB,
+  `EndpointRoutes.g.cs` 427 KB). The client's `ApiClient.g.cs` is 884 KB. Parsing the server output alone
+  takes 64 ms, which the consumer's compile pays.
+
+### Also found (A)
+
+- **Probable bug: `IsGroupCandidate` requires `IEndpointGroup` directly in the base list.** So
+  `class ApiGroup : MyGroupBase` (inheriting it) is never discovered. The endpoint predicate had this blind
+  spot removed; the group predicate did not. No test covers it. Not yet reproduced.
+- **`EndpointMappingPlan.From` runs up to six times per model change:** once in each of the four
+  producers, plus twice in the reporter. `ShadowParameters.For` runs twice per endpoint. Each run is
+  linear, so the waste is small but pure.
+
+### Decisions
+
+- **D19 — Endpoint transform fast paths** (the hotspot, which grows linearly with every endpoint on every
+  keystroke):
+  - Read `Path`/`Prefix`/`Methods` **syntactically first**, when the class itself declares an
+    expression-bodied or getter-returning literal or constant-concatenation.
+  - Otherwise use the transform's own `SemanticModel` (`GeneratorSyntaxContext.SemanticModel`) instead
+    of a `GetSemanticModel` per endpoint.
+  - Call `FindImplementationForInterfaceMember` only when the class does *not* declare the member
+    itself, or declares it `new` (the D7 case).
+  - Results must be byte-identical: every existing route/diagnostic test and the committed OpenAPI
+    snapshot stay green.
+  - Target: at least 3× faster per endpoint on a body edit at N=500, measured with B's benchmark before and
+    after.
+- **D20 — Location-free producer input** (rule 6):
+  - The producers consume a `Select`ed projection of `EndpointModel` without `LocationKey`s. The
+    reporter keeps the located model.
+  - Typing a line above an endpoint then leaves all four output steps Cached. A new line-shift test
+    proves it.
+- **D21 — Build the plan once:** `EndpointMappingPlan` becomes one pipeline step, or a lazily cached
+  value on the immutable model, shared by the producers and the reporter. `ShadowParameters` are cached in
+  it.
+- **D22 — Group discovery through base classes:** reproduce first with a red test. If confirmed, the
+  group predicate becomes "class with a base list" plus the existing semantic check (the endpoint
+  predicate's own cost, measured at zero).
+- **D23 — Guards, copying upstream rule 8:**
+  - a **fixed-file-set test** for both generators (1 vs 5 inputs across namespaces, with and without
+    OpenAPI, and 1 vs 5 referenced servers for the client);
+  - a **line-shift test** (D20);
+  - tracking and an assertion for the `openEndpointNames` step.
+- **D24 — Typed client file set [owner's decision]:**
+  - *Recommended:* every client class goes in one fixed `EndpointClients.g.cs` next to
+    `EndpointClientUrl.g.cs`. Class names stay derived from the server assemblies. This removes the
+    unbounded, rename-sensitive hint names, and the guard (D23) can then hold.
+  - The alternative is to keep one file per server and exempt the client from the guard.
+- **D25 — Analyzer folder [owner's decision]:**
+  - *Recommended:* keep the unversioned `analyzers/dotnet/cs`, recorded as a deliberate deviation from
+    upstream rule 14. The owner decided older Roslyn is unsupported, and an unsupported host should say
+    why (CS9057, measured) rather than silently produce no `Map…Endpoints()`.
+  - Upstream's CS8032 concern applies to hosts that *load* the dll. Here they reject it by version first,
+    with CS9057, as measured on SDK 10.0.112.
+  - The alternative is to follow upstream and move to `roslyn5.9/cs`, accepting a silent skip on older
+    hosts.
+- **D26 — Package versions:** Phase 5 targets **12.0.1**, not 12.0.0:
+  - `MintPlayer.SourceGenerators.Tools`, `MintPlayer.ValueComparerGenerator(.Attributes)`;
+  - `MintPlayer.SourceGenerators(.Attributes)` for MustChangePassword and SitemapXml.
+
+  The only consumer-visible change from 12.0.0 is the equality output's file name
+  (`GeneratedEquality.g.cs`). Wait until nuget.org indexes 12.0.1; it was pushed at 19:38Z and not yet
+  visible at 19:43Z.
+- **Not done, with reasons:**
+  - **Narrowing the endpoint predicate:** measured at zero cost (S3 = S2).
+  - **`ForAttributeWithMetadataName` for assembly attributes:** `AssemblyInfo` and `ClosedEndpoints`
+    measure 0.4–2.6 ms and are Unchanged on edits.
+  - **Hoisting `GetTypeByMetadataName` calls:** Roslyn caches them per compilation.
+  - **Shrinking generated output (1.45 MB at N=500):** a real downstream compile cost, but it needs its
+    own design across all four files and the client, and nobody has reported it.
+  - **A CI allocation benchmark gate (upstream rule 13):** upstream runs BenchmarkDotNet head-against-base
+    on one runner. This repo would first need that infrastructure. B's benchmark is kept as
+    documentation of the method, not as a gate.
+
+### Acceptance criteria (addendum 2)
+
+18. **Measured speed-up:** B's benchmark before and after D19–D21 at N=500. The body-edit rerun is at
+    least 3× faster. Cold time, the Path-edit rerun and allocations are recorded.
+19. **Byte-identical output:** generated output is byte-identical for the TestApp (the OpenAPI snapshot is
+    unchanged) and for the generator test corpus.
+20. **Line shift:** a line inserted above an endpoint leaves every output step Cached.
+21. **Guards green:** the fixed-file-set guard is green for both generators (client per D24), and the
+    `openEndpointNames` step is tracked.
+22. **Group discovery:** D22 is either reproduced and fixed (red→green) or disproved, with the test kept.
+23. **Package versions:** Tools, ValueComparerGenerator and MintPlayer.SourceGenerators are at 12.0.1,
+    and `dotnet list package --outdated` is empty.
+
 ## Version
 
 Created 2026-09-25 from issue #34. Branch `fix/endpoints-open-generics` (from `master` at `c04ffac`).
