@@ -287,6 +287,10 @@ public partial class EndpointGenerator : IncrementalGenerator
         // (PRD D7). They differ only under a 'new static Path', which MPEP032 reports.
         var route = RouteLiteral.ReadImplementation(symbol, "IEndpointBase", "Path", compilation, out var ignoredNewPath, ct);
 
+        // The verbs, resolved the same way: a 'new static Methods' that does not re-implement the
+        // interface is ignored by the runtime, so MPEP007 and the contract ignore it too (MPEP032).
+        var knownMethods = MethodsLiteral.Read(symbol, httpMethod, compilation, out var ignoredNewMethods, ct);
+
         OpenGenericInfo? open = null;
         if (GenericTypes.IsOpen(symbol))
         {
@@ -314,7 +318,7 @@ public partial class EndpointGenerator : IncrementalGenerator
             symbol.GetPathSpec(ct),
             route,
             BoundProperties.Collect(symbol, EndpointsNamespace, ct),
-            MethodsLiteral.Read(symbol, httpMethod, compilation, ct),
+            knownMethods,
             shape.RequestType is { } requestType
                 ? RequestValidationGaps.Inspect(requestType, compilation)
                 : RequestValidationGap.None,
@@ -323,7 +327,8 @@ public partial class EndpointGenerator : IncrementalGenerator
             open,
             closed: null,
             referencedGroups: open is null ? ConstructedGroupChain(groupSymbol, compilation, ct) : default,
-            hasIgnoredNewPath: ignoredNewPath);
+            hasIgnoredNewPath: ignoredNewPath,
+            hasIgnoredNewMethods: ignoredNewMethods);
     }
 
     /// <summary>

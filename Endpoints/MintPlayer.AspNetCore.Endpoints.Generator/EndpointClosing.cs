@@ -16,7 +16,9 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator;
 /// type parameter, containing types' included, is bound. The explicit form binds one endpoint and
 /// wins over constraint keys for it. A violated constraint, two attributes on one parameter and an
 /// explicit arity mismatch are errors on the attribute; nothing is emitted for the endpoint, so none
-/// of them can surface as a compile error in generated code.
+/// of them can surface as a compile error in generated code. A constraint that mentions another type
+/// parameter (<c>TUser : IUser&lt;TKey&gt;</c>) equals no key; a key on the same generic type is
+/// reported (MPEP033) rather than used to infer <c>TKey</c>, and the explicit form closes such an endpoint.
 /// </para>
 /// <para>
 /// <b>Open endpoints come from two places.</b> This compilation's own (found by metadata name, since
@@ -223,6 +225,12 @@ internal static class EndpointClosing
 
             if (conflict) return;
 
+            // A constraint that mentions another type parameter (TUser : IUser<TKey>) equals no key,
+            // so a key on the same generic type (IUser<Guid>) was evidently meant for it. Say so
+            // instead of staying silent (or reporting the unrelated MPEP031): the explicit form is the
+            // way to close it. TKey is deliberately not inferred from the key (PRD, generic constraints).
+            if (ReportDependentConstraints(candidate, parameters, arguments, keyed, used, problems)) return;
+
             var bound = arguments.Count(argument => argument is not null);
             if (bound == 0) return;   // Not this application's to close.
 
@@ -241,6 +249,71 @@ internal static class EndpointClosing
         {
             if (Describe(candidate, parameters, arguments, sources, groupPrefixes, compilation, problems, groups, ct) is { } endpoint)
                 endpoints.Add(endpoint);
+        }
+    }
+
+    /// <summary>
+    /// Reports MPEP033, once per key, for each unbound type parameter whose constraint mentions another
+    /// type parameter and has a key on the same generic type. True when anything was reported, in which
+    /// case the endpoint is not closed.
+    /// </summary>
+    private static bool ReportDependentConstraints(
+        OpenCandidate candidate,
+        List<ITypeParameterSymbol> parameters,
+        ITypeSymbol?[] arguments,
+        List<KeyedArgument> keyed,
+        HashSet<AttributeData> used,
+        List<ClosingProblem> problems)
+    {
+        var reported = new HashSet<AttributeData>();
+
+        for (var i = 0; i < parameters.Count; i++)
+        {
+            if (arguments[i] is not null) continue;
+
+            foreach (var constraint in parameters[i].ConstraintTypes)
+            {
+                if (constraint is not INamedTypeSymbol { IsGenericType: true } generic || !GenericTypes.ContainsTypeParameter(generic)) continue;
+
+                foreach (var form in keyed)
+                {
+                    if (form.Constraint is not INamedTypeSymbol key ||
+                        !SymbolEqualityComparer.Default.Equals(key.OriginalDefinition, generic.OriginalDefinition) ||
+                        !reported.Add(form.Attribute))
+                        continue;
+
+                    used.Add(form.Attribute);
+
+                    var mentioned = new List<ITypeParameterSymbol>();
+                    CollectTypeParameters(generic, mentioned);
+
+                    problems.Add(Problem(DiagnosticDescriptors.ConstraintDependsOnTypeParameter, form.Attribute,
+                        form.Display,
+                        candidate.Display,
+                        parameters[i].Name,
+                        generic.ToDisplayString(),
+                        string.Join(", ", mentioned.Select(parameter => $"'{parameter.Name}'")),
+                        GenericTypes.UnboundTypeOf(candidate.Definition).Substring("global::".Length)));
+                }
+            }
+        }
+
+        return reported.Count > 0;
+    }
+
+    private static void CollectTypeParameters(ITypeSymbol type, List<ITypeParameterSymbol> into)
+    {
+        switch (type)
+        {
+            case ITypeParameterSymbol parameter:
+                if (!into.Any(existing => SymbolEqualityComparer.Default.Equals(existing, parameter))) into.Add(parameter);
+                break;
+            case IArrayTypeSymbol array:
+                CollectTypeParameters(array.ElementType, into);
+                break;
+            case INamedTypeSymbol named:
+                foreach (var argument in GenericTypes.AllTypeArguments(named)) CollectTypeParameters(argument, into);
+                break;
         }
     }
 

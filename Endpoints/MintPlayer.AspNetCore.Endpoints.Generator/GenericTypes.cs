@@ -191,7 +191,7 @@ internal static class GenericTypes
         }
     }
 
-    private static bool ContainsTypeParameter(ITypeSymbol type) => type switch
+    internal static bool ContainsTypeParameter(ITypeSymbol type) => type switch
     {
         ITypeParameterSymbol => true,
         IArrayTypeSymbol array => ContainsTypeParameter(array.ElementType),

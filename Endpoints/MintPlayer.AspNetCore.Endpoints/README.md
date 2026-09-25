@@ -415,6 +415,53 @@ duplicate route and name checks (MPEP007, MPEP012).
   `app.MapEndpoint<ListPasskeys<AppUser>>()` maps a closing by hand, named the same way, but without
   OpenAPI path parameters (see [Manual registration](#manual-registration)).
 
+**Generic constraint types.** A closed one is an ordinary key: `where TUser : IMember<Guid>` is
+bound by `EndpointTypeArgument<IMember<Guid>, Member>`. A constraint that uses another type
+parameter — `where TUser : IMember<TKey>` — equals no key, and `TKey` is not inferred from one:
+a key on the same generic type is reported instead (MPEP033), and nothing is mapped. Close such an
+endpoint explicitly; every constraint is checked after substitution (MPEP026 when `Member` is not an
+`IMember<Guid>`):
+
+```csharp
+using MintPlayer.AspNetCore.Endpoints;
+
+[assembly: EndpointTypeArgument<MyIdentity.IMember<Guid>, Member>]                         // Profile<TUser>
+[assembly: EndpointTypeArgument(typeof(MyIdentity.Keys<,>), typeof(Member), typeof(Guid))] // Keys<TUser, TKey>
+
+namespace MyIdentity
+{
+    public interface IMember<TKey>
+    {
+        TKey Id { get; }
+    }
+
+    public class Profile<TUser> : IGetEndpoint where TUser : IMember<Guid>
+    {
+        public static string Path => "/identity/profile";
+
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok(typeof(TUser).Name));
+    }
+
+    public partial class Keys<TUser, TKey> : IGetEndpoint<string> where TUser : IMember<TKey>
+    {
+        public static string Path => "/identity/keys/{index}";
+
+        [RouteParam] public int Index { get; set; }
+
+        public override Task<IResult> HandleAsync(CancellationToken ct)
+            => Task.FromResult(Results.Ok($"{typeof(TKey).Name} key #{Index}"));
+    }
+}
+
+public class Member : MyIdentity.IMember<Guid>
+{
+    public Guid Id { get; } = Guid.NewGuid();
+}
+```
+
+The closings are `Profile_Member` and `Keys_Member_Guid`. The explicit form wins for
+`Keys`, so the key raises no MPEP033 there.
+
 ## Dependency injection
 
 An endpoint is created for **every request** from `HttpContext.RequestServices`, by a factory
@@ -712,7 +759,8 @@ trim-safe. `MapEndpoint<T>()` says so with its annotations.
 | MPEP029 | Warning | *(on the attribute)* An endpoint cannot be closed because it, a group on its chain or a type argument cannot be named by the application (a library's must be `public`) |
 | MPEP030 | Warning | *(on the attribute)* An `EndpointTypeArgument` closes no endpoint |
 | MPEP031 | Warning | *(on the attribute)* An endpoint has only some of its type parameters bound, so it is not closed |
-| MPEP032 | Warning | A `new static Path` is ignored: the endpoint interface is implemented by a base class, whose `Path` the runtime uses (and the links and contract say) |
+| MPEP032 | Warning | A `new static Path` or `new static Methods` is ignored: the endpoint interface is implemented by a base class (or, for `Methods`, defaulted by the verb interface), whose value the runtime uses (and the links, contract and MPEP007 say); once per hidden member |
+| MPEP033 | Warning | *(on the attribute)* A constraint key cannot bind a type parameter whose constraint uses another type parameter (`where TUser : IUser<TKey>`); close the endpoint with the explicit form |
 
 The route checks (MPEP007–MPEP010) run only where the route is a compile-time constant; anything else
 is skipped, never guessed. MPEP001, MPEP014 and MPEP019 have a **Make 'X' partial** code fix in Visual

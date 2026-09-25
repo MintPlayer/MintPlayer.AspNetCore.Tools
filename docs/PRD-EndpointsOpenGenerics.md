@@ -324,6 +324,46 @@ release remains the owner's decision.
 >   red tests fail on behaviour rather than on unresolved attribute types. Red: 35 of 360 generator tests
 >   (the 11 investigation tests plus all 24 new ones); the TestLibrary did not build (CS0246, CS0534).
 
+> **Closed after the build (2026-09-25): `Methods` resolution and generic constraint types.**
+> - **`Methods` resolves like `Path`** (supersedes the "`Methods` is not" sentence under "`Prefix` too"
+>   above). `MethodsLiteral` takes the implementation of `IEndpointBase.Methods`
+>   (`FindImplementationForInterfaceMember`), which is what `TEndpoint.Methods` dispatches to. An
+>   implementation that is a verb interface's own default (`IGetEndpoint`'s explicit
+>   `IEndpointBase.Methods`) stands for that verb; one on a class is read as before (a literal, or
+>   unknown). The nearest declaration is only the fallback. So a derived `new static Methods` that does
+>   not re-implement the interface no longer changes MPEP007's verb comparison, the contract's methods
+>   or the recorded `Methods` of an open endpoint: they say what the runtime maps.
+> - **MPEP032 covers both members** rather than a new ID for `Methods`: the cause (a `new static` member
+>   does not re-implement the interface), the effect (the runtime keeps the base's value) and the fix
+>   (list the interface again, or remove the member) are the same, so one ID is one thing to learn and
+>   to suppress. The message names the member and the value in force (`'/base'`, or `GET, HEAD`); a
+>   class hiding both gets two MPEP032s, one per member. Title and message were generalised.
+> - **Generic constraint types (D2 made precise).** Binding stays constraint *equality*. A closed
+>   generic constraint is an ordinary key: `Profile<TUser> where TUser : IUser<Guid>` is bound by
+>   `EndpointTypeArgument<IUser<Guid>, AppUser>`, from the same compilation and from a reference (it
+>   already worked; now tested). A constraint that mentions another type parameter
+>   (`Passkeys<TUser, TKey> where TUser : IUser<TKey>`) equals no key, and `TKey` is **not inferred** by
+>   unifying `IUser<TKey>` with the key's `IUser<Guid>`: a key would then bind a parameter it does not
+>   name, and a second key or constraint on `TKey` would make the rule order-dependent. Before this, a
+>   key on the same generic type was silently ignored for such an endpoint (and, alone, reported only as
+>   MPEP030's misleading "no open endpoint has a type parameter constrained to …"). Now it is **MPEP033,
+>   Warning, on the attribute**: it names the parameter, its constraint, the parameters that constraint
+>   depends on and the explicit form to write (`typeof(Lib.Passkeys<,>)`). The attribute counts as used
+>   (no MPEP030), and MPEP031 is not reported on top, since the explicit form fixes both. Warning, like
+>   MPEP030/MPEP031, because nothing wrong is emitted, only nothing. MPEP033 applies only to keys on the
+>   same generic definition as a dependent constraint, and only when no explicit form targets the
+>   endpoint (the explicit form wins, so the usual pairing, a key for `Profile` plus the explicit form
+>   for `Passkeys`, is silent).
+> - **The explicit form closes such an endpoint**:
+>   `EndpointTypeArgument(typeof(Passkeys<,>), typeof(AppUser), typeof(Guid))` maps
+>   `Passkeys<AppUser, Guid>` as `Passkeys_AppUser_Guid`, with its binder, link and contract. Every
+>   constraint is checked after substitution, so `IntUser : IUser<int>` there is MPEP026 naming
+>   `IUser<System.Guid>`. Both already worked; now tested, same compilation and cross-assembly.
+> - **Tests:** 12 new generator test cases in `EndpointTypeArgumentTests` (1 for `Methods`, 11 for
+>   constraint types). Red before the fix: the `Methods` test (contract said `POST` for an endpoint the
+>   runtime maps as `GET`) and both MPEP033 cases (no diagnostic); the others passed at once. The README's
+>   new block was compiled with the other blocks in the scratch server, as before.
+
 ## Version
 
 Created 2026-09-25 from issue #34. Branch `fix/endpoints-open-generics` (from `master` at `c04ffac`).

@@ -234,8 +234,8 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "The generated client is built on HttpClient, System.Net.Http.Json and System.Text.Encodings.Web, all in the .NET shared framework from .NET 5 on. A netstandard2.0 or .NET Framework project needs the corresponding packages.");
 
-    // MPEP025-MPEP032: open-generic endpoints (issue #34). MPEP025 and MPEP032 are reported on the
-    // declaration; MPEP026-MPEP031 on the application's [assembly: EndpointTypeArgument] attribute,
+    // MPEP025-MPEP033: open-generic endpoints (issue #34). MPEP025 and MPEP032 are reported on the
+    // declaration; MPEP026-MPEP031 and MPEP033 on the application's [assembly: EndpointTypeArgument] attribute,
     // since that is what closes the endpoint and what the application can change.
 
     public static readonly DiagnosticDescriptor OpenEndpointNotMapped = new(
@@ -303,10 +303,19 @@ internal static class DiagnosticDescriptors
 
     public static readonly DiagnosticDescriptor NewStaticPathIgnored = new(
         id: "MPEP032",
-        title: "A 'new static Path' is not the route the endpoint answers on",
-        messageFormat: "Endpoint class '{0}' hides the inherited Path with 'new static', but the runtime maps it at '{1}', the Path of the base class that implements the endpoint interface; list the endpoint interface on '{0}' again to use the new Path, or remove it",
+        title: "A 'new static' Path or Methods is not what the endpoint answers on",
+        messageFormat: "Endpoint class '{0}' hides the inherited {1} with 'new static', but the runtime uses {2}, from the implementation of the endpoint interface; list the endpoint interface on '{0}' again to use the new {1}, or remove it",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "TEndpoint.Path dispatches through the interface map, and a static member hidden with 'new' does not re-implement the interface. The generated links and contract use the route the endpoint really answers on.");
+        description: "TEndpoint.Path and TEndpoint.Methods dispatch through the interface map, and a static member hidden with 'new' does not re-implement the interface: the base class's member, or the verb interface's default verb, stays in force. The generated links, the contract and the duplicate-route check (MPEP007) use what the endpoint really answers on. Reported once per hidden member.");
+
+    public static readonly DiagnosticDescriptor ConstraintDependsOnTypeParameter = new(
+        id: "MPEP033",
+        title: "A constraint key cannot bind a type parameter whose constraint uses another type parameter",
+        messageFormat: "{0} does not close endpoint '{1}': type parameter '{2}' is constrained to '{3}', which depends on type parameter(s) {4}, so no constraint key can equal it; close the endpoint with [assembly: EndpointTypeArgument(typeof({5}), ...)], one type argument per type parameter",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Constraint-keyed binding matches a type parameter by constraint type equality. A constraint such as IUser<TKey> mentions another type parameter, so it equals no closed key such as IUser<Guid>, and inferring TKey from the key is not done: a key would then silently bind parameters it does not name. The explicit form lists every type argument, and every constraint is checked after substitution (MPEP026).");
 }

@@ -35,17 +35,24 @@ internal static class MethodsLiteral
     /// </summary>
     /// <remarks>
     /// A string rather than a collection so <see cref="EndpointInfo"/> stays trivially equatable
-    /// (R6.7). A <c>Methods</c> declared on the class or one of its base classes wins over the verb
-    /// interface, exactly as it does at run time: the interface's implementation is only a default.
+    /// (R6.7). The verbs are those of <b>the <c>Methods</c> the runtime uses</b>: the implementation of
+    /// <c>IEndpointBase.Methods</c>, which is what <c>TEndpoint.Methods</c> dispatches to — resolved
+    /// like <c>Path</c> (<see cref="RouteLiteral.ReadImplementation"/>, PRD D7). A <c>Methods</c>
+    /// declared on the class or a base class that implements the interface wins over the verb
+    /// interface's default implementation, which stands for its verb. A <c>new static Methods</c> on a
+    /// class that does not re-implement the interface is not the implementation, and
+    /// <paramref name="newMemberIgnored"/> reports it (MPEP032).
     /// </remarks>
-    public static string? Read(INamedTypeSymbol symbol, HttpMethodKind verb, SemanticModel model, CancellationToken cancellationToken)
-        => Read(symbol, verb, model.Compilation, cancellationToken);
-
-    /// <inheritdoc cref="Read(INamedTypeSymbol, HttpMethodKind, SemanticModel, CancellationToken)"/>
-    public static string? Read(INamedTypeSymbol symbol, HttpMethodKind verb, Compilation compilation, CancellationToken cancellationToken)
+    public static string? Read(INamedTypeSymbol symbol, HttpMethodKind verb, Compilation compilation, out bool newMemberIgnored, CancellationToken cancellationToken)
     {
-        var property = FindMethodsProperty(symbol);
-        if (property is null)
+        var nearest = FindMethodsProperty(symbol);
+        var implementation = FindImplementation(symbol);
+
+        newMemberIgnored = implementation is not null && nearest is not null &&
+                           !SymbolEqualityComparer.Default.Equals(implementation.OriginalDefinition, nearest.OriginalDefinition);
+
+        var property = implementation ?? nearest;
+        if (property is null || IsVerbInterfaceDefault(property))
         {
             return verb switch
             {
@@ -77,6 +84,34 @@ internal static class MethodsLiteral
     public static string[] Decode(string encoded)
         => encoded.Length == 0 ? new string[0] : encoded.Split(Separator);
 
+    /// <summary>The implementation of <c>IEndpointBase.Methods</c> the runtime dispatches to, or null.</summary>
+    private static IPropertySymbol? FindImplementation(INamedTypeSymbol symbol)
+    {
+        foreach (var iface in symbol.AllInterfaces)
+        {
+            if (iface.Name != "IEndpointBase" || iface.ContainingNamespace?.ToDisplayString() != EndpointsNamespace) continue;
+
+            foreach (var member in iface.GetMembers("Methods"))
+            {
+                if (member is IPropertySymbol { IsStatic: true } property &&
+                    symbol.FindImplementationForInterfaceMember(property) is IPropertySymbol implementation)
+                    return implementation;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// A verb interface's own default (<c>static IEnumerable&lt;string&gt; IEndpointBase.Methods =&gt;
+    /// HttpVerbs.Get</c> on <c>IGetEndpoint</c>): the verb, which is known without reading the body — a
+    /// body that lives in the library's metadata anyway.
+    /// </summary>
+    private static bool IsVerbInterfaceDefault(IPropertySymbol property)
+        => property.ContainingType is { TypeKind: TypeKind.Interface } containing &&
+           containing.ContainingNamespace?.ToDisplayString() == EndpointsNamespace;
+
+    /// <summary>The nearest <c>Methods</c> declared on the class or a base class, or null.</summary>
     private static IPropertySymbol? FindMethodsProperty(INamedTypeSymbol symbol)
     {
         foreach (var type in symbol.GetAllBaseTypes())

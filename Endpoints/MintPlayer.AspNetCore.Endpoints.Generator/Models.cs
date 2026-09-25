@@ -31,12 +31,14 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         OpenGenericInfo? open = null,
         ClosedGenericInfo? closed = null,
         ImmutableArray<GroupInfo> referencedGroups = default,
-        bool hasIgnoredNewPath = false)
+        bool hasIgnoredNewPath = false,
+        bool hasIgnoredNewMethods = false)
     {
         Open = open;
         Closed = closed;
         ReferencedGroups = referencedGroups.IsDefault ? ImmutableArray<GroupInfo>.Empty : referencedGroups;
         HasIgnoredNewPath = hasIgnoredNewPath;
+        HasIgnoredNewMethods = hasIgnoredNewMethods;
         InaccessibleReason = inaccessibleReason;
         IsInFileLocalType = isInFileLocalType;
         ValidationGap = validationGap;
@@ -182,6 +184,12 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     /// </summary>
     public bool HasIgnoredNewPath { get; }
 
+    /// <summary>
+    /// The same as <see cref="HasIgnoredNewPath"/>, for <c>Methods</c> (MPEP032).
+    /// <see cref="KnownMethods"/> is the runtime's.
+    /// </summary>
+    public bool HasIgnoredNewMethods { get; }
+
     /// <summary>The name this endpoint is recorded under in the descriptor list.</summary>
     public string EffectiveDescriptorName => DescriptorName ?? ClassName;
 
@@ -223,6 +231,7 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         InaccessibleReason == other.InaccessibleReason &&
         IsInFileLocalType == other.IsInFileLocalType &&
         HasIgnoredNewPath == other.HasIgnoredNewPath &&
+        HasIgnoredNewMethods == other.HasIgnoredNewMethods &&
         Equals(Open, other.Open) &&
         Equals(Closed, other.Closed) &&
         SequenceComparer<GroupInfo>.Instance.Equals(ReferencedGroups, other.ReferencedGroups) &&

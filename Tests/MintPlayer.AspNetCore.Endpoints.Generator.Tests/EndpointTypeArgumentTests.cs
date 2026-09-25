@@ -504,6 +504,205 @@ public class EndpointTypeArgumentTests
         Assert.Contains("Hidden", warning.GetMessage());
     }
 
+    /// <summary>
+    /// <c>Methods</c> resolves like <c>Path</c>: through the interface map the runtime's
+    /// <c>TEndpoint.Methods</c> dispatches through. A verb interface's default implementation is the verb.
+    /// A <c>new static Methods</c> that does not re-implement the interface is ignored at run time, so
+    /// the contract and MPEP007 must ignore it too, and MPEP032 says so.
+    /// </summary>
+    [Fact]
+    public void NewStaticMethods_OnADerivedEndpoint_UsesTheRuntimeVerbs_AndWarns()
+    {
+        var outcome = App(Usings + """
+            using System.Collections.Generic;
+            namespace Fixtures;
+            public abstract class GetBase : IGetEndpoint
+            {
+                public static string Path => "/items";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            public abstract class MultiBase : IGetEndpoint
+            {
+                public static string Path => "/multi";
+                public static IEnumerable<string> Methods => ["GET", "HEAD"];
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            // Runtime: GET (IGetEndpoint's default), not POST.
+            public class HiddenVerb : GetBase { public new static IEnumerable<string> Methods => ["POST"]; }
+            // Runtime: GET, HEAD (MultiBase's), not DELETE.
+            public class HiddenMulti : MultiBase { public new static IEnumerable<string> Methods => ["DELETE"]; }
+            // Re-listing the interface re-implements it: PUT.
+            public class RelistedVerb : GetBase, IGetEndpoint { public new static string Path => "/relisted"; public new static IEnumerable<string> Methods => ["PUT"]; }
+            // Shares HiddenVerb's route with another verb: no conflict at run time.
+            public class ItemsPost : IPostEndpoint
+            { public static string Path => "/items"; public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok()); }
+            """);
+
+        AssertNoErrors(outcome);
+        var contracts = outcome.File("EndpointContracts.g.cs");
+        Assert.Contains("typeof(global::Fixtures.HiddenVerb), \"HiddenVerb\", \"/items\", new string[] { \"GET\" }", contracts);
+        Assert.Contains("typeof(global::Fixtures.HiddenMulti), \"HiddenMulti\", \"/multi\", new string[] { \"GET\", \"HEAD\" }", contracts);
+        Assert.Contains("typeof(global::Fixtures.RelistedVerb), \"RelistedVerb\", \"/relisted\", new string[] { \"PUT\" }", contracts);
+
+        Assert.True(outcome.Ids("MPEP007").Length == 0, outcome.Describe(outcome.Ids("MPEP007")));
+
+        var warnings = outcome.Ids("MPEP032");
+        Assert.Equal(2, warnings.Length);
+        Assert.All(warnings, warning =>
+        {
+            Assert.Equal(DiagnosticSeverity.Warning, warning.Severity);
+            Assert.Contains("Methods", warning.GetMessage());
+        });
+        Assert.Contains(warnings, warning => warning.GetMessage().Contains("HiddenVerb") && warning.GetMessage().Contains("GET"));
+        Assert.Contains(warnings, warning => warning.GetMessage().Contains("HiddenMulti") && warning.GetMessage().Contains("GET, HEAD"));
+    }
+
+    // ---------- generic constraint types ----------
+
+    /// <summary>
+    /// Type parameters constrained to a generic type: closed (<c>IUser&lt;Guid&gt;</c>) and dependent
+    /// on another type parameter (<c>IUser&lt;TKey&gt;</c>).
+    /// </summary>
+    private const string GenericConstraintLibrary = Usings + """
+        namespace Lib;
+
+        public interface IUser<TKey> { TKey Id { get; } }
+
+        public class Profile<TUser> : IGetEndpoint where TUser : IUser<Guid>
+        {
+            public static string Path => "/profile";
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok(typeof(TUser).Name));
+        }
+
+        public partial class Passkeys<TUser, TKey> : IGetEndpoint<string> where TUser : IUser<TKey>
+        {
+            public static string Path => "/passkeys/{id}";
+            [RouteParam] public int Id { get; set; }
+            public override Task<IResult> HandleAsync(CancellationToken ct) => Task.FromResult(Results.Ok(typeof(TUser).Name + typeof(TKey).Name + Id));
+        }
+        """;
+
+    private const string GenericConstraintUsers = """
+
+        namespace App
+        {
+            public class AppUser : Lib.IUser<System.Guid> { public System.Guid Id => default; }
+            public class IntUser : Lib.IUser<int> { public int Id => 0; }
+        }
+        """;
+
+    private static Outcome GenericConstraintApp(bool crossAssembly, string attributes)
+    {
+        var app = Usings + attributes + GenericConstraintUsers;
+        if (!crossAssembly)
+            return Run(EndpointGeneratorHarness.CreateCompilation("App", [GenericConstraintLibrary, app]));
+
+        var (_, lib) = Library(GenericConstraintLibrary);
+        return App(app, lib);
+    }
+
+    [Fact]
+    public void GenericConstraintLibrary_CompilesAndRecordsBothEndpoints()
+    {
+        var (generated, _) = Library(GenericConstraintLibrary);
+        Assert.Contains("typeof(global::Lib.Profile<>)", generated);
+        Assert.Contains("typeof(global::Lib.Passkeys<,>)", generated);
+    }
+
+    /// <summary>(a) A closed generic constraint is an ordinary key: equality holds.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ClosedGenericConstraint_IsBoundByItsKey(bool crossAssembly)
+    {
+        var outcome = GenericConstraintApp(crossAssembly, "[assembly: EndpointTypeArgument<Lib.IUser<System.Guid>, App.AppUser>]\n");
+
+        AssertNoErrors(outcome);
+        var mapping = outcome.File("EndpointMapping.g.cs");
+        Assert.Contains("Map<global::Lib.Profile<global::App.AppUser>>", mapping);
+        Assert.Contains("WithName(b, \"Profile_AppUser\")", mapping);
+        Assert.DoesNotContain("Map<global::Lib.Passkeys", mapping);
+        Assert.Empty(outcome.Ids("MPEP030"));
+    }
+
+    /// <summary>
+    /// (b) <c>IUser&lt;TKey&gt;</c> mentions another type parameter, so no key can equal it. The key that
+    /// was evidently meant for it gets a diagnostic naming the explicit form, and nothing is emitted.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConstraintOnAnotherTypeParameter_IsNotBoundByAKey_AndSaysToUseTheExplicitForm(bool crossAssembly)
+    {
+        var outcome = GenericConstraintApp(crossAssembly, "[assembly: EndpointTypeArgument<Lib.IUser<System.Guid>, App.AppUser>]\n");
+
+        Assert.True(outcome.Compile.All(d => d.Severity != DiagnosticSeverity.Error), outcome.Describe(outcome.Compile.Where(d => d.Severity == DiagnosticSeverity.Error)));
+        Assert.DoesNotContain("Map<global::Lib.Passkeys", outcome.File("EndpointMapping.g.cs"));
+
+        var warning = Assert.Single(outcome.Ids("MPEP033"));
+        Assert.Equal(DiagnosticSeverity.Warning, warning.Severity);
+        Assert.StartsWith("EndpointTypeArgument", SpanText(warning));
+        Assert.Contains("TUser", warning.GetMessage());
+        Assert.Contains("TKey", warning.GetMessage());
+        Assert.Contains("typeof(Lib.Passkeys<,>)", warning.GetMessage());
+        Assert.Empty(outcome.Ids("MPEP030"));
+        Assert.Empty(outcome.Ids("MPEP031"));
+    }
+
+    /// <summary>(c) The explicit form closes it, with the dependent constraint checked after substitution.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConstraintOnAnotherTypeParameter_IsClosedByTheExplicitForm(bool crossAssembly)
+    {
+        var outcome = GenericConstraintApp(crossAssembly, "[assembly: EndpointTypeArgument(typeof(Lib.Passkeys<,>), typeof(App.AppUser), typeof(System.Guid))]\n");
+
+        AssertNoErrors(outcome);
+        var mapping = outcome.File("EndpointMapping.g.cs");
+        Assert.Contains("Map<global::Lib.Passkeys<global::App.AppUser, global::System.Guid>", mapping);
+        Assert.Contains("WithName(b, \"Passkeys_AppUser_Guid\")", mapping);
+        Assert.Contains("\"/passkeys/{id}\"", outcome.File("EndpointContracts.g.cs"));
+        Assert.Contains("Passkeys_AppUser_Guid(int id)", outcome.File("EndpointRoutes.g.cs"));
+        Assert.Empty(outcome.Ids("MPEP033"));
+    }
+
+    /// <summary>
+    /// The usual pairing: a key for the endpoints it can close, the explicit form for the one it cannot.
+    /// The explicit form wins for its endpoint, so the key raises no MPEP033 there.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void KeyAndExplicitForm_TogetherCloseBoth_WithoutMPEP033(bool crossAssembly)
+    {
+        var outcome = GenericConstraintApp(crossAssembly,
+            "[assembly: EndpointTypeArgument<Lib.IUser<System.Guid>, App.AppUser>]\n" +
+            "[assembly: EndpointTypeArgument(typeof(Lib.Passkeys<,>), typeof(App.AppUser), typeof(System.Guid))]\n");
+
+        AssertNoErrors(outcome);
+        var mapping = outcome.File("EndpointMapping.g.cs");
+        Assert.Contains("Map<global::Lib.Profile<global::App.AppUser>>", mapping);
+        Assert.Contains("Map<global::Lib.Passkeys<global::App.AppUser, global::System.Guid>", mapping);
+        Assert.Empty(outcome.Ids("MPEP033"));
+        Assert.Empty(outcome.Ids("MPEP030"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ConstraintOnAnotherTypeParameter_ExplicitFormViolatingIt_IsAnError(bool crossAssembly)
+    {
+        var outcome = GenericConstraintApp(crossAssembly, "[assembly: EndpointTypeArgument(typeof(Lib.Passkeys<,>), typeof(App.IntUser), typeof(System.Guid))]\n");
+
+        var error = Assert.Single(outcome.Ids("MPEP026"));
+        Assert.Equal(DiagnosticSeverity.Error, error.Severity);
+        Assert.Contains("Lib.IUser<System.Guid>", error.GetMessage());
+        Assert.Contains("TUser", error.GetMessage());
+        Assert.StartsWith("EndpointTypeArgument", SpanText(error));
+        Assert.DoesNotContain("Map<global::Lib.Passkeys", outcome.File("EndpointMapping.g.cs"));
+        Assert.True(outcome.Compile.All(d => d.Severity != DiagnosticSeverity.Error), outcome.Describe(outcome.Compile.Where(d => d.Severity == DiagnosticSeverity.Error)));
+    }
+
     // ---------- D5: IsEnabled ----------
 
     [Fact]

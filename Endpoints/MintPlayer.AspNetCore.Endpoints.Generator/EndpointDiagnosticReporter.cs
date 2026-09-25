@@ -34,7 +34,12 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
                 yield return DiagnosticDescriptors.OpenEndpointNotMapped.Create(location, open.DisplayName);
 
             if (endpoint.HasIgnoredNewPath)
-                yield return DiagnosticDescriptors.NewStaticPathIgnored.Create(location, endpoint.ClassName, endpoint.Route ?? "?");
+                yield return DiagnosticDescriptors.NewStaticPathIgnored.Create(location, endpoint.ClassName, "Path",
+                    endpoint.Route is { } route ? $"'{route}'" : "a Path not known at compile time");
+
+            if (endpoint.HasIgnoredNewMethods)
+                yield return DiagnosticDescriptors.NewStaticPathIgnored.Create(location, endpoint.ClassName, "Methods",
+                    endpoint.KnownMethods is { } known ? string.Join(", ", MethodsLiteral.Decode(known)) : "verbs not known at compile time");
 
             foreach (var property in endpoint.BoundProperties)
             {
@@ -128,7 +133,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
                 earlier.FullyQualifiedName.Replace("global::", ""));
         }
 
-        // MPEP026-MPEP031, found by the closing step and located on the application's attribute.
+        // MPEP026-MPEP031 and MPEP033, found by the closing step and located on the application's attribute.
         foreach (var problem in model.Closing.Problems)
         {
             if (DescriptorFor(problem.Id) is { } descriptor)
@@ -302,6 +307,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
         "MPEP029" => DiagnosticDescriptors.ClosedEndpointNotAccessible,
         "MPEP030" => DiagnosticDescriptors.TypeArgumentClosesNothing,
         "MPEP031" => DiagnosticDescriptors.EndpointPartiallyBound,
+        "MPEP033" => DiagnosticDescriptors.ConstraintDependsOnTypeParameter,
         _ => null,
     };
 
