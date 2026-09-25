@@ -33,7 +33,9 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="11.0.0" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="12.0.1" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="MintPlayer.ValueComparerGenerator" Version="12.0.1" PrivateAssets="all" />
+		<PackageReference Include="MintPlayer.ValueComparerGenerator.Attributes" Version="12.0.1" PrivateAssets="all" GeneratePathProperty="true" />
 	</ItemGroup>
 
 	<!--
@@ -73,31 +75,31 @@
 	<PropertyGroup>
 		<!--
 		The one folder the analyzer ships in, in this package and in MintPlayer.AspNetCore.Endpoints
-		(which reads it from here through GetEndpointsAnalyzerPackPath). A move to a versioned folder
-		such as analyzers/dotnet/roslyn5.9/cs is a change to this property and nothing else. It stays
-		unversioned on purpose: Roslyn 5.9 is the floor and older compilers are not supported, and an
-		older host that loads this folder reports CS9057 naming the generator (measured on SDK
-		10.0.112), where a versioned folder would have it skip the generator without saying why.
+		(which reads it from here through GetEndpointsAnalyzerPackPath); every pack guard below reads it
+		too. It is the versioned roslyn5.9 folder (PRD addendum 2, D25, following MintPlayer.Dotnet.Tools'
+		rule): Roslyn 5.9 is the floor, and a host older than that finds no folder it qualifies for and
+		skips the generator, instead of loading an assembly that references a newer compiler. The first
+		symptom there is a missing Map…Endpoints() (CS1061); the READMEs say so. This supersedes the
+		unversioned analyzers/dotnet/cs of commit 7e280e6, chosen so an old SDK would report CS9057.
 		-->
-		<EndpointsAnalyzerPackPath Condition="'$(EndpointsAnalyzerPackPath)' == ''">analyzers/dotnet/cs</EndpointsAnalyzerPackPath>
+		<EndpointsAnalyzerPackPath Condition="'$(EndpointsAnalyzerPackPath)' == ''">analyzers/dotnet/roslyn5.9/cs</EndpointsAnalyzerPackPath>
 		<TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackAnalyzerAssemblies</TargetsForTfmSpecificContentInPackage>
 		<BeforePack>SuppressToolsAnalyzerCopies;$(BeforePack)</BeforePack>
 	</PropertyGroup>
 
 	<!--
-	MintPlayer.SourceGenerators.Tools' own build/MintPlayer.SourceGenerators.Tools.props adds static
-	<None Pack="true"> items that place a second and third copy of this generator (and of Tools.dll)
-	in versioned folders: analyzers/dotnet/roslyn4.0/cs and analyzers/dotnet/roslyn4.9/cs up to Tools
-	10.x, analyzers/dotnet/roslyn5.9/cs since 11.0.0 (the target below matches any analyzers/ path, so
-	it covers both). That layout suits a package
-	that uses those folders exclusively; next to the analyzers/dotnet/cs copy placed below, the SDK
-	resolves every folder as @(Analyzer), the generator runs two or three times, and the consumer
-	gets CS0101/CS0111 duplicate definitions in files they never wrote (PRD R6.5a).
-
-	The contributions are removed here, before pack collects @(None), rather than filtered out of the
-	finished package: the props also adds a Release-only analyzers/dotnet/cs glob for an Attributes
-	assembly, so anything under analyzers/ that arrives as a <None> item is by definition not ours.
-	This package's own payload goes through TfmSpecificPackageFile and is untouched.
+	MintPlayer.SourceGenerators.Tools' build/MintPlayer.SourceGenerators.Tools.props and
+	MintPlayer.ValueComparerGenerator.Attributes' props add static <None Pack="true"> items with copies
+	of this generator, Tools.dll and the Attributes assembly: analyzers/dotnet/roslyn5.9/cs since Tools
+	11.0.0 (roslyn4.0/roslyn4.9 up to 10.x), plus a Release-only analyzers/dotnet/cs glob for an
+	Attributes project this repository does not have. This package packs those same assemblies itself,
+	through TfmSpecificPackageFile (PackAnalyzerAssemblies). So every such item is either
+	  - a duplicate: the same path as $(EndpointsAnalyzerPackPath), which would add the same file twice
+	    (NU5118) — upstream's roslyn5.9/cs copies are exactly that since D25; or
+	  - a second analyzer folder, where the SDK resolves every folder as @(Analyzer), the generator runs
+	    more than once, and the consumer gets CS0101/CS0111 in files they never wrote (PRD R6.5a).
+	Both kinds are removed here, before pack collects @(None), rather than filtered out of the finished
+	package. This package's own payload is untouched.
 	-->
 	<Target Name="SuppressToolsAnalyzerCopies">
 		<ItemGroup>
@@ -152,9 +154,18 @@
 		<!--
 		A guard, because the failure it catches is silent: if SuppressToolsAnalyzerCopies ever stops
 		running (a renamed hook, a props change upstream), the package still packs, still installs, and
-		the consumer's first build fails on CS0101 with nothing pointing here.
+		the consumer's first build fails on CS0101 with nothing pointing here. A leftover copy in this
+		package's own folder is deduplicated rather than rejected: upstream's roslyn5.9/cs items name the
+		very folder this package packs into (PRD addendum 2, D25), and this package's TfmSpecificPackageFile
+		already carries the file. A copy in any other analyzer folder is an error.
 		-->
+		<PropertyGroup>
+			<_EndpointsAnalyzerPackPathNormalized>$([System.String]::Copy('$(EndpointsAnalyzerPackPath)').Replace('\', '/').Trim('/'))</_EndpointsAnalyzerPackPathNormalized>
+		</PropertyGroup>
 		<ItemGroup>
+			<_SamePathAnalyzerPackFile Include="@(None)"
+			                           Condition="'%(None.Pack)' == 'true' and $([System.String]::Copy('%(None.PackagePath)').Replace('\', '/').Trim('/').Equals('$(_EndpointsAnalyzerPackPathNormalized)'))" />
+			<None Remove="@(_SamePathAnalyzerPackFile)" />
 			<_StrayAnalyzerPackFile Include="@(None)"
 			                        Condition="'%(None.Pack)' == 'true' and $([System.String]::Copy('%(None.PackagePath)').Replace('\', '/').TrimStart('/').StartsWith('analyzers/'))" />
 		</ItemGroup>
@@ -165,6 +176,18 @@
 			<TfmSpecificPackageFile Include="@(TargetPathWithTargetPlatformMoniker)" PackagePath="$(EndpointsAnalyzerPackPath)" />
 			<TfmSpecificPackageFile Include="@(_EndpointsCodeFixAssembly)" PackagePath="$(EndpointsAnalyzerPackPath)" />
 		</ItemGroup>
+
+		<!-- PRD D14: MintPlayer.ValueComparerGenerator.Attributes.dll must ship, and only in the generator's
+		     folder. It arrives through the package's own GetTargetPath contribution, so nothing here adds
+		     it; these guards notice when that stops. -->
+		<ItemGroup>
+			<_ValueComparerAttributesPackFile Include="@(TfmSpecificPackageFile)" Condition="'%(Filename)%(Extension)' == 'MintPlayer.ValueComparerGenerator.Attributes.dll'" />
+			<_MisplacedValueComparerAttributesPackFile Include="@(_ValueComparerAttributesPackFile)" Condition="'%(PackagePath)' != '$(EndpointsAnalyzerPackPath)'" />
+		</ItemGroup>
+		<Error Condition="'@(_ValueComparerAttributesPackFile)' == ''"
+		       Text="MintPlayer.ValueComparerGenerator.Attributes.dll is not among the files being packed. The generator's models carry its attributes, so the package would ship an analyzer that references an assembly it does not contain." />
+		<Error Condition="'@(_MisplacedValueComparerAttributesPackFile)' != ''"
+		       Text="MintPlayer.ValueComparerGenerator.Attributes.dll would be packed into '%(_MisplacedValueComparerAttributesPackFile.PackagePath)' instead of $(EndpointsAnalyzerPackPath), beside the generator." />
 
 		<!-- The code fix must ship, and only in the generator's folder: in any other analyzer folder the
 		     IDE would load it from a place the SDK never pairs with the generator. -->
@@ -186,5 +209,48 @@
 			<TargetPathWithTargetPlatformMoniker Include="$(PkgMintPlayer_SourceGenerators_Tools)\lib\netstandard2.0\MintPlayer.SourceGenerators.Tools.dll" IncludeRuntimeDependency="false" />
 		</ItemGroup>
 	</Target>
+
+	<!--
+	Works around an upstream defect (MintPlayer.Dotnet.Tools, reported with PRD D15).
+	MintPlayer.ValueComparerGenerator's build\*.targets adds its Attributes assembly to
+	TargetPathWithTargetPlatformMoniker with IncludeRuntimeDependency="true". Every project that
+	references this one with a plain ProjectReference (Generator.Tests) then receives the Attributes
+	assembly as a runtime dependency twice, and GenerateDepsFile fails with
+	MSB4018: The "GenerateDepsFile" task failed unexpectedly ... An item with the same key has already
+	been added. The assembly is still packed through GetTargetPath (PRD D14); only the runtime flag is
+	cleared, as it is for MintPlayer.SourceGenerators.Tools in GetDependencyTargetPaths above.
+	Remove this target once the package's own target sets IncludeRuntimeDependency="false".
+	-->
+	<Target Name="DemoteValueComparerAttributesRuntimeDependency" AfterTargets="GetDependencyTargetPathsValueComparerGenerator">
+		<ItemGroup>
+			<TargetPathWithTargetPlatformMoniker Condition="'%(Filename)' == 'MintPlayer.ValueComparerGenerator.Attributes'">
+				<IncludeRuntimeDependency>false</IncludeRuntimeDependency>
+			</TargetPathWithTargetPlatformMoniker>
+		</ItemGroup>
+	</Target>
+
+	<!--
+	The Attributes assembly must reach the analyzer folder (PRD D14). It arrives through the package's
+	own GetTargetPath contribution, which needs the package's path property; the package's props sets
+	GeneratePathProperty with an Update that runs too early to reach this project's reference, hence
+	the explicit GeneratePathProperty="true" above and this guard on it.
+	-->
+	<Target Name="CheckValueComparerAttributesPathProperty" BeforeTargets="CoreCompile;GetTargetPath" Condition="'$(DesignTimeBuild)' != 'true'">
+		<Error Condition="'$(PkgMintPlayer_ValueComparerGenerator_Attributes)' == ''"
+		       Text="PkgMintPlayer_ValueComparerGenerator_Attributes is empty. Keep GeneratePathProperty=&quot;true&quot; on the MintPlayer.ValueComparerGenerator.Attributes PackageReference; without it MintPlayer.ValueComparerGenerator.Attributes.dll is not packed beside the generator." />
+	</Target>
+
+	<!--
+	Build-time only: suppresses the CS1591 that MintPlayer.ValueComparerGenerator's public
+	IncrementalValueProviderAdditionalEx adds to this assembly, and nothing else (PRD D16; see the
+	suppressor's remarks for why no lighter mechanism works). ReferenceOutputAssembly="false" and
+	PrivateAssets="all": it is an analyzer of this compilation only, never packed or shipped.
+	-->
+	<ItemGroup>
+		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.Generator.BuildSuppressions\MintPlayer.AspNetCore.Endpoints.Generator.BuildSuppressions.csproj"
+		                  OutputItemType="Analyzer"
+		                  ReferenceOutputAssembly="false"
+		                  PrivateAssets="all" />
+	</ItemGroup>
 
 </Project>

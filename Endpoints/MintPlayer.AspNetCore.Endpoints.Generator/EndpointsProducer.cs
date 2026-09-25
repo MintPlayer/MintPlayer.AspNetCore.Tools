@@ -15,7 +15,7 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator;
 /// <c>Producer.Produce</c> swallowed exceptions without a diagnostic; this class therefore carried
 /// its own <c>Emit</c>. Tools 11.0.0 fixed both: <c>ProduceCode</c> registers one output per
 /// provider with no compilation in it, and a producer that throws is reported as <c>MPSG001</c>
-/// (an error naming the file and the exception) instead of vanishing. The hand-rolled
+/// (an error naming the file and the exception) instead of vanishing; Tools 12 keeps both. The hand-rolled
 /// <c>Emit</c> is gone.
 /// </para>
 /// <para>

@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using MintPlayer.SourceGenerators.Tools;
+using MintPlayer.ValueComparerGenerator.Attributes;
 
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
 
@@ -36,7 +37,8 @@ internal enum BoundKind
 /// One <c>[RouteParam]</c>/<c>[QueryParam]</c> property, reduced to strings and flags so the
 /// incremental pipeline can compare it by value.
 /// </summary>
-internal sealed class BoundProperty : IEquatable<BoundProperty>
+[GenerateEquality]
+internal sealed partial class BoundProperty
 {
     public BoundProperty(string name, string key, BoundSource source, BoundKind kind, string conversionTypeFqn,
         string declaredTypeDisplay, bool isOptional, bool hasInitializer, bool isSettable, LocationKey? location)
@@ -86,23 +88,13 @@ internal sealed class BoundProperty : IEquatable<BoundProperty>
     /// </summary>
     public bool IsSettable { get; }
 
+    /// <inheritdoc cref="EndpointInfo.Location"/>
     public LocationKey? Location { get; }
 
-    public bool Equals(BoundProperty? other) =>
-        other is not null &&
-        Name == other.Name &&
-        Key == other.Key &&
-        Source == other.Source &&
-        Kind == other.Kind &&
-        ConversionTypeFqn == other.ConversionTypeFqn &&
-        DeclaredTypeDisplay == other.DeclaredTypeDisplay &&
-        IsOptional == other.IsOptional &&
-        HasInitializer == other.HasInitializer &&
-        IsSettable == other.IsSettable &&
-        LocationKeys.AreEqual(Location, other.Location);
-
-    public override bool Equals(object? obj) => Equals(obj as BoundProperty);
-    public override int GetHashCode() => Name.GetHashCode();
+    /// <summary>This property without its location, for the producers (PRD addendum 2, D20).</summary>
+    public BoundProperty WithoutLocation() => Location is null
+        ? this
+        : new BoundProperty(Name, Key, Source, Kind, ConversionTypeFqn, DeclaredTypeDisplay, IsOptional, HasInitializer, IsSettable, location: null);
 }
 
 /// <summary>Collects an endpoint's bound properties from its symbol.</summary>
@@ -121,6 +113,12 @@ internal static class BoundProperties
     /// </remarks>
     public static ImmutableArray<BoundProperty> Collect(INamedTypeSymbol endpoint, string endpointsNamespace, CancellationToken ct)
     {
+        // Syntax first (PRD addendum 2, D19): with no base class, only the class's own property
+        // declarations can carry [RouteParam]/[QueryParam], and a property declared without an attribute
+        // list has no attributes at all. Then the member list need not be bound.
+        if (endpoint.BaseType is null or { SpecialType: SpecialType.System_Object } && !MayHaveAttributedProperty(endpoint, ct))
+            return ImmutableArray<BoundProperty>.Empty;
+
         var builder = ImmutableArray.CreateBuilder<BoundProperty>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
@@ -145,12 +143,34 @@ internal static class BoundProperties
         return builder.ToImmutable();
     }
 
+    /// <summary>
+    /// False only when every declaration of the class is a class declaration and none of its property
+    /// declarations has an attribute list.
+    /// </summary>
+    private static bool MayHaveAttributedProperty(INamedTypeSymbol endpoint, CancellationToken ct)
+    {
+        var references = endpoint.OriginalDefinition.DeclaringSyntaxReferences;
+        if (references.IsEmpty) return true;
+
+        foreach (var reference in references)
+        {
+            if (reference.GetSyntax(ct) is not ClassDeclarationSyntax declaration) return true;
+
+            foreach (var member in declaration.Members)
+            {
+                if (member is PropertyDeclarationSyntax { AttributeLists.Count: > 0 }) return true;
+            }
+        }
+
+        return false;
+    }
+
     private static (BoundSource Source, string? Name)? ReadBinding(IPropertySymbol property, string endpointsNamespace)
     {
         foreach (var attribute in property.GetAttributes())
         {
             var attributeClass = attribute.AttributeClass;
-            if (attributeClass?.ContainingNamespace?.ToDisplayString() != endpointsNamespace) continue;
+            if (attributeClass is null || !SymbolNames.IsNamespace(attributeClass.ContainingNamespace, endpointsNamespace)) continue;
 
             BoundSource? source = attributeClass.Name switch
             {
@@ -226,6 +246,6 @@ internal static class BoundProperties
     private static bool IsSelfParsable(ITypeSymbol type) =>
         type.AllInterfaces.Any(i =>
             i.MetadataName == "IParsable`1" &&
-            i.ContainingNamespace?.ToDisplayString() == "System" &&
+            SymbolNames.IsNamespace(i.ContainingNamespace, "System") &&
             SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], type));
 }

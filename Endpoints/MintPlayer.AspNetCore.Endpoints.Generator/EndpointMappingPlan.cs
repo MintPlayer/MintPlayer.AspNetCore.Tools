@@ -5,8 +5,10 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator;
 /// exact set of things that cannot be emitted, with the reason why.
 /// </summary>
 /// <remarks>
-/// The producer and the diagnostic reporter both build one of these, so they cannot disagree: every
-/// endpoint the producer silently drops is an endpoint the reporter has a diagnostic for.
+/// The producers and the diagnostic reporter read one of these, so they cannot disagree: every
+/// endpoint the producer silently drops is an endpoint the reporter has a diagnostic for. It is built
+/// once per model through <see cref="EndpointModel.GetPlan"/> and shared by every consumer of that
+/// model (PRD addendum 2, D21).
 /// <para>
 /// Every collection is ordered, and none of it comes out of a hash set. Route order, factory field
 /// numbering and the descriptor list are all observable in the emitted text, so an unordered source
@@ -272,6 +274,27 @@ internal sealed class EndpointMappingPlan
 
     /// <summary>True when the endpoint is mapped with <c>WithName</c> — every mappable endpoint but an MPEP012 duplicate.</summary>
     public bool IsNamed(EndpointInfo endpoint) => !DuplicateNames.ContainsKey(endpoint.FullyQualifiedName);
+
+    private readonly Dictionary<string, List<ShadowMember>> shadowParameters = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// <see cref="ShadowParameters.For(EndpointInfo, string?)"/> for a mappable endpoint, computed once
+    /// per plan (PRD addendum 2, D21): the mapping and the OpenAPI producer both need it.
+    /// </summary>
+    /// <remarks>The returned list is shared; callers only read it.</remarks>
+    public List<ShadowMember> ShadowParametersOf(EndpointInfo endpoint)
+    {
+        lock (shadowParameters)
+        {
+            if (!shadowParameters.TryGetValue(endpoint.FullyQualifiedName, out var members))
+            {
+                members = ShadowParameters.For(endpoint, ComposedRoutes[endpoint.FullyQualifiedName]);
+                shadowParameters[endpoint.FullyQualifiedName] = members;
+            }
+
+            return members;
+        }
+    }
 
     private static List<string> ChainOf(string? groupFqn, Dictionary<string, string?> parentOf)
     {

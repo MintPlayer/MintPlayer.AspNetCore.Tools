@@ -42,7 +42,7 @@ partial class EndpointGenerator
 
         protected override void ProduceSource(IndentedTextWriter writer, CancellationToken cancellationToken)
         {
-            var root = TypedLinks.Build(EndpointMappingPlan.From(Model));
+            var root = TypedLinks.Build(Model.GetPlan());
             if (TypedLinks.IsEmpty(root)) return;
 
             writer.WriteLine(Header);

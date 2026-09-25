@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+	A build-time helper for MintPlayer.AspNetCore.Endpoints.Generator only: that project loads this
+	assembly as an analyzer (OutputItemType="Analyzer"). It is not packed, not shipped and not loaded
+	by any consumer. See UpstreamGeneratedTypeSuppressor for the one thing it does.
+	-->
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+		<IsPackable>false</IsPackable>
+		<IsRoslynComponent>true</IsRoslynComponent>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- The same Roslyn the generator compiles against (5.9.0), so every supported SDK can load it. -->
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" PrivateAssets="all" />
+	</ItemGroup>
+
+</Project>

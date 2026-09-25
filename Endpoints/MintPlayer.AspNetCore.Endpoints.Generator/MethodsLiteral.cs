@@ -43,41 +43,132 @@ internal static class MethodsLiteral
     /// class that does not re-implement the interface is not the implementation, and
     /// <paramref name="newMemberIgnored"/> reports it (MPEP032).
     /// </remarks>
-    public static string? Read(INamedTypeSymbol symbol, HttpMethodKind verb, Compilation compilation, out bool newMemberIgnored, CancellationToken cancellationToken)
+    /// <param name="symbol">The endpoint type; constructed types work.</param>
+    /// <param name="verb">The verb its verb interface stands for.</param>
+    /// <param name="compilation">The compilation the symbol belongs to.</param>
+    /// <param name="newMemberIgnored">True when a nearer <c>new static Methods</c> is not the one used.</param>
+    /// <param name="cancellationToken">Cancellation.</param>
+    /// <param name="model">Optional: the caller's semantic model, reused when the expression lives in its tree.</param>
+    /// <remarks>
+    /// The same fast path as <see cref="RouteLiteral.ReadImplementation"/> (PRD addendum 2, D19): when
+    /// the class's own declaration is decidably the implementation, or the class has no base class and
+    /// declares no <c>Methods</c> (the common case, answered by its verb interface), the interface map is
+    /// not consulted; string literals are read from syntax.
+    /// </remarks>
+    public static string? Read(INamedTypeSymbol symbol, HttpMethodKind verb, Compilation compilation, out bool newMemberIgnored, CancellationToken cancellationToken, SemanticModel? model = null)
     {
-        var nearest = FindMethodsProperty(symbol);
-        var implementation = FindImplementation(symbol);
-
-        newMemberIgnored = implementation is not null && nearest is not null &&
-                           !SymbolEqualityComparer.Default.Equals(implementation.OriginalDefinition, nearest.OriginalDefinition);
-
-        var property = implementation ?? nearest;
-        if (property is null || IsVerbInterfaceDefault(property))
+        var interfaceMember = RouteLiteral.FindInterfaceMember(symbol, "IEndpointBase", "Methods");
+        if (interfaceMember is not null && RouteLiteral.OwnDeclarationCanImplement(symbol, interfaceMember))
         {
-            return verb switch
+            // Syntax first, without binding the class's member list.
+            var declarations = RouteLiteral.OwnPropertyDeclarations(symbol, "Methods", cancellationToken);
+            var hasBaseClass = symbol.BaseType is { SpecialType: not SpecialType.System_Object };
+
+            // No Methods of its own and no base class: only an interface default can implement it, and
+            // with no user interface declaring one, that is its verb interface's.
+            if (declarations is { Count: 0 } && !hasBaseClass && !HasUserInterfaceMethods(symbol))
             {
-                HttpMethodKind.Get => "GET",
-                HttpMethodKind.Post => "POST",
-                HttpMethodKind.Put => "PUT",
-                HttpMethodKind.Delete => "DELETE",
-                HttpMethodKind.Patch => "PATCH",
-                _ => null,
-            };
+                newMemberIgnored = false;
+                return VerbOf(verb);
+            }
+
+            // One `public static IEnumerable<string> Methods` of its own: the implementation. Only the
+            // declared type is bound, to compare it with the interface's exactly.
+            if (declarations is { Count: 1 } &&
+                RouteLiteral.IsPublicStaticImplicit(declarations[0]) &&
+                RouteLiteral.ModelFor(declarations[0].SyntaxTree, compilation, model).GetTypeInfo(declarations[0].Type, cancellationToken).Type is { } declaredType &&
+                declaredType.SpecialType != SpecialType.System_String &&
+                SymbolEqualityComparer.Default.Equals(declaredType, interfaceMember.Type))
+            {
+                newMemberIgnored = false;
+                return VerbsOfDeclaration(declarations[0], compilation, model, cancellationToken);
+            }
         }
+
+        IPropertySymbol? property;
+        if (interfaceMember is not null &&
+            RouteLiteral.TryFindOwnImplementation(symbol, interfaceMember, IsMethodsProperty, out var own) &&
+            (own is not null || !HasUserInterfaceMethods(symbol)))
+        {
+            // The class's own Methods, or none: then only an interface default can implement it, and
+            // with no user interface declaring one, that is a verb interface's.
+            newMemberIgnored = false;
+            property = own;
+        }
+        else
+        {
+            var nearest = FindMethodsProperty(symbol);
+            var implementation = FindImplementation(symbol);
+
+            newMemberIgnored = implementation is not null && nearest is not null &&
+                               !SymbolEqualityComparer.Default.Equals(implementation.OriginalDefinition, nearest.OriginalDefinition);
+
+            property = implementation ?? nearest;
+        }
+
+        if (property is null || IsVerbInterfaceDefault(property))
+            return VerbOf(verb);
 
         foreach (var reference in property.DeclaringSyntaxReferences)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var expression = RouteLiteral.ValueExpressionOf(reference.GetSyntax(cancellationToken));
-            if (expression is null) continue;
-
-            var treeModel = compilation.GetSemanticModel(expression.SyntaxTree);
-            var verbs = VerbsOf(expression, treeModel, cancellationToken);
-            if (verbs is not null) return Encode(verbs);
+            var verbs = VerbsOfDeclaration(reference.GetSyntax(cancellationToken), compilation, model, cancellationToken);
+            if (verbs is not null) return verbs;
         }
 
         return null;
+    }
+
+    /// <summary>The verb a verb interface stands for, encoded; null for a custom endpoint.</summary>
+    private static string? VerbOf(HttpMethodKind verb) => verb switch
+    {
+        HttpMethodKind.Get => "GET",
+        HttpMethodKind.Post => "POST",
+        HttpMethodKind.Put => "PUT",
+        HttpMethodKind.Delete => "DELETE",
+        HttpMethodKind.Patch => "PATCH",
+        _ => null,
+    };
+
+    /// <summary>The encoded verbs of one <c>Methods</c> declaration, or null when they cannot be read.</summary>
+    private static string? VerbsOfDeclaration(SyntaxNode declaration, Compilation compilation, SemanticModel? model, CancellationToken cancellationToken)
+    {
+        var expression = RouteLiteral.ValueExpressionOf(declaration);
+        if (expression is null) return null;
+
+        var verbs = VerbsOf(expression, new LazyModel(expression.SyntaxTree, compilation, model), cancellationToken);
+        return verbs is null ? null : Encode(verbs);
+    }
+
+    /// <summary>A static, non-string property named <c>Methods</c>, or an explicit implementation named <c>Ns.IEndpointBase.Methods</c>.</summary>
+    private static bool IsMethodsProperty(IPropertySymbol property) =>
+        property.IsStatic &&
+        property.Type.SpecialType != SpecialType.System_String &&
+        (property.Name == "Methods" || property.Name.EndsWith(".Methods", StringComparison.Ordinal));
+
+    /// <summary>
+    /// True when an interface outside the library declares a static <c>Methods</c>, which could be a
+    /// default implementation of <c>IEndpointBase.Methods</c> that only the interface map can rank.
+    /// </summary>
+    private static bool HasUserInterfaceMethods(INamedTypeSymbol symbol)
+    {
+        foreach (var iface in symbol.AllInterfaces)
+        {
+            if (SymbolNames.IsNamespace(iface.ContainingNamespace, EndpointsNamespace)) continue;
+            if (iface.GetMembers().OfType<IPropertySymbol>().Any(property => property.IsStatic && (property.Name == "Methods" || property.Name.EndsWith(".Methods", StringComparison.Ordinal))))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>A semantic model created only when a verb cannot be read from syntax.</summary>
+    private sealed class LazyModel(SyntaxTree tree, Compilation compilation, SemanticModel? hint)
+    {
+        private SemanticModel? model;
+
+        public SemanticModel Value => model ??= RouteLiteral.ModelFor(tree, compilation, hint);
     }
 
     /// <summary>Splits an encoded verb set back into its verbs.</summary>
@@ -89,7 +180,7 @@ internal static class MethodsLiteral
     {
         foreach (var iface in symbol.AllInterfaces)
         {
-            if (iface.Name != "IEndpointBase" || iface.ContainingNamespace?.ToDisplayString() != EndpointsNamespace) continue;
+            if (iface.Name != "IEndpointBase" || !SymbolNames.IsNamespace(iface.ContainingNamespace, EndpointsNamespace)) continue;
 
             foreach (var member in iface.GetMembers("Methods"))
             {
@@ -109,7 +200,7 @@ internal static class MethodsLiteral
     /// </summary>
     private static bool IsVerbInterfaceDefault(IPropertySymbol property)
         => property.ContainingType is { TypeKind: TypeKind.Interface } containing &&
-           containing.ContainingNamespace?.ToDisplayString() == EndpointsNamespace;
+           SymbolNames.IsNamespace(containing.ContainingNamespace, EndpointsNamespace);
 
     /// <summary>The nearest <c>Methods</c> declared on the class or a base class, or null.</summary>
     private static IPropertySymbol? FindMethodsProperty(INamedTypeSymbol symbol)
@@ -130,7 +221,7 @@ internal static class MethodsLiteral
         return null;
     }
 
-    private static List<string>? VerbsOf(ExpressionSyntax expression, SemanticModel model, CancellationToken cancellationToken)
+    private static List<string>? VerbsOf(ExpressionSyntax expression, LazyModel model, CancellationToken cancellationToken)
     {
         switch (expression)
         {
@@ -156,12 +247,12 @@ internal static class MethodsLiteral
             case MemberAccessExpressionSyntax or IdentifierNameSyntax:
                 // HttpVerbs.Get and friends are static readonly, so not constants; recognise them by
                 // symbol, and only the library's own.
-                if (model.GetSymbolInfo(expression, cancellationToken).Symbol is IFieldSymbol
+                if (model.Value.GetSymbolInfo(expression, cancellationToken).Symbol is IFieldSymbol
                     {
                         IsStatic: true,
                         ContainingType: { Name: "HttpVerbs" } containing,
                     } field &&
-                    containing.ContainingNamespace?.ToDisplayString() == EndpointsNamespace)
+                    SymbolNames.IsNamespace(containing.ContainingNamespace, EndpointsNamespace))
                 {
                     return field.Name switch
                     {
@@ -176,7 +267,7 @@ internal static class MethodsLiteral
         }
     }
 
-    private static List<string>? ConstantStrings(SeparatedSyntaxList<ExpressionSyntax> items, SemanticModel model, CancellationToken cancellationToken)
+    private static List<string>? ConstantStrings(SeparatedSyntaxList<ExpressionSyntax> items, LazyModel model, CancellationToken cancellationToken)
     {
         var verbs = new List<string>();
         foreach (var item in items)
@@ -187,10 +278,16 @@ internal static class MethodsLiteral
         return verbs;
     }
 
-    private static string? ConstantString(ExpressionSyntax expression, SemanticModel model, CancellationToken cancellationToken)
+    private static string? ConstantString(ExpressionSyntax expression, LazyModel model, CancellationToken cancellationToken)
     {
-        var constant = model.GetConstantValue(expression, cancellationToken);
-        if (!constant.HasValue || constant.Value is not string value) return null;
+        // A string literal needs no binding (PRD addendum 2, D19); anything else is folded by the model.
+        var value = RouteLiteral.FoldStringLiterals(expression);
+        if (value is null)
+        {
+            var constant = model.Value.GetConstantValue(expression, cancellationToken);
+            if (!constant.HasValue || constant.Value is not string folded) return null;
+            value = folded;
+        }
 
         // A verb containing the separator cannot be encoded faithfully; admit ignorance instead.
         return value.IndexOf(Separator) >= 0 ? null : value;

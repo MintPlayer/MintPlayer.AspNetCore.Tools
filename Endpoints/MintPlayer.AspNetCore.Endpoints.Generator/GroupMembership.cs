@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using MintPlayer.SourceGenerators.Tools;
 
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
@@ -55,11 +56,13 @@ internal static class GroupMembership
         // nearest declaration.
         foreach (var type in symbol.GetAllBaseTypes())
         {
+            if (HasNoAttributeSyntax(type)) continue;
+
             foreach (var attribute in type.GetAttributes())
             {
                 if (attribute.AttributeClass is not { IsGenericType: true } attributeClass) continue;
                 if (attributeClass.OriginalDefinition.MetadataName != AttributeMetadataName) continue;
-                if (attributeClass.ContainingNamespace?.ToDisplayString() != endpointsNamespace) continue;
+                if (!SymbolNames.IsNamespace(attributeClass.ContainingNamespace, endpointsNamespace)) continue;
                 if (attributeClass.TypeArguments.Length != 1) continue;
 
                 return attributeClass.TypeArguments[0] as INamedTypeSymbol;
@@ -67,5 +70,23 @@ internal static class GroupMembership
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// True when <paramref name="type"/> is declared in source and none of its declarations has an
+    /// attribute list, so it has no attributes and <c>GetAttributes()</c> need not bind anything (PRD
+    /// addendum 2, D19). False for a metadata type, which has no declarations to look at.
+    /// </summary>
+    internal static bool HasNoAttributeSyntax(INamedTypeSymbol type)
+    {
+        var references = type.OriginalDefinition.DeclaringSyntaxReferences;
+        if (references.IsEmpty) return false;
+
+        foreach (var reference in references)
+        {
+            if (reference.GetSyntax() is not TypeDeclarationSyntax { AttributeLists.Count: 0 }) return false;
+        }
+
+        return true;
     }
 }

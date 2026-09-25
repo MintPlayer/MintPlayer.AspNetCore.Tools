@@ -33,7 +33,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IConditi
 
     private IEnumerable<Diagnostic> Collect(Compilation? compilation)
     {
-        var plan = EndpointMappingPlan.From(model);
+        var plan = model.GetPlan();
 
         // Open endpoints this compilation closes itself are mapped here, so MPEP025 would be wrong.
         var closedHere = new HashSet<string>(

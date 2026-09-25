@@ -1,9 +1,11 @@
 using System.Collections.Immutable;
+using MintPlayer.ValueComparerGenerator.Attributes;
 
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
 
 /// <summary>One parameter of a client method: its wire name, emitted type and optionality.</summary>
-internal sealed class ClientParameter : IEquatable<ClientParameter>
+[GenerateEquality]
+internal sealed partial class ClientParameter
 {
     public ClientParameter(string key, string typeFqn, bool isOptional)
     {
@@ -20,16 +22,11 @@ internal sealed class ClientParameter : IEquatable<ClientParameter>
 
     /// <summary>Emitted as <c>T?</c>; a null argument leaves the value out.</summary>
     public bool IsOptional { get; }
-
-    public bool Equals(ClientParameter? other) =>
-        other is not null && Key == other.Key && TypeFqn == other.TypeFqn && IsOptional == other.IsOptional;
-
-    public override bool Equals(object? obj) => Equals(obj as ClientParameter);
-    public override int GetHashCode() => Key.GetHashCode();
 }
 
 /// <summary>One endpoint contract, resolved against the client compilation and reduced to strings.</summary>
-internal sealed class ClientEndpoint : IEquatable<ClientEndpoint>
+[GenerateEquality]
+internal sealed partial class ClientEndpoint
 {
     public ClientEndpoint(string name, string template, ImmutableArray<string> methods,
         string? requestTypeFqn, string? responseTypeFqn, bool responseIsNullableValueType,
@@ -58,24 +55,11 @@ internal sealed class ClientEndpoint : IEquatable<ClientEndpoint>
 
     public ImmutableArray<ClientParameter> RouteParameters { get; }
     public ImmutableArray<ClientParameter> QueryParameters { get; }
-
-    public bool Equals(ClientEndpoint? other) =>
-        other is not null &&
-        Name == other.Name &&
-        Template == other.Template &&
-        RequestTypeFqn == other.RequestTypeFqn &&
-        ResponseTypeFqn == other.ResponseTypeFqn &&
-        ResponseIsNullableValueType == other.ResponseIsNullableValueType &&
-        SequenceComparer<string>.Instance.Equals(Methods, other.Methods) &&
-        SequenceComparer<ClientParameter>.Instance.Equals(RouteParameters, other.RouteParameters) &&
-        SequenceComparer<ClientParameter>.Instance.Equals(QueryParameters, other.QueryParameters);
-
-    public override bool Equals(object? obj) => Equals(obj as ClientEndpoint);
-    public override int GetHashCode() => Name.GetHashCode();
 }
 
 /// <summary>A diagnostic the client generator reports, as a value: descriptor id and message arguments.</summary>
-internal sealed class ClientProblem : IEquatable<ClientProblem>
+[GenerateEquality]
+internal sealed partial class ClientProblem
 {
     public ClientProblem(string id, ImmutableArray<string> arguments)
     {
@@ -85,16 +69,11 @@ internal sealed class ClientProblem : IEquatable<ClientProblem>
 
     public string Id { get; }
     public ImmutableArray<string> Arguments { get; }
-
-    public bool Equals(ClientProblem? other) =>
-        other is not null && Id == other.Id && SequenceComparer<string>.Instance.Equals(Arguments, other.Arguments);
-
-    public override bool Equals(object? obj) => Equals(obj as ClientProblem);
-    public override int GetHashCode() => Id.GetHashCode();
 }
 
 /// <summary>Everything read from one referenced server assembly.</summary>
-internal sealed class ClientServer : IEquatable<ClientServer>
+[GenerateEquality]
+internal sealed partial class ClientServer
 {
     public ClientServer(string assemblyName, ImmutableArray<ClientEndpoint> endpoints, ImmutableArray<ClientProblem> problems, bool isCacheable)
     {
@@ -113,22 +92,16 @@ internal sealed class ClientServer : IEquatable<ClientServer>
     /// the client references, which can change while the server's metadata reference stays the same,
     /// so it is never memoised: adding the missing reference must take effect.
     /// </summary>
+    [EqualityIgnore]
     public bool IsCacheable { get; }
 
+    [EqualityIgnore]
     public bool IsEmpty => Endpoints.IsEmpty && Problems.IsEmpty;
-
-    public bool Equals(ClientServer? other) =>
-        other is not null &&
-        AssemblyName == other.AssemblyName &&
-        SequenceComparer<ClientEndpoint>.Instance.Equals(Endpoints, other.Endpoints) &&
-        SequenceComparer<ClientProblem>.Instance.Equals(Problems, other.Problems);
-
-    public override bool Equals(object? obj) => Equals(obj as ClientServer);
-    public override int GetHashCode() => AssemblyName.GetHashCode();
 }
 
 /// <summary>The whole input of the client source output, value-equal so the output caches.</summary>
-internal sealed class ClientModel : IEquatable<ClientModel>
+[GenerateEquality]
+internal sealed partial class ClientModel
 {
     public static readonly ClientModel Disabled = new(false, null, false, ImmutableArray<ClientServer>.Empty);
 
@@ -154,14 +127,4 @@ internal sealed class ClientModel : IEquatable<ClientModel>
 
     /// <summary>The referenced server assemblies that carry contracts, in ordinal name order.</summary>
     public ImmutableArray<ClientServer> Servers { get; }
-
-    public bool Equals(ClientModel? other) =>
-        other is not null &&
-        Enabled == other.Enabled &&
-        MissingPrerequisite == other.MissingPrerequisite &&
-        EmitGlobalUsing == other.EmitGlobalUsing &&
-        SequenceComparer<ClientServer>.Instance.Equals(Servers, other.Servers);
-
-    public override bool Equals(object? obj) => Equals(obj as ClientModel);
-    public override int GetHashCode() => Servers.Length;
 }

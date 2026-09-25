@@ -37,7 +37,7 @@
 		<!-- The generator references this with PrivateAssets="all", so it does NOT flow
 		     transitively. Without an explicit reference the driver throws FileNotFoundException
 		     the moment it touches the IncrementalGenerator base class. -->
-		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="11.0.0" GeneratePathProperty="true" />
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="12.0.1" GeneratePathProperty="true" />
 
 		<!-- The code-fix harness (M11). NOT the .XUnit flavour: its newest version, 1.1.2, was built
 		     against xunit 2.4.x and every assertion dies with MissingMethodException on this repo's

@@ -18,16 +18,23 @@ dotnet add package MintPlayer.AspNetCore.Endpoints
 ### Requirements
 
 The generator needs a compiler with **Roslyn 5.9 or newer**: the **.NET SDK 10.0.400+ or 11.x**, or
-**Visual Studio 2026** (with Roslyn 5.9+). Older Roslyn versions are not supported. On an older SDK
-(10.0.1xx ships Roslyn 5.0) the compiler refuses to load the generator and the build fails on the
-call it should have generated:
+**Visual Studio 2026**. Older compilers are not supported. The generator ships in the package's
+`analyzers/dotnet/roslyn5.9/cs` folder, so an older compiler (the .NET SDK 10.0.1xx ships Roslyn 5.0)
+skips it without a word, and the build fails on the code it should have generated. The first error is
+the missing mapping method:
 
 ```
-CSC : warning CS9057: Analyzer assembly '…\MintPlayer.AspNetCore.Endpoints.Generator.dll' cannot be used because it references version '5.9.0.0' of the compiler, which is newer than the currently running version '5.0.0.0'.
-Program.cs(4,5): error CS1061: 'WebApplication' does not contain a definition for 'MapConsumerEndpoints' …
+Program.cs(5,5): error CS1061: 'WebApplication' does not contain a definition for 'MapConsumerEndpoints' and no accessible extension method 'MapConsumerEndpoints' accepting a first argument of type 'WebApplication' could be found (are you missing a using directive or an assembly reference?)
 ```
 
-If you see that pair, update the SDK (or pin a newer one in `global.json`); nothing in your code is wrong.
+A project with typed endpoints fails one step earlier, on the base class the generator did not add:
+
+```
+Program.cs(12,37): error CS0535: 'GetThing' does not implement interface member 'IEndpoint.HandleAsync(HttpContext)'
+Program.cs(18,39): error CS0115: 'GetThing.HandleAsync(CancellationToken)': no suitable method found to override
+```
+
+If you see these, update the SDK (or pin a newer one in `global.json`); nothing in your code is wrong.
 
 ## Quick start
 
@@ -710,7 +717,8 @@ types. A client project — Blazor WebAssembly, a console tool, another service 
 </ItemGroup>
 ```
 
-That generates `internal sealed partial class {LastNameSegment}Client` (`MyShop.Api` → `ApiClient`) with
+That generates `internal sealed partial class {LastNameSegment}Client` (`MyShop.Api` → `ApiClient`), in
+`EndpointClients.g.cs` together with the client of every other referenced server, with
 one `{Name}Async` method per endpoint (`{Name}{Verb}Async` for a multi-verb one): route values, then the
 body, then optional query values, then a `CancellationToken`:
 
@@ -820,4 +828,7 @@ binders, the `Map…Endpoints()` method, the descriptors), `EndpointRoutes.g.cs`
 An assembly with open-generic endpoints also carries `[assembly: OpenEndpoint(…)]` and
 `[assembly: OpenEndpointGroup(…)]` records at the top of `EndpointMapping.g.cs`, which is what an
 application reads to close them.
+A typed client project gets two files, under the same rules: `EndpointClients.g.cs` (one class per
+referenced server) and `EndpointClientUrl.g.cs` (the URL builder). The file names never depend on the
+endpoints, the groups or the servers, so they stay short and stable however the project grows.
 Output is ordered by fully qualified name, so it is identical across builds.

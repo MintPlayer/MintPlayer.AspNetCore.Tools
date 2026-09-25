@@ -10,9 +10,11 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is what every hand-written <see cref="IEquatable{T}"/> in <c>Models.cs</c> exists for, and it
-/// was entirely unverified — the models were correct and bought nothing, because the source output
-/// sat downstream of something that compared unequal on every compilation.
+/// This is what the models' <see cref="IEquatable{T}"/> exists for, and it was entirely unverified —
+/// the models were correct and bought nothing, because the source output sat downstream of something
+/// that compared unequal on every compilation. (The equality was hand-written then; it is generated
+/// by <c>[GenerateEquality]</c> since MintPlayer.ValueComparerGenerator 12, PRD addendum D10, and
+/// these tests are what proved that migration: none changed its expectations.)
 /// </para>
 /// <para>
 /// The cause was <c>GeneratorExtensions.ProduceCode</c> in MintPlayer.SourceGenerators.Tools: it
@@ -33,7 +35,9 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
 /// <c>ProduceCode</c> again (one output per producer, no compilation in the combine) and the
 /// reporter is an <c>IConditionalDiagnosticReporter</c>. For a project with nothing to report that
 /// makes the raw output steps assertable too — see
-/// <see cref="EditingAHandlerBody_InADiagnosticFreeProject_RunsNoOutputStep"/>.
+/// <see cref="EditingAHandlerBody_InADiagnosticFreeProject_RunsNoOutputStep"/>. Tools 12 keeps both.
+/// Since PRD addendum 2, D20, the producers read a location-free projection of the model, so a line
+/// shift runs no output step either (<see cref="InsertingALineAboveTheEndpoints_RunsNoOutputStep"/>).
 /// </para>
 /// </remarks>
 public class EndpointGeneratorIncrementalTests
@@ -223,6 +227,115 @@ public class EndpointGeneratorIncrementalTests
     }
 
     /// <summary>
+    /// A line inserted above the endpoints moves every source location but changes no declaration, so
+    /// no file is regenerated: all four output steps and their inputs are cached (PRD addendum 2, D20).
+    /// </summary>
+    /// <remarks>
+    /// The per-endpoint models legitimately change, because they carry the <c>LocationKey</c>s the
+    /// diagnostics need. The producers are fed a projection without them, so the change stops there.
+    /// The fixture has a group, a bound property and an endpoint, the three models that carry a
+    /// location, and nothing to report, so no diagnostics step runs either.
+    /// </remarks>
+    [Fact]
+    public void InsertingALineAboveTheEndpoints_RunsNoOutputStep()
+    {
+        const string before = """
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using MintPlayer.AspNetCore.Endpoints;
+
+            namespace Fixtures;
+
+            public class ApiGroup : IEndpointGroup
+            {
+                public static string Prefix => "/api";
+            }
+
+            [MemberOf<ApiGroup>]
+            public partial class GetThing : IGetEndpoint
+            {
+                public static string Path => "/things/{id}";
+                [RouteParam] public int Id { get; set; }
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok(Id));
+            }
+            """;
+        var after = before.Replace("namespace Fixtures;", "namespace Fixtures;\n\n// A comment that shifts every line below it.\n");
+
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [before]);
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+        Assert.Empty(driver.GetRunResult().Diagnostics);
+
+        var edited = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Last(),
+            EndpointGeneratorHarness.CreateCompilation("Fixtures", [after]).SyntaxTrees.Last());
+        var result = driver.RunGenerators(edited).GetRunResult();
+
+        // The located per-endpoint step did change; otherwise this test would not be testing the projection.
+        Assert.Contains(IncrementalStepRunReason.Modified, ReasonsFor(result, "Endpoints"));
+
+        var outputSteps = result.Results
+            .SelectMany(generatorResult => generatorResult.TrackedOutputSteps)
+            .SelectMany(step => step.Value)
+            .ToArray();
+        var reasons = outputSteps
+            .SelectMany(step => step.Outputs.Select(output => output.Reason)
+                .Concat(step.Inputs.Select(input => input.Source.Outputs[input.OutputIndex].Reason)))
+            .ToArray();
+
+        Assert.Equal(4, outputSteps.Length);
+        Assert.All(reasons, reason =>
+            Assert.True(
+                reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                $"expected every output step and its input to be cached after a line shift, was {reason}"));
+    }
+
+    /// <summary>
+    /// The step that lists the compilation's open endpoints builds a new collection on every run, so it
+    /// must compare by value: a handler-body edit leaves it, and the closing step after it, unchanged.
+    /// </summary>
+    /// <remarks>
+    /// An <c>ImmutableArray</c> compares by reference, and would make both steps re-run on every
+    /// keystroke in a project with an open-generic endpoint. The step returns an
+    /// <c>EquatableArray</c> (PRD D12).
+    /// </remarks>
+    [Fact]
+    public void EditingAHandlerBody_WithAnOpenEndpoint_LeavesTheOpenEndpointNamesUnchanged()
+    {
+        const string before = """
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using MintPlayer.AspNetCore.Endpoints;
+
+            namespace Fixtures;
+
+            public partial class Echo<TPayload> : IGetEndpoint
+            {
+                public static string Path => "/echo";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok("before"));
+            }
+            """;
+
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [before]);
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+
+        var edited = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Last(),
+            EndpointGeneratorHarness.CreateCompilation("Fixtures", [before.Replace("\"before\"", "\"after!\"")]).SyntaxTrees.Last());
+        var result = driver.RunGenerators(edited).GetRunResult();
+
+        foreach (var step in new[] { "OpenEndpointNames", "ClosedEndpoints" })
+        {
+            var reasons = ReasonsFor(result, step);
+
+            Assert.NotEmpty(reasons);
+            Assert.All(reasons, reason =>
+                Assert.True(
+                    reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                    $"expected step '{step}' to be cached, was {reason}"));
+        }
+    }
+
+    /// <summary>
     /// A handler-body edit in a compilation whose endpoints carry <c>[RouteParam]</c>/<c>[QueryParam]</c>
     /// properties still hits the cache — at the per-endpoint step as well as the model step.
     /// </summary>
@@ -231,7 +344,7 @@ public class EndpointGeneratorIncrementalTests
     /// Since M4, <c>EndpointInfo.Equals</c> also compares an <c>ImmutableArray&lt;BoundProperty&gt;</c>.
     /// <c>ImmutableArray</c>'s own equality is by backing-array reference, and every transform builds
     /// a fresh array, so comparing it that way would make every endpoint with a bound property
-    /// report <c>Modified</c> on every keystroke. The fixture above has no bound properties and
+    /// report <c>Modified</c> on every keystroke. (The generated equality compares it element-wise.) The fixture above has no bound properties and
     /// cannot see that; this one uses the corpus, which has a route-bound GET, a route-bound PUT and
     /// PATCH, a raw route-bound DELETE and a raw list endpoint with a defaulted query parameter.
     /// </para>
@@ -421,8 +534,10 @@ public class EndpointGeneratorIncrementalTests
     [InlineData("Endpoints")]
     [InlineData("Groups")]
     [InlineData("AssemblyInfo")]
+    [InlineData("OpenEndpointNames")]
     [InlineData("ClosedEndpoints")]
     [InlineData(TrackedModelStep)]
+    [InlineData("ProducerModel")]
     public void EveryProvider_IsTracked(string stepName)
     {
         var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [FixtureSources.Corpus]);

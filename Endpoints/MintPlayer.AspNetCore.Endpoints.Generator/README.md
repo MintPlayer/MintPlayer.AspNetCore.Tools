@@ -19,14 +19,14 @@ as an analyzer-only package with no `FrameworkReference`.
 ```
 
 `EndpointsServerReference` (from this package's `build` targets) builds the server and references its
-assembly metadata-only, and the generator writes an `internal sealed partial class …Client` from the
-endpoint contracts in it. See "Typed client in another project" in the main package's README for the
-full rules and the MPEP021–MPEP023 diagnostics.
+assembly metadata-only, and the generator writes an `internal sealed partial class …Client` per server
+into `EndpointClients.g.cs`, from the endpoint contracts in it. See "Typed client in another project" in
+the main package's README for the full rules and the MPEP021–MPEP023 diagnostics.
 
 ## Requirements
 
-A compiler with **Roslyn 5.9 or newer**: the **.NET SDK 10.0.400+ or 11.x**, or **Visual Studio 2026**
-(with Roslyn 5.9+). Older Roslyn versions are not supported. An older compiler rejects the generator
-with `CS9057` ("… references version '5.9.0.0' of the compiler, which is newer than the currently
-running version …"), no client is generated, and the build then fails wherever the generated code is
-used.
+A compiler with **Roslyn 5.9 or newer**: the **.NET SDK 10.0.400+ or 11.x**, or **Visual Studio 2026**.
+Older compilers are not supported. The generator ships in `analyzers/dotnet/roslyn5.9/cs`, so an older
+compiler (the .NET SDK 10.0.1xx ships Roslyn 5.0) skips it without a word: no client is generated, and
+the build fails wherever the generated code is used (in a server, first with `CS1061` for the missing
+`Map…Endpoints()`). Update the SDK (or pin a newer one in `global.json`); nothing in your code is wrong.

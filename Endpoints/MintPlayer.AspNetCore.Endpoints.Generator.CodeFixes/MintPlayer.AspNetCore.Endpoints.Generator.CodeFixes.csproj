@@ -32,7 +32,8 @@
 	<ItemGroup>
 		<!--
 		Pinned to the SAME Roslyn the generator compiles against: 5.9.0, which
-		MintPlayer.SourceGenerators.Tools 11.0.0 injects into the generator project. A code fix built
+		MintPlayer.SourceGenerators.Tools 12.0.1 injects into the generator project (as 11.0.0 did before
+		it; every 12.0.x package targets Microsoft.CodeAnalysis 5.9.0). A code fix built
 		against a HIGHER Roslyn than the IDE host loads fails to load there, and the consumer gets no
 		lightbulb and nothing to act on.
 

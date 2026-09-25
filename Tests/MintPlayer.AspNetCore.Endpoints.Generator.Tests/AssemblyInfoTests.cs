@@ -173,11 +173,19 @@ public class AssemblyInfoTests
         Assert.NotEqual(new AssemblyInfo("MyApp.Api", null, true), new AssemblyInfo("MyApp.Api", null, false));
     }
 
+    /// <summary>
+    /// Equal models have equal hash codes, and a changed member makes them unequal (PRD D17). The
+    /// hash is the one <c>[GenerateEquality]</c> generates; nothing hashes this model into a collection,
+    /// so no particular hash is pinned.
+    /// </summary>
     [Fact]
-    public void GetHashCode_IsDerivedFromTheAssemblyNameOnly()
+    public void GetHashCode_IsEqualForEqualModels()
     {
         Assert.Equal(
-            new AssemblyInfo("MyApp.Api", null).GetHashCode(),
-            new AssemblyInfo("MyApp.Api", "MapCustomEndpoints").GetHashCode());
+            new AssemblyInfo("MyApp.Api", "MapCustomEndpoints", true).GetHashCode(),
+            new AssemblyInfo("MyApp.Api", "MapCustomEndpoints", true).GetHashCode());
+        Assert.NotEqual(
+            new AssemblyInfo("MyApp.Api", "MapCustomEndpoints", true),
+            new AssemblyInfo("MyApp.Api", "MapCustomEndpoints", false));
     }
 }

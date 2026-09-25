@@ -1088,6 +1088,12 @@ without extending `Equals` silently kills incremental caching, because `Immutabl
 equality is by reference. `EndpointGeneratorIncrementalTests` will catch it if the tests
 are kept honest.
 
+> **Superseded 2026-09-25 (PR #35, PRD-EndpointsOpenGenerics addendum D10):** the models are no longer
+> hand-written. Every one is a `[GenerateEquality]` partial class (MintPlayer.ValueComparerGenerator 12.0.1),
+> which generates `IEquatable<T>` from the properties and compares `ImmutableArray` members element-wise,
+> so adding a collection no longer needs a matching `Equals` edit. The rule's intent stands: the incremental
+> tests still assert the cache hits.
+
 **R6.8 — Member discovery reads symbols, not the triggering syntax node.** A partial split
 across files, or an attribute on two partial parts, makes `ForAttributeWithMetadataName`
 fire twice for the same symbol with `ctx.Attributes` scoped to each node. De-duplicate by

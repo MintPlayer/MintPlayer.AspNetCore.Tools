@@ -1,8 +1,19 @@
 using System.Collections.Immutable;
 using System.Text;
 using MintPlayer.SourceGenerators.Tools;
+using MintPlayer.ValueComparerGenerator.Attributes;
 
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
+
+// Model equality. Roslyn compares every pipeline output with EqualityComparer<T>.Default, so a model is
+// only value-equal at every step if the type itself implements IEquatable<T>. Every model here (and in
+// BoundProperty.cs and ClientModels.cs) is a [GenerateEquality] partial class: MintPlayer.ValueComparerGenerator
+// writes IEquatable<T>, Equals and GetHashCode for it from its properties (PRD addendum D10). Collections
+// compare element-wise (default only equal to default), and LocationKey and PathSpec compare through
+// their own IEquatable<T> (MintPlayer.SourceGenerators.Tools 12). [EqualityIgnore] marks the properties
+// equality must not see: ClientServer.IsCacheable by meaning, and the computed properties because they
+// derive from compared members and would only add work to every comparison (D11). Nothing may
+// hand-write Equals or GetHashCode here; doing so suppresses the generated members (MINT002).
 
 /// <summary>How much the endpoint declares, which decides its generated base class.</summary>
 /// <remarks>
@@ -14,7 +25,8 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator;
 internal enum EndpointLevel { Raw, Typed, TypedWithResponse, ResponseOnly }
 internal enum HttpMethodKind { Custom, Get, Post, Put, Delete, Patch }
 
-internal sealed class EndpointInfo : IEquatable<EndpointInfo>
+[GenerateEquality]
+internal sealed partial class EndpointInfo
 {
     public EndpointInfo(string fqn, string ns, string className, bool isPartial, bool hasExistingBaseClass,
         EndpointLevel level, HttpMethodKind httpMethod,
@@ -191,7 +203,40 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public bool HasIgnoredNewMethods { get; }
 
     /// <summary>The name this endpoint is recorded under in the descriptor list.</summary>
+    [EqualityIgnore]
     public string EffectiveDescriptorName => DescriptorName ?? ClassName;
+
+    /// <summary>
+    /// This endpoint with every <see cref="LocationKey"/> removed (its own, its bound properties' and
+    /// its referenced groups'), for the producers (PRD addendum 2, D20). Returns this instance when it
+    /// carries none.
+    /// </summary>
+    public EndpointInfo WithoutLocations()
+    {
+        if (Location is null &&
+            BoundProperties.All(property => property.Location is null) &&
+            ReferencedGroups.All(group => group.Location is null))
+            return this;
+
+        return new EndpointInfo(
+            FullyQualifiedName, Namespace, ClassName, IsPartial, HasExistingBaseClass,
+            Level, HttpMethod,
+            RequestTypeFqn, ResponseTypeFqn,
+            GroupTypeFqn,
+            BaseChainReachesEndpointBase,
+            DescriptorName, location: null,
+            PathSpec, Route,
+            BoundProperties.Select(property => property.WithoutLocation()).ToImmutableArray(),
+            KnownMethods,
+            ValidationGap,
+            InaccessibleReason,
+            IsInFileLocalType,
+            Open,
+            Closed,
+            ReferencedGroups.Select(group => group.WithoutLocation()).ToImmutableArray(),
+            HasIgnoredNewPath,
+            HasIgnoredNewMethods);
+    }
 
     public string? GetBaseClassName()
     {
@@ -208,43 +253,11 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         };
         return $"global::MintPlayer.AspNetCore.Endpoints.{name}<{RequestTypeFqn}>";
     }
-
-    public bool Equals(EndpointInfo? other) =>
-        other is not null &&
-        FullyQualifiedName == other.FullyQualifiedName &&
-        Namespace == other.Namespace &&
-        ClassName == other.ClassName &&
-        IsPartial == other.IsPartial &&
-        HasExistingBaseClass == other.HasExistingBaseClass &&
-        Level == other.Level &&
-        HttpMethod == other.HttpMethod &&
-        RequestTypeFqn == other.RequestTypeFqn &&
-        ResponseTypeFqn == other.ResponseTypeFqn &&
-        GroupTypeFqn == other.GroupTypeFqn &&
-        BaseChainReachesEndpointBase == other.BaseChainReachesEndpointBase &&
-        DescriptorName == other.DescriptorName &&
-        LocationKeys.AreEqual(Location, other.Location) &&
-        PathSpecs.AreEqual(PathSpec, other.PathSpec) &&
-        Route == other.Route &&
-        KnownMethods == other.KnownMethods &&
-        ValidationGap == other.ValidationGap &&
-        InaccessibleReason == other.InaccessibleReason &&
-        IsInFileLocalType == other.IsInFileLocalType &&
-        HasIgnoredNewPath == other.HasIgnoredNewPath &&
-        HasIgnoredNewMethods == other.HasIgnoredNewMethods &&
-        Equals(Open, other.Open) &&
-        Equals(Closed, other.Closed) &&
-        SequenceComparer<GroupInfo>.Instance.Equals(ReferencedGroups, other.ReferencedGroups) &&
-        // ImmutableArray's own equality compares the backing array by reference. Using it here
-        // would make every run look like a change and kill incremental caching, silently.
-        SequenceComparer<BoundProperty>.Instance.Equals(BoundProperties, other.BoundProperties);
-
-    public override bool Equals(object? obj) => Equals(obj as EndpointInfo);
-    public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
 }
 
 /// <summary>What the declaring assembly knows about an open-generic endpoint (issue #34, PRD D6).</summary>
-internal sealed class OpenGenericInfo : IEquatable<OpenGenericInfo>
+[GenerateEquality]
+internal sealed partial class OpenGenericInfo
 {
     public OpenGenericInfo(string displayName, string metadataName, string unboundTypeOf, string? ownTypeParameters)
     {
@@ -265,20 +278,11 @@ internal sealed class OpenGenericInfo : IEquatable<OpenGenericInfo>
 
     /// <summary>The class's own type parameter list, <c>&lt;T&gt;</c>, repeated on its generated partial (PRD R3); null when only a container is generic.</summary>
     public string? OwnTypeParameters { get; }
-
-    public bool Equals(OpenGenericInfo? other) =>
-        other is not null &&
-        DisplayName == other.DisplayName &&
-        MetadataName == other.MetadataName &&
-        UnboundTypeOf == other.UnboundTypeOf &&
-        OwnTypeParameters == other.OwnTypeParameters;
-
-    public override bool Equals(object? obj) => Equals(obj as OpenGenericInfo);
-    public override int GetHashCode() => MetadataName.GetHashCode();
 }
 
 /// <summary>Where a closed construction came from (issue #34, PRD D4).</summary>
-internal sealed class ClosedGenericInfo : IEquatable<ClosedGenericInfo>
+[GenerateEquality]
+internal sealed partial class ClosedGenericInfo
 {
     public ClosedGenericInfo(string openFullyQualifiedName, bool fromReference)
     {
@@ -291,18 +295,11 @@ internal sealed class ClosedGenericInfo : IEquatable<ClosedGenericInfo>
 
     /// <summary>True when the open endpoint is declared in a referenced assembly rather than in this compilation.</summary>
     public bool FromReference { get; }
-
-    public bool Equals(ClosedGenericInfo? other) =>
-        other is not null &&
-        OpenFullyQualifiedName == other.OpenFullyQualifiedName &&
-        FromReference == other.FromReference;
-
-    public override bool Equals(object? obj) => Equals(obj as ClosedGenericInfo);
-    public override int GetHashCode() => OpenFullyQualifiedName.GetHashCode();
 }
 
 /// <summary>A diagnostic the closing step found, as value-equal strings (see <see cref="ClosingModel"/>).</summary>
-internal sealed class ClosingProblem : IEquatable<ClosingProblem>
+[GenerateEquality]
+internal sealed partial class ClosingProblem
 {
     public ClosingProblem(string id, ImmutableArray<string> arguments, LocationKey? location)
     {
@@ -314,15 +311,6 @@ internal sealed class ClosingProblem : IEquatable<ClosingProblem>
     public string Id { get; }
     public ImmutableArray<string> Arguments { get; }
     public LocationKey? Location { get; }
-
-    public bool Equals(ClosingProblem? other) =>
-        other is not null &&
-        Id == other.Id &&
-        SequenceComparer<string>.Instance.Equals(Arguments, other.Arguments) &&
-        LocationKeys.AreEqual(Location, other.Location);
-
-    public override bool Equals(object? obj) => Equals(obj as ClosingProblem);
-    public override int GetHashCode() => Id.GetHashCode();
 }
 
 /// <summary>
@@ -331,7 +319,8 @@ internal sealed class ClosingProblem : IEquatable<ClosingProblem>
 /// problems (PRD D2, D6). Value-equal, because it is computed from the <c>Compilation</c> on every run
 /// and only equality keeps everything downstream cached.
 /// </summary>
-internal sealed class ClosingModel : IEquatable<ClosingModel>
+[GenerateEquality]
+internal sealed partial class ClosingModel
 {
     public static readonly ClosingModel Empty = new(
         ImmutableArray<EndpointInfo>.Empty, ImmutableArray<GroupInfo>.Empty, ImmutableArray<ClosingProblem>.Empty);
@@ -346,18 +335,27 @@ internal sealed class ClosingModel : IEquatable<ClosingModel>
     public ImmutableArray<EndpointInfo> Endpoints { get; }
     public ImmutableArray<GroupInfo> Groups { get; }
     public ImmutableArray<ClosingProblem> Problems { get; }
-
-    public bool Equals(ClosingModel? other) =>
-        other is not null &&
-        SequenceComparer<EndpointInfo>.Instance.Equals(Endpoints, other.Endpoints) &&
-        SequenceComparer<GroupInfo>.Instance.Equals(Groups, other.Groups) &&
-        SequenceComparer<ClosingProblem>.Instance.Equals(Problems, other.Problems);
-
-    public override bool Equals(object? obj) => Equals(obj as ClosingModel);
-    public override int GetHashCode() => unchecked((Endpoints.Length * 31) ^ Groups.Length ^ (Problems.Length * 7));
 }
 
-internal sealed class GroupInfo : IEquatable<GroupInfo>
+/// <summary>
+/// What one discovery transform found on a class: an endpoint, a group, or (rarely) both. One
+/// transform binds each candidate class once for both questions (PRD addendum 2, D19/D22).
+/// </summary>
+[GenerateEquality]
+internal sealed partial class DiscoveredType
+{
+    public DiscoveredType(EndpointInfo? endpoint, GroupInfo? group)
+    {
+        Endpoint = endpoint;
+        Group = group;
+    }
+
+    public EndpointInfo? Endpoint { get; }
+    public GroupInfo? Group { get; }
+}
+
+[GenerateEquality]
+internal sealed partial class GroupInfo
 {
     public GroupInfo(string fullyQualifiedName, string? parentGroupFqn,
         LocationKey? location = null, string? prefix = null, string? inaccessibleReason = null,
@@ -401,21 +399,14 @@ internal sealed class GroupInfo : IEquatable<GroupInfo>
     /// </summary>
     public string? UnboundTypeOf { get; }
 
-    public bool Equals(GroupInfo? other) =>
-        other is not null &&
-        FullyQualifiedName == other.FullyQualifiedName &&
-        ParentGroupFqn == other.ParentGroupFqn &&
-        LocationKeys.AreEqual(Location, other.Location) &&
-        Prefix == other.Prefix &&
-        InaccessibleReason == other.InaccessibleReason &&
-        IsOpen == other.IsOpen &&
-        UnboundTypeOf == other.UnboundTypeOf;
-
-    public override bool Equals(object? obj) => Equals(obj as GroupInfo);
-    public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
+    /// <summary>This group without its location, for the producers (PRD addendum 2, D20).</summary>
+    public GroupInfo WithoutLocation() => Location is null
+        ? this
+        : new GroupInfo(FullyQualifiedName, ParentGroupFqn, location: null, Prefix, InaccessibleReason, IsOpen, UnboundTypeOf);
 }
 
-internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
+[GenerateEquality]
+internal sealed partial class AssemblyInfo
 {
     public AssemblyInfo(string assemblyName, string? methodNameOverride, bool hasOpenApiTransformers = false, bool canMapEndpoints = true, bool canRecordOpenEndpoints = true)
     {
@@ -491,12 +482,14 @@ internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
     /// <summary>
     /// True when <see cref="GetMethodName"/> had to change or discard what it was given.
     /// </summary>
+    [EqualityIgnore]
     public bool MethodNameWasSanitised =>
         MethodNameOverride is not null
             ? GetMethodName() != MethodNameOverride
             : GetMethodName() != NaiveAssemblyMethodName();
 
     /// <summary>The unsanitised name the original rule would have produced, for MPEP006's message.</summary>
+    [EqualityIgnore]
     public string RequestedMethodName => MethodNameOverride ?? NaiveAssemblyMethodName();
 
     public string GetSafeClassName()
@@ -540,17 +533,6 @@ internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
 
         return builder.ToString();
     }
-
-    public bool Equals(AssemblyInfo? other) =>
-        other is not null &&
-        AssemblyName == other.AssemblyName &&
-        MethodNameOverride == other.MethodNameOverride &&
-        HasOpenApiTransformers == other.HasOpenApiTransformers &&
-        CanMapEndpoints == other.CanMapEndpoints &&
-        CanRecordOpenEndpoints == other.CanRecordOpenEndpoints;
-
-    public override bool Equals(object? obj) => Equals(obj as AssemblyInfo);
-    public override int GetHashCode() => AssemblyName?.GetHashCode() ?? 0;
 }
 
 /// <summary>
@@ -561,7 +543,8 @@ internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
 /// incremental cache can actually hit: a node whose value is a freshly allocated object with no
 /// value equality compares unequal on every compilation, which re-runs the whole generator.
 /// </remarks>
-internal sealed class EndpointModel : IEquatable<EndpointModel>
+[GenerateEquality]
+internal sealed partial class EndpointModel
 {
     public EndpointModel(ImmutableArray<EndpointInfo> endpoints, ImmutableArray<GroupInfo> groups, AssemblyInfo assembly, ClosingModel? closing = null)
     {
@@ -578,101 +561,37 @@ internal sealed class EndpointModel : IEquatable<EndpointModel>
     /// <summary>The open endpoints this compilation closes, and what went wrong closing them.</summary>
     public ClosingModel Closing { get; }
 
-    public bool Equals(EndpointModel? other) =>
-        other is not null &&
-        Assembly.Equals(other.Assembly) &&
-        Closing.Equals(other.Closing) &&
-        SequenceComparer<EndpointInfo>.Instance.Equals(Endpoints, other.Endpoints) &&
-        SequenceComparer<GroupInfo>.Instance.Equals(Groups, other.Groups);
+    private EndpointMappingPlan? plan;
 
-    public override bool Equals(object? obj) => Equals(obj as EndpointModel);
-
-    public override int GetHashCode() =>
-        unchecked((Assembly.GetHashCode() * 397) ^ (Endpoints.Length * 31) ^ Groups.Length);
-}
-
-/// <summary>
-/// Element-wise equality for a collected provider's <see cref="ImmutableArray{T}"/>.
-/// </summary>
-/// <remarks>
-/// <see cref="ImmutableArray{T}"/>'s own equality compares the underlying array by reference, so a
-/// re-collected batch of equal elements still compares unequal. Attaching this with
-/// <c>WithComparer</c> makes Roslyn recycle the previous instance, which is what lets every node
-/// downstream of it report Cached.
-/// </remarks>
-internal sealed class SequenceComparer<T> : IEqualityComparer<ImmutableArray<T>>
-{
-    public static readonly SequenceComparer<T> Instance = new();
-
-    public bool Equals(ImmutableArray<T> x, ImmutableArray<T> y)
+    /// <summary>
+    /// The mapping plan of this model, built on first use and then shared by every consumer of this
+    /// instance (PRD addendum 2, D21). A method rather than a property, so the generated equality
+    /// leaves it out: it is derived entirely from the compared members.
+    /// </summary>
+    public EndpointMappingPlan GetPlan()
     {
-        if (x.IsDefault || y.IsDefault) return x.IsDefault && y.IsDefault;
-        if (x.Length != y.Length) return false;
+        var existing = Volatile.Read(ref plan);
+        if (existing is not null) return existing;
 
-        for (var i = 0; i < x.Length; i++)
-        {
-            if (!EqualityComparer<T>.Default.Equals(x[i], y[i]))
-                return false;
-        }
-
-        return true;
+        var built = EndpointMappingPlan.From(this);
+        return Interlocked.CompareExchange(ref plan, built, null) ?? built;
     }
 
-    public int GetHashCode(ImmutableArray<T> obj) => obj.IsDefault ? 0 : obj.Length;
-}
-
-internal static class PathSpecs
-{
     /// <summary>
-    /// Field-wise equality for <see cref="PathSpec"/>.
+    /// What the four producers consume: this model with every <see cref="LocationKey"/> removed, and
+    /// without the closing problems, which only the diagnostic reporter reads (PRD addendum 2, D20).
     /// </summary>
     /// <remarks>
-    /// <see cref="PathSpec"/> carries a <c>[ValueComparer]</c> attribute, but a generated comparer is a
-    /// separate object: Roslyn compares pipeline outputs with <c>EqualityComparer&lt;T&gt;.Default</c>,
-    /// so a model is only value-equal at every step if the type itself implements equality. That is
-    /// why every model here hand-writes <see cref="IEquatable{T}"/>, and why this helper exists for a
-    /// type we do not own. MintPlayer/MintPlayer.Dotnet.Tools#184 proposes generating
-    /// <c>IEquatable&lt;T&gt;</c> from <c>[AutoValueComparer]</c>; once it ships, these models can use it
-    /// (packing its attributes assembly into this analyzer folder).
+    /// A location is the one thing a line inserted above an endpoint changes. The reporter needs it and
+    /// keeps the located model; the producers never emit it, so on this projection such an edit
+    /// compares equal and every output step stays cached.
     /// </remarks>
-    public static bool AreEqual(PathSpec? left, PathSpec? right)
-    {
-        if (ReferenceEquals(left, right)) return true;
-        if (left is null || right is null) return false;
-        if (left.ContainingNamespace != right.ContainingNamespace) return false;
-        if (left.Parents.Length != right.Parents.Length) return false;
-
-        for (var i = 0; i < left.Parents.Length; i++)
-        {
-            var a = left.Parents[i];
-            var b = right.Parents[i];
-            if (a.Name != b.Name
-                || a.Type != b.Type
-                || a.IsPartial != b.IsPartial
-                || a.GenericTypeParameters != b.GenericTypeParameters)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-}
-
-internal static class LocationKeys
-{
-    /// <summary>
-    /// Field-wise equality for <see cref="LocationKey"/>, which has no <c>Equals</c> of its own.
-    /// </summary>
-    public static bool AreEqual(LocationKey? left, LocationKey? right)
-    {
-        if (ReferenceEquals(left, right)) return true;
-        if (left is null || right is null) return false;
-
-        return left.FilePath == right.FilePath
-            && left.StartLine == right.StartLine
-            && left.StartColumn == right.StartColumn
-            && left.EndLine == right.EndLine
-            && left.EndColumn == right.EndColumn;
-    }
+    public EndpointModel WithoutLocations() => new(
+        Endpoints.Select(endpoint => endpoint.WithoutLocations()).ToImmutableArray(),
+        Groups.Select(group => group.WithoutLocation()).ToImmutableArray(),
+        Assembly,
+        new ClosingModel(
+            Closing.Endpoints.Select(endpoint => endpoint.WithoutLocations()).ToImmutableArray(),
+            Closing.Groups.Select(group => group.WithoutLocation()).ToImmutableArray(),
+            ImmutableArray<ClosingProblem>.Empty));
 }

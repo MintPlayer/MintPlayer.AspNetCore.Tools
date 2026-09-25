@@ -28,7 +28,7 @@ partial class EndpointGenerator
             // A typed-client project runs this generator too, and has no ASP.NET Core to map onto.
             if (!Model.Assembly.CanMapEndpoints) return;
 
-            Write(writer, EndpointMappingPlan.From(Model), Model.Assembly, cancellationToken);
+            Write(writer, Model.GetPlan(), Model.Assembly, cancellationToken);
         }
 
         private static void Write(IndentedTextWriter writer, EndpointMappingPlan plan, AssemblyInfo assembly, CancellationToken cancellationToken)
@@ -82,7 +82,7 @@ partial class EndpointGenerator
 
             var shadows = plan.MappableEndpoints.ToDictionary(
                 endpoint => endpoint.FullyQualifiedName,
-                endpoint => ShadowParameters.For(endpoint, plan.ComposedRoutes[endpoint.FullyQualifiedName]),
+                endpoint => plan.ShadowParametersOf(endpoint),
                 StringComparer.Ordinal);
 
             // --- Task B: Mapping extension ---

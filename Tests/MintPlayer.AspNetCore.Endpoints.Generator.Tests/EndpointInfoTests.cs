@@ -102,16 +102,26 @@ public class EndpointInfoTests
     }
 
     /// <summary>
-    /// Only the fully qualified name feeds the hash code, so two infos for the same class with
-    /// different details collide. That is legal, and it is what makes the duplicate infos a partial
-    /// class split across files produces land in the same <c>GroupBy</c> bucket.
+    /// The contract the incremental pipeline needs from the generated equality (PRD D17): equal
+    /// models have equal hash codes, and a changed member makes them unequal.
     /// </summary>
+    /// <remarks>
+    /// This used to pin a hash derived from the fully qualified name only, on the claim that a
+    /// <c>GroupBy</c> depended on it. None does: every <c>GroupBy</c> keys on the name string, and no
+    /// model is hashed into a collection. The hash is now whatever <c>[GenerateEquality]</c>
+    /// generates, which is free to include every compared member.
+    /// </remarks>
     [Fact]
-    public void GetHashCode_IsDerivedFromTheFullyQualifiedNameOnly()
+    public void GetHashCode_IsEqualForEqualModels()
     {
+        var bound = ImmutableArray.Create(Bound());
+
         Assert.Equal(
-            Info(EndpointLevel.Typed, HttpMethodKind.Post).GetHashCode(),
-            Info(EndpointLevel.Raw, HttpMethodKind.Delete, hasExistingBaseClass: true).GetHashCode());
+            Info(EndpointLevel.Typed, HttpMethodKind.Post, route: "/users", boundProperties: bound).GetHashCode(),
+            Info(EndpointLevel.Typed, HttpMethodKind.Post, route: "/users", boundProperties: ImmutableArray.Create(Bound())).GetHashCode());
+        Assert.NotEqual(
+            Info(EndpointLevel.Typed, HttpMethodKind.Post, boundProperties: bound),
+            Info(EndpointLevel.Typed, HttpMethodKind.Post, boundProperties: ImmutableArray.Create(Bound(hasInitializer: true))));
     }
 
     /// <summary>

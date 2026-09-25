@@ -643,6 +643,10 @@ however well `Models.cs` compared. The `IEquatable` implementations were correct
 simply could not matter. Fixed by registering on a value-equal model with `WithTrackingName`
 throughout.
 
+> **2026-09-25 (PR #35, PRD-EndpointsOpenGenerics addendum D10):** the "IEquatable ceremony" in `Models.cs`
+> is gone. The models are `[GenerateEquality]` partial classes and MintPlayer.ValueComparerGenerator 12.0.1
+> generates their equality; the incremental tests passed unchanged across the migration.
+
 Smaller ones: **D-M27** is three bare-`throw` sites covering three modes (the other two surfaced as
 `UnauthorizedAccessException`), not "three sites, five modes" — five modes, five types now, so the
 outcome matched but the mapping did not. **D-M33**'s "no `SameSite`" is accurate but the *effective*

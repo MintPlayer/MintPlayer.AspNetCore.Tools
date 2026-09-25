@@ -562,6 +562,30 @@ Findings:
     and the public `JoinMethods.g.cs` type. A third item goes in the same issue or its own: the
     load-time claim contradicted by S's measurement.
 
+> **As built (Phase 5, 2026-09-25, uncommitted for review):**
+> - **12.0.1 throughout** (D26): Tools in all three references, ValueComparerGenerator(.Attributes) in the
+>   generator, MintPlayer.SourceGenerators(.Attributes) in MustChangePassword and SitemapXml. The spike patch
+>   applied cleanly; its `SpikeDropVcAttributes` switch is gone.
+> - **Models, comparers, tests** as D10–D13, D17: 14 `[GenerateEquality]` partials, `[EqualityIgnore]` on
+>   the five members of D11, no `SequenceComparer`/`LocationKeys`/`PathSpecs`/`.WithComparer()`, and
+>   `openEndpointNamesProvider` returns `EquatableArray<string>`. The two hash tests assert
+>   equal-models-equal-hashes; `ClientServer_Equality_IgnoresIsCacheable` is new. No incremental or cache
+>   test changed its expectations.
+> - **Deviation from D16:** the generated class is not partial, and neither lighter mechanism works. Measured:
+>   `[assembly: SuppressMessage(…, Target = "~T:…IncrementalValueProviderAdditionalEx")]` (with and without
+>   `Scope = "type"`) does not suppress a compiler warning, and an `.editorconfig` severity is not applied to a
+>   source-generated tree even under `[*]`. The CS1591 is therefore suppressed by a `DiagnosticSuppressor`
+>   that matches that one type: a new non-packable project,
+>   `Endpoints/MintPlayer.AspNetCore.Endpoints.Generator.BuildSuppressions`, referenced by the generator as an
+>   analyzer (`ReferenceOutputAssembly="false"`, `PrivateAssets="all"`), never shipped. Baseline: 36 CS1591
+>   (16 MustChangePassword, 20 SitemapXml).
+> - **Packaging** (D14, D15): the named `DemoteValueComparerAttributesRuntimeDependency` target cites the
+>   MSB4018; `CheckValueComparerAttributesPathProperty` errors on an empty
+>   `$(PkgMintPlayer_ValueComparerGenerator_Attributes)`; both pack targets guard presence and placement of the
+>   attributes dll. Each guard was triggered once deliberately (removed from `GetTargetPath`, misplaced into
+>   `analyzers/dotnet/cs` in each package, `GeneratePathProperty` dropped): each fails the pack with its message.
+> - **Not done here:** the upstream issues of acceptance 17 (the caller files them).
+
 ## Addendum 2 — Generator performance, following MintPlayer.Dotnet.Tools #183 / #185 / #186
 
 *(Added 2026-09-25. Same PR #35.)* #186, published as 12.0.1, made the equality generator write one fixed
@@ -720,6 +744,58 @@ benchmark source is `scratchpad\bench\ZzGeneratorBenchmark.cs` and its logs are 
 22. **Group discovery:** D22 is either reproduced and fixed (red→green) or disproved, with the test kept.
 23. **Package versions:** Tools, ValueComparerGenerator and MintPlayer.SourceGenerators are at 12.0.1,
     and `dotnet list package --outdated` is empty.
+
+> **As built (Phase 6, 2026-09-25, uncommitted for review):**
+> - **Red first**, then green: the D22 group test (`GroupInheritingIEndpointGroupFromItsBaseClass_IsDiscovered`)
+>   failed with `info MPEP016: Endpoint group 'RootGroup' is not joined…` (the group was mapped as a root
+>   group: its `[MemberOf<RootGroup>]` and prefix were never read). D22 is reproduced and fixed. The line-shift
+>   test failed with 7 of 8 output-step reasons `Modified`; the `OpenEndpointNames` tracking tests found no
+>   such step; the client guard found `["ApiClient.g.cs", "EndpointClientUrl.g.cs"]`. The server
+>   fixed-file-set guard passed from the start (rule 7 was already met).
+> - **D19 as built:** one discovery transform for endpoints and groups (both use the same "class with a base
+>   list" predicate now, so D22 and the merge are one change); `Path`/`Prefix`/`Methods` read from the class's
+>   own declaration syntax when it has no base class or lists the interface again, with the interface map only
+>   otherwise; string literals folded from syntax, the transform's `SemanticModel` reused for anything else;
+>   syntactic pre-checks that skip `GetAttributes()` on a type with no attribute lists and skip binding the
+>   member list for bound properties when no property has an attribute; namespace checks without
+>   `ToDisplayString`. The plan is built once per model (`EndpointModel.GetPlan`, D21) with shadow parameters
+>   cached in it; the producers read `EndpointModel.WithoutLocations()` (D20, tracked as `ProducerModel`).
+> - **Byte-identical output (acceptance 19):** generated files and diagnostics were dumped for the corpus,
+>   the corpus with OpenAPI, a shapes corpus (const concatenation, `nameof`, explicit implementations, getter
+>   forms, raw literals, parentheses, computed and interpolated paths, `new static` and re-listed interfaces,
+>   every `Methods` spelling, a user interface default, partial declarations, nested and open generics) and
+>   the benchmark corpus at N=100, from the base commit and from this tree: `diff -r` is empty. The TestApp
+>   OpenAPI snapshot is unchanged.
+> - **D24:** `EndpointClients.g.cs` holds every client class; its content is the per-server texts
+>   concatenated, with the header and `global using` once. **D25:** both nupkgs carry exactly
+>   `analyzers/dotnet/roslyn5.9/cs/{Generator, Generator.CodeFixes, SourceGenerators.Tools, ValueComparerGenerator.Attributes}.dll`.
+>   The stray-folder guard now drops same-path copies (packing with `SuppressToolsAnalyzerCopies` disabled
+>   still yields that one folder) and still errors on any other analyzer folder (triggered deliberately).
+>   Re-measured with a scratch consumer on the packed packages: SDK 10.0.112 prints no CS9057 or CS8032 and
+>   fails with `CS1061 'WebApplication' does not contain a definition for 'MapConsumerEndpoints'` (or, with a
+>   typed endpoint, `CS0535`/`CS0115` first); SDK 10.0.401 builds clean. The READMEs say so.
+> - **Measurements (acceptance 18):** B's benchmark, before (base commit) and after (this tree) interleaved
+>   twice on one machine, Release net10.0, median of 7 at N=500:
+>
+>   | Scenario, N=500 | Before | After | Speed-up |
+>   |---|---|---|---|
+>   | Cold (OpenAPI on) | 122–146 ms, 33.0 MB | 84–87 ms, 24.9 MB | 1.5× |
+>   | Method-body edit | 76.5–79.1 ms, 16.8 MB | 44.9–46.6 ms, 10.6 MB | **1.7×** |
+>   | Unrelated class added | 75.3–76.3 ms | 42.5–45.6 ms | 1.7× |
+>   | One `Path` literal changed | 97.5–101.2 ms, 32.8 MB | 51.8–60.5 ms, 24.6 MB | 1.8× |
+>   | Discovery step alone (body edit) | 69.9 ms | 28.2 ms | 2.5× |
+>   | `DescribeDeclaredEndpoint`, 500 endpoints, fresh compilation | 9.9–11.9 ms | 4.6–4.9 ms | 2.2× |
+>   | Client cold / unrelated edit | 17.9 / 0.64 ms | 15.0–18.4 / 0.57 ms | = |
+>
+>   N=100 body edit 15.8 → 10.0 ms; N=10 4.9 → 3.5 ms.
+> - **Acceptance 18 is not met: 1.7×, not 3×.** A floor measurement explains why: a generator with the same
+>   predicate whose transform does nothing but `GetDeclaredSymbol` + `AllInterfaces` costs 5.6–6.0 ms per body
+>   edit at N=500; adding `GetAttributes()` makes it 12.4–14.5 ms, and adding `GetMembers()` 25.9–28.0 ms. The
+>   generator needs both for every endpoint (group membership and descriptor names are attributes, bound
+>   properties and `Path` are members), so the binding it cannot avoid on a fresh compilation already costs
+>   about the 26 ms a 3× target allows. Getting below it needs work the transform does not own: not
+>   re-running the semantic transform per node at all, which `CreateSyntaxProvider` does on every compilation.
+>   The target in D19 was set before this floor was measured.
 
 ## Version
 
