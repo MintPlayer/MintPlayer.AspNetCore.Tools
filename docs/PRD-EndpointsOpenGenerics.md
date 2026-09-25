@@ -126,6 +126,102 @@ applications, `MapEndpoint<T>()` (or the R6 outcome) for libraries, and the diag
 **R8 — Version.** A fix release, proposed **`11.1.1-rc.0`** for the three Endpoints packages; the
 release remains the owner's decision.
 
+> **Investigation findings (2026-09-25, I1–I3; measured on net10.0 against `c04ffac`).**
+> - **R1:** every open shape breaks the build: own type parameter; nested in a generic container;
+>   typed levels whose `TRequest`/`TResponse` is the parameter; bound properties. The issue's five
+>   CS0246 are reproduced at the exact reported lines. An `abstract` generic class is already
+>   skipped. A closed class derived from a generic base works, including an inherited
+>   `[MemberOf<T>]`.
+> - **R3 [verify] answered: no.** `ClassName` is `symbol.Name`, so the partial for `GetById<T>` is
+>   written as `partial class GetById`, a separate, non-generic phantom type. The real class never
+>   gets its base class (CS0534/CS0115/CS0535) or `BindParameters` (CS1061). Containers are
+>   reopened correctly with their type parameters (`OpenPathSpec`). Repeating the endpoint's own type
+>   parameter list, without constraints (C# allows that on a partial part), was measured to fix it:
+>   binding returns 200/400 on the manual path.
+> - **Open groups:** `[MemberOf<Api<T>>]` is illegal C# (CS8968), so an open group can only arise
+>   by nesting. A non-generic endpoint in a *closed* generic group, `[MemberOf<Api<string>>]`,
+>   works at run time, but group keys are the open FQN (`Api<T>`) while membership is the closed
+>   one. The generator therefore silently drops its link and contract, skips it in MPEP007, and
+>   misfires MPEP016 on `Api<T>`.
+> - **Existing diagnostics on open endpoints:** MPEP007 and MPEP012 fire with an open endpoint as
+>   a participant; MPEP012 treats `Echo<T>`, `Echo` and `Echo<T1,T2>` as one name. Filtering in
+>   `EndpointMappingPlan`'s mappable set (next to MPEP024) removes them from both checks. MPEP008
+>   still applies usefully, since the partial is kept.
+> - **R5, manual path:** route, prefix, inherited `[MemberOf<T>]` (also through a generic base),
+>   typed levels, validation, 415 and the library shape (`MapEndpoint<Passkeys<TUser>>()` inside a
+>   generic method) all work. **Naming is broken:** `EndpointNameOf` uses `Type.Name`, so every
+>   closing is named `Echo`1`, and two closings throw `Duplicate endpoint name 'Echo`1'` on the
+>   first request, `/openapi/v1.json` included. `[EndpointDescriptorName]` on a generic class
+>   collides the same way. The manual path also declares no route parameters in OpenAPI (a
+>   documented limit, which matters for Spark's `{id}` routes), and it carries
+>   `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]`.
+> - **R6:** Spark's 14 generic routes share one list (`TUser : SparkUser, new()`) but are mapped
+>   **conditionally, in clusters** (passkeys and external-login linking are behind options). A
+>   generated unconditional generic method would map disabled routes. Option B would also have to
+>   copy constraints exactly and handle constraint-type accessibility (CS0703) and
+>   same-arity-different-constraint collisions (CS0111), and is estimated at 2–3 days.
+> - **Found, outside #34:** `new static Path` on a closed derived type makes the generated links
+>   and contracts say the new route, while at run time the base's `Path` is used unless the derived
+>   type lists the endpoint interface again.
+
+> **Decided 2026-09-25 (grill session, supersedes R2's "skip only", R4, R6 and R8).** The owner rejected
+> "skip + let the library call `MapEndpoint<T>()`" and proposed closing open endpoints **in the
+> application**. The application's generated code is the one place where the open endpoint and its type
+> argument are both known. A prototype (`C:\Repos\WebApplication9`: `Level1.Libraries.cs`,
+> `Level2.Generated.cs`, `Program.cs`) builds and serves all three closed endpoints with 200. The owner
+> left the open questions to Claude; the decisions:
+>
+> **D1 — The attribute** (Abstractions, public):
+> ```csharp
+> [assembly: EndpointTypeArgument<Spark.SparkUser, AppUser>]              // primary: keyed on a constraint type
+> [assembly: EndpointTypeArgument(typeof(Spark.Echo<>), typeof(string))]   // explicit: per open endpoint
+> ```
+> `EndpointTypeArgumentAttribute<TConstraint, TArgument> where TArgument : TConstraint`, so a wrong
+> argument is a compiler error (measured: `<SparkUser, string>` → CS0311). The sketched
+> `EndpointTypeArgument<TEndpoint<TArg1>, TArg1>` is not expressible (no higher-kinded generics;
+> `Echo` without arguments is CS0305).
+>
+> **D2 — Binding rules.** A type parameter is bound by a constraint-keyed attribute when one of its
+> constraint types **equals** `TConstraint`. An endpoint is closed only when **every** type parameter,
+> including those of containing types, is bound. The explicit form binds one open endpoint and wins over
+> constraint keys for that endpoint. Violated constraints (`new()`, `class`, `struct`, `unmanaged`,
+> `notnull`, other constraint types), two attributes matching one parameter, and explicit-form arity
+> mismatches are **errors on the attribute**. They are never emitted as uncompilable code.
+>
+> **D3 — Discovery.** Every assembly's generator stamps a marker attribute on its assembly when it declares
+> open endpoints. The application's generator reads only marked references, and only when the compilation
+> declares at least one `EndpointTypeArgument`. Reads are memoised per `MetadataReference`, as in M9. Open
+> endpoints in the application's own compilation are closable too. Library endpoints, and the groups on
+> their chain, must be `public`; an inaccessible one is a diagnostic.
+>
+> **D4 — A closed endpoint is an ordinary endpoint.** It gets mapping, descriptor, typed link, contract,
+> OpenAPI hooks and duplicate route/name checks like a hand-written one. Its name, and everything derived
+> from it (`WithName`, `operationId`, link method), is `{Name}_{TypeArgumentNames}`, e.g.
+> `Passkeys_AppUser`. The runtime's `EndpointNameOf` uses the same rule for the manual path, so two
+> closings never collide.
+>
+> **D5 — Conditional mapping** (Spark maps passkey and linking routes only when enabled):
+> `IEndpointGroup` gains `static virtual bool IsEnabled(IServiceProvider services) => true`. Generated
+> mapping wraps a group, and everything nested in it, in `if (G.IsEnabled(app.ServiceProvider))`,
+> evaluated once at map time. This applies to all groups, generic or not. The condition is group-level
+> only: an endpoint that needs its own condition goes in its own group.
+>
+> **D6 — In the assembly that declares it,** an open endpoint is not mapped (R2 stands there), and its
+> partial repeats its type parameters (R3). An Info diagnostic says it is closed by an application with
+> `[assembly: EndpointTypeArgument<…>]`. An application attribute that closes nothing gets a warning.
+>
+> **D7 — Also fixed, since they came up:** closed generic groups (`[MemberOf<Api<string>>]`) are keyed by
+> their closed type, so they keep their links and contracts and MPEP016 stops misfiring. A derived
+> endpoint's `new static Path` no longer diverges from the runtime route: the generator resolves `Path`
+> through the interface implementation the runtime uses, and a Warning says the `new` member is ignored
+> unless the interface is listed again.
+>
+> **D8 — Option B** (the declaring library generates its own generic `Map…<TUser>()`) is **not done**.
+> D1–D5 give the application a one-line closing and keep conditions in the library, which B could not.
+>
+> **D9 — Version:** proposed **`11.2.0-rc.0`**, a new feature on top of `11.1.0-rc.0`. The release stays
+> the owner's decision.
+
 ## Acceptance criteria
 
 1. A generator test with the issue's exact repro is **red** on `master` (CS0246 in generated code)
@@ -140,6 +236,17 @@ release remains the owner's decision.
    unique `operationId`s.
 5. A closed derived type keeps working, including inherited `[MemberOf<T>]` (regression test).
 6. Both TFMs green; solution `-t:Rebuild` warnings at the 36 CS1591 baseline.
+
+> **Added with D1–D9:**
+> 7. A test library project declares `Passkeys<TUser> where TUser : LibUser, new()` and friends. The
+>    TestApp references it and writes one `[assembly: EndpointTypeArgument<LibUser, AppUser>]`.
+>    `MapTestAppEndpoints()` then maps the closed endpoints, and they answer end to end with route binding,
+>    names `…_AppUser`, typed links, contracts and a valid OpenAPI entry (path parameters included).
+> 8. A group whose `IsEnabled` returns false maps none of its endpoints or nested groups (runtime test,
+>    both states).
+> 9. Every D2 error has a generator test, and none of them produces a compile error in generated code.
+> 10. The 12 investigation red tests are green, with their expectations updated to D6.
+> 11. The README's "Generic endpoints" section compiles, like every other block.
 
 ## Version
 
