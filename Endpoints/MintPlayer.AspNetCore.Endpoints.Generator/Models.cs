@@ -627,12 +627,13 @@ internal static class PathSpecs
     /// Field-wise equality for <see cref="PathSpec"/>.
     /// </summary>
     /// <remarks>
-    /// <see cref="PathSpec"/> carries a <c>[ValueComparer]</c> attribute, but using the generated
-    /// comparer would put <c>MintPlayer.ValueComparerGenerator.Attributes.dll</c> on this
-    /// generator's analyzer-load path — a dependency this package deliberately does not have, and
-    /// one whose absence fails at load time with an error naming an assembly the consumer never
-    /// referenced. Fifteen hand-written lines are the cheaper trade, and they match how
-    /// <see cref="LocationKeys"/> already handles the same problem.
+    /// <see cref="PathSpec"/> carries a <c>[ValueComparer]</c> attribute, but a generated comparer is a
+    /// separate object: Roslyn compares pipeline outputs with <c>EqualityComparer&lt;T&gt;.Default</c>,
+    /// so a model is only value-equal at every step if the type itself implements equality. That is
+    /// why every model here hand-writes <see cref="IEquatable{T}"/>, and why this helper exists for a
+    /// type we do not own. MintPlayer/MintPlayer.Dotnet.Tools#184 proposes generating
+    /// <c>IEquatable&lt;T&gt;</c> from <c>[AutoValueComparer]</c>; once it ships, these models can use it
+    /// (packing its attributes assembly into this analyzer folder).
     /// </remarks>
     public static bool AreEqual(PathSpec? left, PathSpec? right)
     {
