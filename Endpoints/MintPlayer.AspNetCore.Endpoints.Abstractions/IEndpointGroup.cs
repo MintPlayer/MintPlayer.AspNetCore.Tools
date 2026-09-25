@@ -2,7 +2,7 @@ namespace MintPlayer.AspNetCore.Endpoints;
 
 /// <summary>
 /// Defines a route group: a shared route prefix plus one place to configure everything mapped under
-/// it. Endpoints join by implementing <see cref="IMemberOf{TGroup}"/>; a group joins another group
+/// it. Endpoints join with <see cref="MemberOfAttribute{TGroup}"/>; a group joins another group
 /// the same way, so groups nest.
 /// </summary>
 /// <remarks>
@@ -27,17 +27,3 @@ public interface IEndpointGroup
     /// </summary>
     static virtual void Configure(RouteGroupBuilder group) { }
 }
-
-/// <summary>
-/// Places an endpoint — or another group — inside <typeparamref name="TGroup"/>. The implementer's
-/// <c>Path</c> (or <c>Prefix</c>) is then relative to <typeparamref name="TGroup"/>'s
-/// <see cref="IEndpointGroup.Prefix"/>, and <typeparamref name="TGroup"/>'s
-/// <see cref="IEndpointGroup.Configure"/> applies to it.
-/// </summary>
-/// <remarks>
-/// A pure marker: no members, nothing to implement. Exactly one may be declared per type — two
-/// memberships have no single resolvable route, so registration throws rather than pick one, as does
-/// a membership cycle.
-/// </remarks>
-/// <typeparam name="TGroup">The group to join. Nest by having a group declare this too.</typeparam>
-public interface IMemberOf<TGroup> where TGroup : IEndpointGroup;

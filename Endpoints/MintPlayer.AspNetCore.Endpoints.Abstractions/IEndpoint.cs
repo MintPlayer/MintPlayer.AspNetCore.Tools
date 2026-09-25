@@ -30,11 +30,11 @@ public interface IEndpoint : IEndpointBase
 /// <typeparamref name="TRequest"/> and a cancellation token instead of <c>HttpContext</c>.
 /// </summary>
 /// <remarks>
-/// Whether the binding is written for you depends on the verb, not on this level. A body verb
-/// (POST/PUT/PATCH) gets a working default from <c>BodyEndpoint&lt;TRequest&gt;</c>; a body-less one
-/// (GET/DELETE) inherits <c>BindRequestAsync</c> as abstract from
-/// <c>NonBodyEndpoint&lt;TRequest&gt;</c> and must implement it. Either way a request that fails to
-/// bind never reaches the handler.
+/// <typeparamref name="TRequest"/> is the request <i>body</i>, on every verb, and it is bound for you:
+/// content-negotiated through MVC's input formatters where they are registered, JSON otherwise. A
+/// request that fails to bind never reaches the handler. Values from the route or query string are
+/// not part of the request; they arrive through <c>[RouteParam]</c>/<c>[QueryParam]</c> properties
+/// on the endpoint.
 /// <para>
 /// Pick level 3 instead if the endpoint returns a body worth documenting; this level is right when
 /// the response shape varies, or when nothing but a status code comes back.

@@ -71,6 +71,54 @@ public class EndpointGeneratorIncrementalTests
     }
 
     /// <summary>
+    /// The OpenAPI flag added to the model in M5 keeps it value-equal: a rerun over an identical
+    /// compilation that references <c>Microsoft.AspNetCore.OpenApi</c> is cached too.
+    /// </summary>
+    /// <remarks>
+    /// The flag is computed from the compilation on every run; a flag that compared unequal (or a
+    /// model that stopped comparing it) would rerun both producers on every keystroke.
+    /// </remarks>
+    [Fact]
+    public void RerunOverAnIdenticalCompilationWithOpenApi_DoesNotRebuildTheModel()
+    {
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [FixtureSources.Corpus], includeOpenApi: true);
+
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+        var second = driver.RunGenerators(compilation.Clone()).GetRunResult();
+
+        var reasons = ReasonsFor(second, TrackedModelStep);
+
+        Assert.NotEmpty(reasons);
+        Assert.All(reasons, reason =>
+            Assert.True(
+                reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                $"expected the model step to be cached, was {reason}"));
+    }
+
+    /// <summary>
+    /// Adding the OpenAPI package to an existing compilation <i>does</i> rebuild the model, and the
+    /// second file appears.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the flag's equality: if it did not take part, the cache would serve the old
+    /// output and <c>EndpointOpenApi.g.cs</c> would be missing until an unrelated edit.
+    /// </remarks>
+    [Fact]
+    public void AddingTheOpenApiReference_RebuildsTheModel_AndEmitsTheOpenApiFile()
+    {
+        var without = EndpointGeneratorHarness.CreateCompilation("Fixtures", [FixtureSources.Corpus]);
+        var with = EndpointGeneratorHarness.CreateCompilation("Fixtures", [FixtureSources.Corpus], includeOpenApi: true);
+
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(without);
+        Assert.DoesNotContain(driver.GetRunResult().GeneratedTrees, tree => tree.FilePath.EndsWith("EndpointOpenApi.g.cs", StringComparison.Ordinal));
+
+        var second = driver.RunGenerators(without.WithReferences(with.References)).GetRunResult();
+
+        Assert.Contains(IncrementalStepRunReason.Modified, ReasonsFor(second, TrackedModelStep));
+        Assert.Contains(second.GeneratedTrees, tree => tree.FilePath.EndsWith("EndpointOpenApi.g.cs", StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// Editing a handler body does not rebuild the model either — the case that matters most, since
     /// it is what a developer does all day in the IDE.
     /// </summary>
@@ -108,6 +156,111 @@ public class EndpointGeneratorIncrementalTests
             Assert.True(
                 reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
                 $"expected the model step to be cached, was {reason}"));
+    }
+
+    /// <summary>
+    /// A handler-body edit in a compilation whose endpoints carry <c>[RouteParam]</c>/<c>[QueryParam]</c>
+    /// properties still hits the cache — at the per-endpoint step as well as the model step.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Since M4, <c>EndpointInfo.Equals</c> also compares an <c>ImmutableArray&lt;BoundProperty&gt;</c>.
+    /// <c>ImmutableArray</c>'s own equality is by backing-array reference, and every transform builds
+    /// a fresh array, so comparing it that way would make every endpoint with a bound property
+    /// report <c>Modified</c> on every keystroke. The fixture above has no bound properties and
+    /// cannot see that; this one uses the corpus, which has a route-bound GET, a route-bound PUT and
+    /// PATCH, a raw route-bound DELETE and a raw list endpoint with a defaulted query parameter.
+    /// </para>
+    /// <para>
+    /// The replacement keeps the text length identical on purpose: the model stores source
+    /// locations, and a length change would legitimately move every endpoint declared after the
+    /// edit, which is a different question from the one asked here.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void EditingAHandlerBody_WithBoundPropertiesPresent_DoesNotRebuildTheModel()
+    {
+        var before = FixtureSources.Corpus;
+        var after = before.Replace("new UserResponse(Id, \"Alice\")", "new UserResponse(Id, \"Carol\")");
+        Assert.NotEqual(before, after);
+        Assert.Contains("[RouteParam]", before);
+        Assert.Contains("[QueryParam]", before);
+
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [before]);
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+
+        var edited = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Last(),
+            EndpointGeneratorHarness.CreateCompilation("Fixtures", [after]).SyntaxTrees.Last());
+
+        var result = driver.RunGenerators(edited).GetRunResult();
+
+        foreach (var step in new[] { "Endpoints", TrackedModelStep })
+        {
+            var reasons = ReasonsFor(result, step);
+
+            Assert.NotEmpty(reasons);
+            Assert.All(reasons, reason =>
+                Assert.True(
+                    reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                    $"expected step '{step}' to be cached, was {reason}"));
+        }
+    }
+
+    /// <summary>
+    /// Renaming a bound property's route key <i>does</i> rebuild the model — the counterpart that keeps
+    /// the test above honest.
+    /// </summary>
+    /// <remarks>
+    /// A <c>BoundProperty</c> comparison that ignored its members, or an <c>EndpointInfo.Equals</c>
+    /// that left the array out, would pass the cache-hit test and then keep emitting a binder that
+    /// reads the old key.
+    /// </remarks>
+    [Fact]
+    public void ChangingABoundPropertyKey_RebuildsTheModel()
+    {
+        var before = FixtureSources.Corpus;
+        var after = before.Replace("[QueryParam] public int Page", "[QueryParam(\"p\")] public int Page");
+        Assert.NotEqual(before, after);
+
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [before]);
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+
+        var edited = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Last(),
+            EndpointGeneratorHarness.CreateCompilation("Fixtures", [after]).SyntaxTrees.Last());
+
+        var result = driver.RunGenerators(edited).GetRunResult();
+
+        Assert.Contains(IncrementalStepRunReason.Modified, ReasonsFor(result, TrackedModelStep));
+        Assert.Contains("ParameterSource.Query, \"p\"", Text(result));
+    }
+
+    /// <summary>
+    /// Editing a literal <c>Methods</c> rebuilds the model, because MPEP007 reads it.
+    /// </summary>
+    /// <remarks>
+    /// <c>EndpointInfo.KnownMethods</c> is part of equality. Leave it out and adding a verb that now
+    /// collides with another endpoint is served from the cache, so the duplicate-route warning only
+    /// appears after an unrelated edit — or never, in the IDE.
+    /// </remarks>
+    [Fact]
+    public void ChangingALiteralMethodsCollection_RebuildsTheModel()
+    {
+        var before = FixtureSources.Corpus;
+        var after = before.Replace("[\"OPTIONS\", \"HEAD\"]", "[\"OPTIONS\", \"HEAD\", \"TRACE\"]");
+        Assert.NotEqual(before, after);
+
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [before]);
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+
+        var edited = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Last(),
+            EndpointGeneratorHarness.CreateCompilation("Fixtures", [after]).SyntaxTrees.Last());
+
+        var result = driver.RunGenerators(edited).GetRunResult();
+
+        Assert.Contains(IncrementalStepRunReason.Modified, ReasonsFor(result, TrackedModelStep));
     }
 
     /// <summary>
@@ -183,7 +336,7 @@ public class EndpointGeneratorIncrementalTests
     public void EditingAHandlerBody_EmitsIdenticalSource()
     {
         var before = FixtureSources.Corpus;
-        var after = before.Replace("new UserResponse(request.Id, \"Alice\")", "new UserResponse(request.Id, \"Bob\")");
+        var after = before.Replace("new UserResponse(Id, \"Alice\")", "new UserResponse(Id, \"Bob\")");
         Assert.NotEqual(before, after);
 
         var first = EndpointGeneratorHarness.Run("Fixtures", before);

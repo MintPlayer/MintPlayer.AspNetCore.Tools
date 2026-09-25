@@ -62,7 +62,24 @@ public partial class EndpointGenerator : IncrementalGenerator
         // compilation — so the source output could never be cached however well the models compared.
         // Registering on the value-equal model instead is what makes the equality in Models.cs pay.
         context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
-            EndpointMappingProducer.Emit(productionContext, model));
+            new EndpointMappingProducer(model).Emit(productionContext));
+
+        // The second file exists only for a consumer that references Microsoft.AspNetCore.OpenApi.
+        // The producer writes nothing otherwise, and Emit adds no source for an empty buffer, so the
+        // absent case is no file at all rather than an empty one. (An IncrementalValueProvider has
+        // no Where to filter on; only the plural IncrementalValuesProvider does.)
+        context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
+            new EndpointOpenApiProducer(model).Emit(productionContext));
+
+        // The third file: typed links (EndpointRoutes.g.cs). Same model, so the same caching, and the
+        // same plan, so it names exactly the endpoints the mapping names.
+        context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
+            new EndpointRoutesProducer(model).Emit(productionContext));
+
+        // The fourth: the cross-assembly contract (EndpointContracts.g.cs) a typed client reads from
+        // this assembly's metadata (M9). Same model, same plan, same caching.
+        context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
+            new EndpointContractsProducer(model).Emit(productionContext));
 
         // Diagnostics do go through the Tools pipeline, because turning a LocationKey back into a
         // Location needs the Compilation. They are recomputed per compilation; they are cheap, and
@@ -71,28 +88,26 @@ public partial class EndpointGenerator : IncrementalGenerator
             .Select(static (model, _) => (IDiagnosticReporter)new EndpointDiagnosticReporter(model)));
     }
 
-    private static bool IsEndpointCandidate(SyntaxNode node, CancellationToken _)
-    {
-        if (node is not ClassDeclarationSyntax classDecl || classDecl.BaseList is null)
-            return false;
-
-        foreach (var baseType in classDecl.BaseList.Types)
-        {
-            var name = NameOf(baseType.Type);
-
-            if (name is not null && (
-                name.StartsWith("IEndpoint") ||
-                name.StartsWith("IGetEndpoint") ||
-                name.StartsWith("IPostEndpoint") ||
-                name.StartsWith("IPutEndpoint") ||
-                name.StartsWith("IDeleteEndpoint") ||
-                name.StartsWith("IPatchEndpoint") ||
-                name.StartsWith("IMemberOf")))
-                return true;
-        }
-
-        return false;
-    }
+    /// <summary>
+    /// Syntactic pre-filter: any non-abstract class with a base list is a candidate, and the
+    /// transform's semantic check (<c>AllInterfaces</c> contains <c>IEndpointBase</c>) decides.
+    /// </summary>
+    /// <remarks>
+    /// This used to match base-list names beginning with an endpoint interface, plus
+    /// <c>IMemberOf</c>. That silently missed every endpoint inheriting its verb interface from a
+    /// base class of its own: <c>partial class GetUser : UsersEndpointBase&lt;…&gt;</c> names no
+    /// endpoint interface, so it never reached the semantic check and was never mapped. It only
+    /// ever worked when an <c>IMemberOf&lt;T&gt;</c> happened to sit in the same base list. With
+    /// membership now an attribute that inherits through base classes (PRD R1.4), that accident is
+    /// gone and the shape would break outright, so the name match is dropped rather than patched.
+    /// <para>
+    /// The cost is one <c>GetDeclaredSymbol</c> and an interface scan per class with a base list.
+    /// Abstract classes are excluded here because the transform would reject them anyway.
+    /// </para>
+    /// </remarks>
+    private static bool IsEndpointCandidate(SyntaxNode node, CancellationToken _) =>
+        node is ClassDeclarationSyntax { BaseList: not null } classDecl &&
+        !classDecl.Modifiers.Any(SyntaxKind.AbstractKeyword);
 
     private static string? NameOf(TypeSyntax type) => type switch
     {
@@ -117,7 +132,6 @@ public partial class EndpointGenerator : IncrementalGenerator
         INamedTypeSymbol? verbInterface = null;
         INamedTypeSymbol? typedInterface = null;
         var httpMethod = HttpMethodKind.Custom;
-        var groupTypeFqns = new List<string>();
 
         foreach (var iface in symbol.AllInterfaces)
         {
@@ -125,14 +139,6 @@ public partial class EndpointGenerator : IncrementalGenerator
 
             var name = iface.Name;
             var arity = iface.TypeArguments.Length;
-
-            if (name == "IMemberOf" && arity == 1)
-            {
-                var groupFqn = iface.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-                if (!groupTypeFqns.Contains(groupFqn))
-                    groupTypeFqns.Add(groupFqn);
-                continue;
-            }
 
             var method = name switch
             {
@@ -167,19 +173,29 @@ public partial class EndpointGenerator : IncrementalGenerator
                 ? verbInterface ?? typedInterface
                 : typedInterface;
 
-        var level = (carrier?.TypeArguments.Length ?? 0) switch
-        {
-            >= 2 => EndpointLevel.TypedWithResponse,
-            1 => EndpointLevel.Typed,
-            _ => EndpointLevel.Raw
-        };
+        // IGetEndpoint<TResponse> / IDeleteEndpoint<TResponse> carry one type argument that is the
+        // RESPONSE. Reading them by arity alone would classify them as Typed and try to bind a body
+        // into the response type, so the response-only rung is recognised by its interface first.
+        var responseOnly = symbol.AllInterfaces.FirstOrDefault(i =>
+            i.Name == "IResponseEndpoint" &&
+            i.TypeArguments.Length == 1 &&
+            i.ContainingNamespace?.ToDisplayString() == EndpointsNamespace);
 
-        var requestTypeFqn = level == EndpointLevel.Raw
-            ? null
-            : carrier!.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-        var responseTypeFqn = level == EndpointLevel.TypedWithResponse
-            ? carrier!.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+        var carrierArity = carrier?.TypeArguments.Length ?? 0;
+        var level = carrierArity >= 2 ? EndpointLevel.TypedWithResponse
+            : responseOnly is not null ? EndpointLevel.ResponseOnly
+            : carrierArity == 1 ? EndpointLevel.Typed
+            : EndpointLevel.Raw;
+
+        var requestTypeFqn = level is EndpointLevel.Typed or EndpointLevel.TypedWithResponse
+            ? carrier!.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
             : null;
+        var responseTypeFqn = level switch
+        {
+            EndpointLevel.TypedWithResponse => carrier!.TypeArguments[1].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            EndpointLevel.ResponseOnly => responseOnly!.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            _ => null,
+        };
 
         // Both of these are properties of the *symbol*, not of one declaration. Reading them from
         // the single ClassDeclarationSyntax that triggered this callback makes a partial class split
@@ -200,17 +216,25 @@ public partial class EndpointGenerator : IncrementalGenerator
 
         return new EndpointInfo(
             symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            symbol.ContainingNamespace?.ToDisplayString() ?? "",
+            symbol.ContainingNamespace is { IsGlobalNamespace: false } containingNamespace ? containingNamespace.ToDisplayString() : "",
             symbol.Name,
             isPartial,
             hasExistingBaseClass,
             level, httpMethod,
             requestTypeFqn, responseTypeFqn,
-            groupTypeFqns.Count == 1 ? groupTypeFqns[0] : groupTypeFqns.FirstOrDefault(),
-            groupTypeFqns.Count > 1,
+            GroupMembership.Resolve(symbol, EndpointsNamespace),
             baseChainReachesEndpointBase,
             GetDescriptorName(symbol),
-            symbol.FromSymbol().AsKey());
+            symbol.FromSymbol().AsKey(),
+            symbol.GetPathSpec(ct),
+            RouteLiteral.Read(symbol, "Path", context.SemanticModel, ct),
+            BoundProperties.Collect(symbol, EndpointsNamespace, ct),
+            MethodsLiteral.Read(symbol, httpMethod, context.SemanticModel, ct),
+            level is EndpointLevel.Typed or EndpointLevel.TypedWithResponse
+                ? RequestValidationGaps.Inspect(carrier!.TypeArguments[0], context.SemanticModel.Compilation)
+                : RequestValidationGap.None,
+            GeneratedCodeAccess.WhyInaccessible(symbol),
+            GeneratedCodeAccess.IsInFileLocalType(symbol));
     }
 
     private static bool IsMoreDerived(INamedTypeSymbol candidate, INamedTypeSymbol? incumbent)
@@ -262,23 +286,12 @@ public partial class EndpointGenerator : IncrementalGenerator
         if (!symbol.AllInterfaces.Any(i => i.Name == "IEndpointGroup" && i.ContainingNamespace?.ToDisplayString() == EndpointsNamespace))
             return null;
 
-        var parentGroupFqns = new List<string>();
-
-        foreach (var iface in symbol.AllInterfaces)
-        {
-            if (iface.ContainingNamespace?.ToDisplayString() != EndpointsNamespace) continue;
-            if (iface.Name != "IMemberOf" || iface.TypeArguments.Length != 1) continue;
-
-            var parentFqn = iface.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-            if (!parentGroupFqns.Contains(parentFqn))
-                parentGroupFqns.Add(parentFqn);
-        }
-
         return new GroupInfo(
             symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-            parentGroupFqns.FirstOrDefault(),
-            parentGroupFqns.Count > 1,
-            symbol.FromSymbol().AsKey());
+            GroupMembership.Resolve(symbol, EndpointsNamespace),
+            symbol.FromSymbol().AsKey(),
+            RouteLiteral.Read(symbol, "Prefix", context.SemanticModel, ct),
+            GeneratedCodeAccess.WhyInaccessible(symbol));
     }
 
     private static bool ReachesEndpointBase(INamedTypeSymbol? type)
@@ -293,7 +306,7 @@ public partial class EndpointGenerator : IncrementalGenerator
     }
 
     private static bool IsOurBaseClass(string name) => name is
-        "EndpointBase" or "BodyEndpoint" or "NonBodyEndpoint" or
+        "EndpointBase" or "BodyEndpoint" or "ResponseEndpoint" or
         "PostEndpoint" or "PutEndpoint" or "PatchEndpoint" or
         "GetEndpoint" or "DeleteEndpoint";
 
@@ -314,6 +327,28 @@ public partial class EndpointGenerator : IncrementalGenerator
             }
         }
 
-        return new AssemblyInfo(assemblyName, methodNameOverride);
+        return new AssemblyInfo(
+            assemblyName,
+            methodNameOverride,
+            HasOpenApiTransformers(compilation),
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.IEndpointRouteBuilder") is not null);
     }
+
+    /// <summary>
+    /// Whether the emitted schema transformer would compile against this consumer's references.
+    /// </summary>
+    /// <remarks>
+    /// Three probes, because the context type on its own is not enough. It also exists in
+    /// <c>Microsoft.AspNetCore.OpenApi</c> 9.x, which a net10.0 project can still reference, but
+    /// that version builds on <c>Microsoft.OpenApi</c> 1.x — schemas in
+    /// <c>Microsoft.OpenApi.Models</c>, no <c>JsonSchemaType</c> — and has no endpoint-level
+    /// <c>AddOpenApiOperationTransformer</c>. Emitting against it would put compile errors in a
+    /// file the consumer cannot edit. <c>JsonSchemaType</c> exists from 2.x on, and the extension
+    /// is looked up on the type the call is emitted against, so a moved method fails closed.
+    /// </remarks>
+    private static bool HasOpenApiTransformers(Compilation compilation) =>
+        compilation.GetTypeByMetadataName("Microsoft.AspNetCore.OpenApi.OpenApiOperationTransformerContext") is not null &&
+        compilation.GetTypeByMetadataName("Microsoft.OpenApi.JsonSchemaType") is not null &&
+        compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Builder.OpenApiEndpointConventionBuilderExtensions") is { } extensions &&
+        !extensions.GetMembers("AddOpenApiOperationTransformer").IsEmpty;
 }

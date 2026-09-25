@@ -8,7 +8,8 @@ namespace MintPlayer.AspNetCore.Endpoints.TestApp.Endpoints;
 /// Generator emits: partial class CreateUser : PostEndpoint&lt;CreateUserRequest&gt;
 /// Generator emits: .Produces&lt;CreateUserResponse&gt;(201)
 /// </summary>
-public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserResponse>, IMemberOf<UsersApi>
+[MemberOf<UsersApi>]
+public partial class CreateUser(IUserStore users) : IPostEndpoint<CreateUserRequest, CreateUserResponse>
 {
     public static string Path => "/";
 
@@ -16,8 +17,12 @@ public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserRes
 
     public override Task<IResult> HandleAsync(CreateUserRequest request, CancellationToken ct)
     {
-        // Simulate creation
-        var response = new CreateUserResponse(42, request.Name, request.Email);
-        return Task.FromResult(Results.Created($"/api/users/42", response));
+        // Stored through the scoped IUserStore the constructor received.
+        var user = users.Add(request.Name, request.Email);
+        var response = new CreateUserResponse(user.Id, user.Name, user.Email);
+        // A typed link, not "/api/users/42": renaming the group prefix or the route token now
+        // breaks this line at compile time instead of silently pointing the Location header at
+        // nothing.
+        return Task.FromResult(Results.Created(Routes.Api.Users.GetUser(id: response.Id), response));
     }
 }

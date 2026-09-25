@@ -158,6 +158,21 @@ public class AssemblyInfoTests
         Assert.False(info.Equals("MyApp.Api"));
     }
 
+    /// <summary>
+    /// The OpenAPI flag takes part in equality.
+    /// </summary>
+    /// <remarks>
+    /// If it did not, adding <c>Microsoft.AspNetCore.OpenApi</c> to a project would compare the model
+    /// equal to the previous one, the cached outputs would be reused, and <c>EndpointOpenApi.g.cs</c>
+    /// would not appear until some unrelated edit invalidated the cache.
+    /// </remarks>
+    [Fact]
+    public void Equals_ComparesTheOpenApiFlag()
+    {
+        Assert.Equal(new AssemblyInfo("MyApp.Api", null, true), new AssemblyInfo("MyApp.Api", null, true));
+        Assert.NotEqual(new AssemblyInfo("MyApp.Api", null, true), new AssemblyInfo("MyApp.Api", null, false));
+    }
+
     [Fact]
     public void GetHashCode_IsDerivedFromTheAssemblyNameOnly()
     {

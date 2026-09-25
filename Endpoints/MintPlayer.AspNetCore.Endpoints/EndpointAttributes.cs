@@ -32,6 +32,21 @@ public static class EndpointAttributes
         var type = attribute.GetType();
 
         return type.Namespace != "System.Runtime.CompilerServices"
-            && type.GetCustomAttribute<CompilerGeneratedAttribute>(inherit: false) is null;
+            && type.GetCustomAttribute<CompilerGeneratedAttribute>(inherit: false) is null
+            && !IsMembership(type);
     }
+
+    /// <summary>
+    /// <c>[MemberOf&lt;TGroup&gt;]</c> is an instruction to the mapper, already acted on by the time
+    /// the route exists, not metadata about the route.
+    /// </summary>
+    /// <remarks>
+    /// Without this it would land in <c>endpoint.Metadata</c> as a routing-visible object, where
+    /// anything enumerating metadata — middleware, an OpenAPI transformer, a diagnostics page —
+    /// would find a library-internal type it has no use for. And because membership inherits, an
+    /// endpoint overriding its base's group would carry <i>both</i> closed attribute types, since
+    /// <c>inherit: true</c> does not suppress a base attribute of a different closed generic type.
+    /// </remarks>
+    private static bool IsMembership(Type type) =>
+        type.IsGenericType && type.GetGenericTypeDefinition() == typeof(MemberOfAttribute<>);
 }

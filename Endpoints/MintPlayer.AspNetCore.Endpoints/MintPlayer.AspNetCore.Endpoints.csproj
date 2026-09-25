@@ -5,10 +5,16 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<OutputType>Library</OutputType>
+		<!--
+		A regression gate for the library's own code, not an AOT claim (PRD R6.4, R7.6): the reflective
+		manual MapEndpoint<T>() path is annotated [RequiresUnreferencedCode]/[RequiresDynamicCode], and
+		the generated mapping still binds through the Delegate overload of MapMethods in the consumer.
+		-->
+		<IsAotCompatible>true</IsAotCompatible>
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints</PackageId>
-		<Version>11.0.1-rc.0</Version>
+		<Version>11.1.0-rc.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>Class-per-endpoint mapping library for ASP.NET Core with constructor injection, content negotiation, and source-generated endpoint discovery.</Description>
@@ -23,8 +29,21 @@
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
+	<!--
+	On net10.0 Microsoft.Extensions.Validation is [Experimental("ASP0029")], and the compiler reports
+	that as an ERROR on the whole API RequestValidation.cs calls (ValidationOptions.Resolvers,
+	TryGetValidatableTypeInfo, IValidatableInfo, ValidateContext) — there is no Web-SDK exemption
+	(PRD R5.6). On net11.0 the API has graduated, so the suppression is scoped to net10.0 only: an
+	unconditioned NoWarn would also hide a genuinely new experimental API on the newer framework.
+	-->
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+		<NoWarn>$(NoWarn);ASP0029</NoWarn>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<None Include="README.md" Pack="true" PackagePath="\" />
+		<!-- Makes GenerateEndpointsClient visible to the typed-client generator this package carries (M9). -->
+		<None Include="build\MintPlayer.AspNetCore.Endpoints.props" Pack="true" PackagePath="build\" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -82,9 +101,62 @@
 		         RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier">
 			<Output TaskParameter="TargetOutputs" ItemName="_EndpointsGeneratorAnalyzer" />
 		</MSBuild>
+
+		<!--
+		  Guards, not warnings. An analyzer payload that comes out empty installs perfectly happily
+		  and then does nothing: no generated mapping, no diagnostic, and nothing for the consumer
+		  to search for. There is no error to notice, so the only way this is caught is by failing
+		  the pack.
+
+		  Two different existence tests are needed and mixing them up produces a guard that can
+		  never fire. GetTargetPath returns a literal path, so the item exists whether or not the
+		  file does, which calls for Exists('%(...)'). A glob contributes no items at all when it
+		  matches nothing, so it would have to be tested as '@(...)' == '' instead.
+		-->
+		<Error Condition="'@(_EndpointsGeneratorAnalyzer)' == ''"
+		       Text="PackEndpointsGenerator resolved no analyzer assembly from MintPlayer.AspNetCore.Endpoints.Generator. Packing would produce a nupkg with an empty analyzers/ folder, which restores cleanly and generates nothing." />
+		<Error Condition="!Exists('%(_EndpointsGeneratorAnalyzer.FullPath)')"
+		       Text="PackEndpointsGenerator resolved '%(_EndpointsGeneratorAnalyzer.FullPath)' but that file does not exist. Packing would produce a nupkg with no analyzer in it and no error." />
+
+		<!--
+		  The folder comes from the generator project, which owns $(EndpointsAnalyzerPackPath), so the
+		  two packages cannot drift into different analyzer folders. A value passed on the command line
+		  is a global property and reaches both projects alike.
+		-->
+		<MSBuild Condition="'$(EndpointsAnalyzerPackPath)' == ''"
+		         Projects="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
+		         Targets="GetEndpointsAnalyzerPackPath"
+		         Properties="Configuration=$(Configuration)"
+		         RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier">
+			<Output TaskParameter="TargetOutputs" PropertyName="EndpointsAnalyzerPackPath" />
+		</MSBuild>
+		<Error Condition="'$(EndpointsAnalyzerPackPath)' == ''"
+		       Text="PackEndpointsGenerator could not resolve EndpointsAnalyzerPackPath from MintPlayer.AspNetCore.Endpoints.Generator. Packing without it would place the analyzer at the package root, where Roslyn never loads it." />
+
+		<!--
+		  The code-fix assembly (M11), from the generator project, which owns the list and guards that it
+		  resolves to a file that exists. It goes into the same folder as the generator.
+		-->
+		<MSBuild Projects="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
+		         Targets="GetEndpointsCodeFixAssembly"
+		         Properties="Configuration=$(Configuration)"
+		         RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier">
+			<Output TaskParameter="TargetOutputs" ItemName="_EndpointsCodeFixAnalyzer" />
+		</MSBuild>
+
 		<ItemGroup>
-			<TfmSpecificPackageFile Include="@(_EndpointsGeneratorAnalyzer)" PackagePath="analyzers/dotnet/cs" />
+			<TfmSpecificPackageFile Include="@(_EndpointsGeneratorAnalyzer)" PackagePath="$(EndpointsAnalyzerPackPath)" />
+			<TfmSpecificPackageFile Include="@(_EndpointsCodeFixAnalyzer)" PackagePath="$(EndpointsAnalyzerPackPath)" />
 		</ItemGroup>
+
+		<ItemGroup>
+			<_EndpointsCodeFixPackFile Include="@(TfmSpecificPackageFile)" Condition="'%(Filename)%(Extension)' == 'MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll'" />
+			<_MisplacedEndpointsCodeFixPackFile Include="@(_EndpointsCodeFixPackFile)" Condition="'%(PackagePath)' != '$(EndpointsAnalyzerPackPath)'" />
+		</ItemGroup>
+		<Error Condition="'@(_EndpointsCodeFixPackFile)' == ''"
+		       Text="MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll is not among the files being packed. The package would ship without its code fixes." />
+		<Error Condition="'@(_MisplacedEndpointsCodeFixPackFile)' != ''"
+		       Text="MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll would be packed into '%(_MisplacedEndpointsCodeFixPackFile.PackagePath)' instead of $(EndpointsAnalyzerPackPath), beside the generator." />
 	</Target>
 
 </Project>

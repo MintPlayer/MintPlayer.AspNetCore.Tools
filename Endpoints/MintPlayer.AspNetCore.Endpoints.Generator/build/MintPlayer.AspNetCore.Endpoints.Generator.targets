@@ -1,0 +1,61 @@
+<Project>
+
+	<!--
+	The metadata-only server reference a typed client needs (PRD R7.4, spike S6), done for you:
+
+	  <ItemGroup>
+	    <EndpointsServerReference Include="..\MyServer\MyServer.csproj" />
+	  </ItemGroup>
+
+	What it does, and why it is not a ProjectReference:
+
+	- A ProjectReference to an ASP.NET Core project carries its FrameworkReference Microsoft.AspNetCore.App
+	  into the client. A Blazor WebAssembly client then fails with NETSDK1082 before the server is even
+	  built, and no ProjectReference metadata prevents it (four mitigations measured). An MSBuild task
+	  call is not a ProjectReference, so nothing flows back.
+	- It builds the server first, in the client's Configuration and TargetFramework, then references the
+	  server's output assembly with Private=false: one extra compile-time reference, nothing copied, no
+	  ASP.NET Core in the client. A hand-written <Reference HintPath="..\bin\Release\net10.0\..."> has to
+	  get the configuration, the framework and the build order right by hand, and a mistake is an
+	  MSB3245 + CS1061 cascade rather than a clear message.
+	- A server whose TargetFrameworks does not include the client's sets it per item, as on a
+	  ProjectReference: <EndpointsServerReference Include="..." SetTargetFramework="TargetFramework=net10.0" />.
+	- Design-time builds (the IDE) and builds with BuildProjectReferences=false (dotnet build
+	  no-dependencies) only locate the server assembly; they never build it.
+	-->
+	<Target Name="ResolveEndpointsServerReferences"
+	        BeforeTargets="ResolveAssemblyReferences"
+	        Condition="'@(EndpointsServerReference)' != ''">
+
+		<ItemGroup>
+			<_EndpointsServerProject Include="@(EndpointsServerReference)">
+				<SetTargetFramework Condition="'%(EndpointsServerReference.SetTargetFramework)' == ''">TargetFramework=$(TargetFramework)</SetTargetFramework>
+			</_EndpointsServerProject>
+		</ItemGroup>
+
+		<MSBuild Condition="'$(DesignTimeBuild)' != 'true' and '$(BuildProjectReferences)' != 'false'"
+		         Projects="@(_EndpointsServerProject)"
+		         Targets="Build"
+		         Properties="%(_EndpointsServerProject.SetTargetFramework)"
+		         RemoveProperties="RuntimeIdentifier;SelfContained" />
+
+		<MSBuild Projects="@(_EndpointsServerProject)"
+		         Targets="GetTargetPath"
+		         Properties="%(_EndpointsServerProject.SetTargetFramework)"
+		         RemoveProperties="RuntimeIdentifier;SelfContained">
+			<Output TaskParameter="TargetOutputs" ItemName="_EndpointsServerAssembly" />
+		</MSBuild>
+
+		<!--
+		The implementation assembly, not the reference assembly in obj\ref: either carries the contracts,
+		but only the implementation assembly exists at a stable path next to the server's build output.
+		-->
+		<ItemGroup>
+			<Reference Include="%(_EndpointsServerAssembly.Filename)">
+				<HintPath>%(_EndpointsServerAssembly.FullPath)</HintPath>
+				<Private>false</Private>
+			</Reference>
+		</ItemGroup>
+	</Target>
+
+</Project>

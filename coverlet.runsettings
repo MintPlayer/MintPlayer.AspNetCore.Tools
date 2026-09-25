@@ -24,10 +24,14 @@
           sibling repo measured a project reporting 46.9% where 48% of the denominator was
           unreachable generator code, and the honest figure was 88.5%.
 
+          The trailing wildcard also covers MintPlayer.AspNetCore.Endpoints.TestApp.Client, the
+          IsPackable=false typed-client sample (M9), for the same reason: it is generated code
+          referenced only so the tests can drive it.
+
           Do NOT grow this list to hide uncovered shipped code. Everything else that is
           instrumented here is published to NuGet and belongs in the number.
           -->
-          <Exclude>[MintPlayer.AspNetCore.Endpoints.TestApp]*</Exclude>
+          <Exclude>[MintPlayer.AspNetCore.Endpoints.TestApp*]*</Exclude>
 
           <!--
           Pinned to false, not left to the default.

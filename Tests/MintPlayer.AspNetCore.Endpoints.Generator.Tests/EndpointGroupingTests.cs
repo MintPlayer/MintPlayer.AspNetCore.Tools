@@ -10,8 +10,10 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
 /// </summary>
 /// <remarks>
 /// Grouping is the only place the generator builds a graph rather than a list, so it is the only
-/// place that can be ambiguous (a group with two parents) or unbounded (a cycle). Both are reported
-/// rather than resolved by guessing.
+/// place that can be ambiguous (a group with two parents) or unbounded (a cycle). Neither is
+/// resolved by guessing: the ambiguous shape is now the compiler's CS0579, because
+/// <c>[MemberOf&lt;T&gt;]</c> is <c>AllowMultiple = false</c>, and the cycle — which C# cannot
+/// forbid — is still the generator's MPEP005.
 /// </remarks>
 public class EndpointGroupingTests
 {
@@ -82,7 +84,8 @@ public class EndpointGroupingTests
                 public static string Prefix => "/unreferenced";
             }
 
-            public class ListItems : IGetEndpoint, IMemberOf<ReferencedRoot>
+            [MemberOf<ReferencedRoot>]
+            public class ListItems : IGetEndpoint
             {
                 public static string Path => "/items";
                 public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
@@ -109,22 +112,49 @@ public class EndpointGroupingTests
     }
 
     /// <summary>
-    /// A group with two parents gets MPEP004, and neither it nor its endpoints are mapped.
+    /// A group declaring two parents is <c>CS0579</c>, on one declaration or split across partials.
     /// </summary>
     /// <remarks>
-    /// It used to become a <i>root</i> group: <c>HasMultipleParents</c> removed it from the parent
-    /// map, and "not in the parent map" was exactly the test for being a root. So instead of an error
-    /// the consumer got working routes in the wrong place — <c>/users/…</c> where they asked for
-    /// <c>/api/users/…</c>. A missing route is far easier to notice than a wrong one.
+    /// Under <c>IMemberOf&lt;T&gt;</c> this shape was the generator's to catch, and it got it wrong
+    /// once: the group became a <i>root</i> group, because <c>HasMultipleParents</c> removed it from
+    /// the parent map and "not in the parent map" was exactly the test for being a root. The consumer
+    /// got working routes in the wrong place — <c>/users/…</c> where they asked for
+    /// <c>/api/users/…</c>. MPEP004 fixed that; <c>[MemberOf&lt;T&gt;]</c> being
+    /// <c>AllowMultiple = false</c> retired it, because the compiler now refuses the shape outright.
     /// <para>
-    /// MPEP004 rather than MPEP003: the shapes and the consequences differ. MPEP003 is about an
-    /// endpoint and its one route; this moves every endpoint beneath the group, and someone filtering
-    /// diagnostics needs to be able to tell the two apart.
+    /// Asserted for a group rather than only for an endpoint because the consequence is larger —
+    /// every endpoint beneath the group would move — and because the partial case is the one a
+    /// generator reading a single declaration would get wrong. Neither variant may produce a
+    /// generator diagnostic: MPEP004 is retired, and its id is not reused.
     /// </para>
     /// </remarks>
-    [Fact]
-    public void GroupWithTwoParents_ReportsMPEP004_AndIsNotMapped()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GroupWithTwoParents_IsCS0579(bool splitAcrossPartials)
     {
+        var usersApi = splitAcrossPartials
+            ? """
+              [MemberOf<ApiGroup>]
+              public partial class UsersApi : IEndpointGroup
+              {
+                  public static string Prefix => "/users";
+              }
+
+              [MemberOf<AdminGroup>]
+              public partial class UsersApi
+              {
+              }
+              """
+            : """
+              [MemberOf<ApiGroup>]
+              [MemberOf<AdminGroup>]
+              public class UsersApi : IEndpointGroup
+              {
+                  public static string Prefix => "/users";
+              }
+              """;
+
         var source = $$"""
             {{Preamble}}
 
@@ -138,28 +168,26 @@ public class EndpointGroupingTests
                 public static string Prefix => "/admin";
             }
 
-            public class UsersApi : IEndpointGroup, IMemberOf<ApiGroup>, IMemberOf<AdminGroup>
-            {
-                public static string Prefix => "/users";
-            }
+            {{usersApi}}
 
-            public class ListUsers : IGetEndpoint, IMemberOf<UsersApi>
+            [MemberOf<UsersApi>]
+            public class ListUsers : IGetEndpoint
             {
                 public static string Path => "/";
                 public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
             }
             """;
 
-        var result = EndpointGeneratorHarness.Run("Fixtures", source);
-        var generated = string.Join("\n", result.GeneratedTrees.Select(tree => tree.ToString()));
+        // No MPEP004. MPEP016 at Info on the parent the rejected second attribute named is expected:
+        // the generator reads the first [MemberOf<T>], so that group really is unjoined, and the
+        // compilation already fails on CS0579.
+        Assert.All(
+            EndpointGeneratorHarness.Run("Fixtures", source).Diagnostics,
+            diagnostic => Assert.Equal("MPEP016", diagnostic.Id));
 
-        var diagnostic = Assert.Single(result.Diagnostics);
-        Assert.Equal("MPEP004", diagnostic.Id);
-        Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
-        Assert.Contains("UsersApi", diagnostic.GetMessage());
-
-        Assert.DoesNotContain("MapGroup<global::Fixtures.UsersApi>", generated);
-        Assert.DoesNotContain("Map<global::Fixtures.ListUsers>", generated);
+        var errors = EndpointGeneratorHarness.RunAndCompile("Fixtures", source)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        Assert.Equal("CS0579", Assert.Single(errors).Id);
     }
 
     /// <summary>
@@ -184,17 +212,20 @@ public class EndpointGroupingTests
         var source = $$"""
             {{Preamble}}
 
-            public class GroupA : IEndpointGroup, IMemberOf<GroupB>
+            [MemberOf<GroupB>]
+            public class GroupA : IEndpointGroup
             {
                 public static string Prefix => "/a";
             }
 
-            public class GroupB : IEndpointGroup, IMemberOf<GroupA>
+            [MemberOf<GroupA>]
+            public class GroupB : IEndpointGroup
             {
                 public static string Prefix => "/b";
             }
 
-            public class InA : IGetEndpoint, IMemberOf<GroupA>
+            [MemberOf<GroupA>]
+            public class InA : IGetEndpoint
             {
                 public static string Path => "/";
                 public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
@@ -225,12 +256,14 @@ public class EndpointGroupingTests
         var source = $$"""
             {{Preamble}}
 
-            public class Loop : IEndpointGroup, IMemberOf<Loop>
+            [MemberOf<Loop>]
+            public class Loop : IEndpointGroup
             {
                 public static string Prefix => "/loop";
             }
 
-            public class InLoop : IGetEndpoint, IMemberOf<Loop>
+            [MemberOf<Loop>]
+            public class InLoop : IGetEndpoint
             {
                 public static string Path => "/";
                 public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
@@ -262,23 +295,29 @@ public class EndpointGroupingTests
             public class RootTwo : IEndpointGroup { public static string Prefix => "/two"; }
             public class RootThree : IEndpointGroup { public static string Prefix => "/three"; }
 
-            public class ChildOne : IEndpointGroup, IMemberOf<RootOne> { public static string Prefix => "/child"; }
-            public class ChildTwo : IEndpointGroup, IMemberOf<RootTwo> { public static string Prefix => "/child"; }
-            public class ChildThree : IEndpointGroup, IMemberOf<RootThree> { public static string Prefix => "/child"; }
+            [MemberOf<RootOne>]
+            public class ChildOne : IEndpointGroup { public static string Prefix => "/child"; }
+            [MemberOf<RootTwo>]
+            public class ChildTwo : IEndpointGroup { public static string Prefix => "/child"; }
+            [MemberOf<RootThree>]
+            public class ChildThree : IEndpointGroup { public static string Prefix => "/child"; }
 
-            public class InOne : IGetEndpoint, IMemberOf<ChildOne>
+            [MemberOf<ChildOne>]
+            public class InOne : IGetEndpoint
             {
                 public static string Path => "/";
                 public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
             }
 
-            public class InTwo : IGetEndpoint, IMemberOf<ChildTwo>
+            [MemberOf<ChildTwo>]
+            public class InTwo : IGetEndpoint
             {
                 public static string Path => "/";
                 public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
             }
 
-            public class InThree : IGetEndpoint, IMemberOf<ChildThree>
+            [MemberOf<ChildThree>]
+            public class InThree : IGetEndpoint
             {
                 public static string Path => "/";
                 public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
@@ -320,20 +359,39 @@ public class EndpointGroupingTests
             .ThenBy(route => route.Methods, StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(
-            new (string? Path, string Methods)[]
+        // The expected routes are the generated Routes.…Template constants, not a second copy of
+        // the strings: the mapping and the typed links must agree, and this is where both meet the
+        // route ASP.NET Core actually composed. Routes is internal, hence reflection.
+        string Template(string container, string endpoint)
+        {
+            var type = generated.GetType("MintPlayer.AspNetCore.Endpoints.Generated.Routes")!;
+            foreach (var name in container.Split('.', StringSplitOptions.RemoveEmptyEntries))
+                type = type.GetNestedType(name)!;
+            return (string)type.GetField(endpoint + "Template")!.GetRawConstantValue()!;
+        }
+
+        var expected = new (string? Path, string Methods)[]
             {
-                ("/api/products/", "GET"),
-                ("/api/users/", "GET"),
-                ("/api/users/", "POST"),
-                ("/api/users/{id}", "DELETE"),
-                ("/api/users/{id}", "GET"),
-                ("/api/users/{id}", "PUT"),
-                ("/api/users/{id}/patch", "PATCH"),
-                ("/api/{**path}", "OPTIONS,HEAD"),
-                ("/health", "GET"),
-            },
-            actual);
+                (Template("Api.Products", "ListProducts"), "GET"),
+                (Template("Api.Users", "ListUsers"), "GET"),
+                (Template("Api.Users", "CreateUser"), "POST"),
+                (Template("Api.Users", "DeleteUser"), "DELETE"),
+                (Template("Api.Users", "GetUser"), "GET"),
+                (Template("Api.Users", "UpdateUser"), "PUT"),
+                (Template("Api.Users", "PatchUser"), "PATCH"),
+                (Template("", "PreflightEndpoint"), "OPTIONS,HEAD"),
+                (Template("", "HealthCheck"), "GET"),
+            }
+            .OrderBy(route => route.Path, StringComparer.Ordinal)
+            .ThenBy(route => route.Methods, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, actual);
+
+        // And the constants are the routes they should be — without this, a Template that drifted
+        // together with the mapping would pass the assertion above.
+        Assert.Equal("/api/users/{id}/patch", Template("Api.Users", "PatchUser"));
+        Assert.Equal("/api/{**path}", Template("", "PreflightEndpoint"));
     }
 
     /// <summary>

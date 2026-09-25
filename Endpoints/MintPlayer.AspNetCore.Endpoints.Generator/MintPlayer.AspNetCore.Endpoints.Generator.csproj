@@ -10,7 +10,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints.Generator</PackageId>
-		<Version>11.0.1-rc.0</Version>
+		<Version>11.1.0-rc.0</Version>
 		<IncludeSymbols>false</IncludeSymbols>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<DevelopmentDependency>true</DevelopmentDependency>
@@ -23,6 +23,7 @@
 		<Authors>Pieterjan De Clippel</Authors>
 		<Company>MintPlayer</Company>
 		<Product>MintPlayer.AspNetCore.Endpoints</Product>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<GetTargetPathDependsOn>$(GetTargetPathDependsOn);GetDependencyTargetPaths</GetTargetPathDependsOn>
 	</PropertyGroup>
 
@@ -36,6 +37,31 @@
 	</ItemGroup>
 
 	<!--
+	The typed client's URL builder is the runtime library's own EndpointTemplateBinder.cs, embedded as
+	text and emitted into client projects (EndpointClientUrl.g.cs). One source file, so a client URL
+	and an EndpointRoute link cannot drift apart; the runtime's LinkGenerator battery pins both. A
+	client cannot reference the runtime library instead: it is a Web SDK package (NETSDK1082 on
+	browser-wasm, PRD R7.4).
+	-->
+	<ItemGroup>
+		<EmbeddedResource Include="..\MintPlayer.AspNetCore.Endpoints\EndpointTemplateBinder.cs"
+		                  LogicalName="MintPlayer.AspNetCore.Endpoints.Generator.EndpointTemplateBinder.cs"
+		                  Link="Embedded\EndpointTemplateBinder.cs" />
+	</ItemGroup>
+
+	<!--
+	build\*.props makes GenerateEndpointsClient visible to the compiler; build\*.targets provides
+	EndpointsServerReference, the metadata-only server reference a typed client needs (M9). A client
+	references this package, not MintPlayer.AspNetCore.Endpoints, because this one carries no
+	FrameworkReference.
+	-->
+	<ItemGroup>
+		<None Include="build\MintPlayer.AspNetCore.Endpoints.Generator.props" Pack="true" PackagePath="build\" />
+		<None Include="build\MintPlayer.AspNetCore.Endpoints.Generator.targets" Pack="true" PackagePath="build\" />
+		<None Include="README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+	<!--
 	One mechanism packs the analyzer here and in MintPlayer.AspNetCore.Endpoints: GetTargetPath,
 	whose TargetPathWithTargetPlatformMoniker output already carries this assembly *and* every
 	dependency GetDependencyTargetPaths adds below. The two hard-coded globs this replaces
@@ -45,14 +71,110 @@
 	and the analyzer then failed to load in the consumer, with nothing wrong at pack time.
 	-->
 	<PropertyGroup>
+		<!--
+		The one folder the analyzer ships in, in this package and in MintPlayer.AspNetCore.Endpoints
+		(which reads it from here through GetEndpointsAnalyzerPackPath). A move to a versioned folder
+		such as analyzers/dotnet/roslyn4.14/cs is a change to this property and nothing else.
+		-->
+		<EndpointsAnalyzerPackPath Condition="'$(EndpointsAnalyzerPackPath)' == ''">analyzers/dotnet/cs</EndpointsAnalyzerPackPath>
 		<TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackAnalyzerAssemblies</TargetsForTfmSpecificContentInPackage>
+		<BeforePack>SuppressToolsAnalyzerCopies;$(BeforePack)</BeforePack>
 	</PropertyGroup>
 
-	<Target Name="PackAnalyzerAssemblies" DependsOnTargets="GetTargetPath">
+	<!--
+	MintPlayer.SourceGenerators.Tools' own build/MintPlayer.SourceGenerators.Tools.props adds static
+	<None Pack="true"> items that place a second and third copy of this generator (and of Tools.dll)
+	in analyzers/dotnet/roslyn4.0/cs and analyzers/dotnet/roslyn4.9/cs. That layout suits a package
+	that uses those folders exclusively; next to the analyzers/dotnet/cs copy placed below, the SDK
+	resolves every folder as @(Analyzer), the generator runs two or three times, and the consumer
+	gets CS0101/CS0111 duplicate definitions in files they never wrote (PRD R6.5a).
+
+	The contributions are removed here, before pack collects @(None), rather than filtered out of the
+	finished package: the props also adds a Release-only analyzers/dotnet/cs glob for an Attributes
+	assembly, so anything under analyzers/ that arrives as a <None> item is by definition not ours.
+	This package's own payload goes through TfmSpecificPackageFile and is untouched.
+	-->
+	<Target Name="SuppressToolsAnalyzerCopies">
 		<ItemGroup>
-			<TfmSpecificPackageFile Include="@(TargetPathWithTargetPlatformMoniker)" PackagePath="analyzers/dotnet/cs" />
+			<_ToolsAnalyzerCopy Include="@(None)"
+			                    Condition="'%(None.Pack)' == 'true' and $([System.String]::Copy('%(None.PackagePath)').Replace('\', '/').TrimStart('/').StartsWith('analyzers/'))" />
+			<None Remove="@(_ToolsAnalyzerCopy)" />
 		</ItemGroup>
 	</Target>
+
+	<!--
+	The MPEP001/MPEP014/MPEP019 code fix (M11) is a second assembly in the same analyzer folder. It is
+	separate because a CodeFixProvider needs Microsoft.CodeAnalysis.Workspaces, which csc's analyzer
+	host does not load: inside the generator assembly it would stop the GENERATOR loading on every
+	command-line build. Beside it, csc scans it, finds no generator or analyzer, and moves on; only the
+	IDE instantiates it (spike S5).
+
+	ReferenceOutputAssembly="false": the reference only orders the build, so the code fix exists before
+	either package reads it. It is not part of this assembly's compile closure, and it is deliberately
+	not added to GetTargetPath either, which would hand it to csc as an analyzer in every project here
+	that references the generator.
+	-->
+	<ItemGroup>
+		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.csproj"
+		                  ReferenceOutputAssembly="false"
+		                  PrivateAssets="all" />
+	</ItemGroup>
+
+	<!--
+	Returns the code-fix assembly; both packages call it, so there is one place that knows where the
+	code fix comes from and one pair of guards on it.
+
+	Two existence tests, and both are needed. GetTargetPath returns a path without touching the disk,
+	so '@(x)' == '' catches a target that returned nothing (a renamed project), and
+	!Exists('%(x.FullPath)') catches a path that is returned but not built — what a no-build pack over
+	a half-cleaned tree looks like. The second batches over the items and runs zero times on an empty
+	list, which is why the first exists.
+	-->
+	<Target Name="GetEndpointsCodeFixAssembly" Returns="@(_EndpointsCodeFixAssembly)">
+		<MSBuild Projects="..\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.csproj"
+		         Targets="GetTargetPath"
+		         Properties="Configuration=$(Configuration)"
+		         RemoveProperties="TargetFramework;TargetFrameworks;RuntimeIdentifier">
+			<Output TaskParameter="TargetOutputs" ItemName="_EndpointsCodeFixAssembly" />
+		</MSBuild>
+		<Error Condition="'@(_EndpointsCodeFixAssembly)' == ''"
+		       Text="GetTargetPath on MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes returned nothing. Packing would produce a package whose code fixes never appear in the IDE, with no error anywhere." />
+		<Error Condition="!Exists('%(_EndpointsCodeFixAssembly.FullPath)')"
+		       Text="The code-fix assembly '%(_EndpointsCodeFixAssembly.FullPath)' does not exist. Build before packing; otherwise the package ships without its code fixes and nothing reports it." />
+	</Target>
+
+	<Target Name="PackAnalyzerAssemblies" DependsOnTargets="GetTargetPath;GetEndpointsCodeFixAssembly">
+		<!--
+		A guard, because the failure it catches is silent: if SuppressToolsAnalyzerCopies ever stops
+		running (a renamed hook, a props change upstream), the package still packs, still installs, and
+		the consumer's first build fails on CS0101 with nothing pointing here.
+		-->
+		<ItemGroup>
+			<_StrayAnalyzerPackFile Include="@(None)"
+			                        Condition="'%(None.Pack)' == 'true' and $([System.String]::Copy('%(None.PackagePath)').Replace('\', '/').TrimStart('/').StartsWith('analyzers/'))" />
+		</ItemGroup>
+		<Error Condition="'@(_StrayAnalyzerPackFile)' != ''"
+		       Text="'%(_StrayAnalyzerPackFile.Identity)' would be packed into '%(_StrayAnalyzerPackFile.PackagePath)' beside $(EndpointsAnalyzerPackPath). A second analyzer folder makes the generator run more than once in the consumer (CS0101/CS0111)." />
+
+		<ItemGroup>
+			<TfmSpecificPackageFile Include="@(TargetPathWithTargetPlatformMoniker)" PackagePath="$(EndpointsAnalyzerPackPath)" />
+			<TfmSpecificPackageFile Include="@(_EndpointsCodeFixAssembly)" PackagePath="$(EndpointsAnalyzerPackPath)" />
+		</ItemGroup>
+
+		<!-- The code fix must ship, and only in the generator's folder: in any other analyzer folder the
+		     IDE would load it from a place the SDK never pairs with the generator. -->
+		<ItemGroup>
+			<_EndpointsCodeFixPackFile Include="@(TfmSpecificPackageFile)" Condition="'%(Filename)%(Extension)' == 'MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll'" />
+			<_MisplacedEndpointsCodeFixPackFile Include="@(_EndpointsCodeFixPackFile)" Condition="'%(PackagePath)' != '$(EndpointsAnalyzerPackPath)'" />
+		</ItemGroup>
+		<Error Condition="'@(_EndpointsCodeFixPackFile)' == ''"
+		       Text="MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll is not among the files being packed. The package would ship without its code fixes." />
+		<Error Condition="'@(_MisplacedEndpointsCodeFixPackFile)' != ''"
+		       Text="MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll would be packed into '%(_MisplacedEndpointsCodeFixPackFile.PackagePath)' instead of $(EndpointsAnalyzerPackPath), beside the generator." />
+	</Target>
+
+	<!-- Lets MintPlayer.AspNetCore.Endpoints pack into the same folder without a second literal. -->
+	<Target Name="GetEndpointsAnalyzerPackPath" Returns="$(EndpointsAnalyzerPackPath)" />
 
 	<Target Name="GetDependencyTargetPaths">
 		<ItemGroup>

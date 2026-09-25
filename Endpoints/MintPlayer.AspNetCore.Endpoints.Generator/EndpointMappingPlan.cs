@@ -25,8 +25,14 @@ internal sealed class EndpointMappingPlan
         Dictionary<string, List<EndpointInfo>> endpointsByGroup,
         Dictionary<string, int> factoryIndex,
         Dictionary<string, List<string>> groupChains,
-        HashSet<string> cyclicGroups)
+        HashSet<string> cyclicGroups,
+        Dictionary<string, string?> composedRoutes,
+        List<string> unjoinedGroups,
+        Dictionary<string, EndpointInfo> duplicateNames)
     {
+        DuplicateNames = duplicateNames;
+        ComposedRoutes = composedRoutes;
+        UnjoinedGroups = unjoinedGroups;
         DeclaredEndpoints = declared;
         MappableEndpoints = mappable;
         Groups = groups;
@@ -37,6 +43,17 @@ internal sealed class EndpointMappingPlan
         GroupChains = groupChains;
         CyclicGroups = cyclicGroups;
     }
+
+    /// <summary>
+    /// The full route each mappable endpoint answers on, keyed by fully qualified name, or
+    /// <see langword="null"/> where it could not be recovered at compile time.
+    /// </summary>
+    /// <remarks>
+    /// A null entry means "unknown", never "empty" — see <see cref="ComposedRoute"/>. An endpoint
+    /// whose <c>Path</c> is computed, or whose group's <c>Prefix</c> is, appears here as null and
+    /// must simply be skipped by anything reading this, rather than compared against.
+    /// </remarks>
+    public Dictionary<string, string?> ComposedRoutes { get; }
 
     /// <summary>Every discovered endpoint, deduplicated and ordered. Drives the partial base classes.</summary>
     public List<EndpointInfo> DeclaredEndpoints { get; }
@@ -54,6 +71,12 @@ internal sealed class EndpointMappingPlan
 
     /// <summary>Fully qualified endpoint name to its group chain, outermost group first.</summary>
     public Dictionary<string, List<string>> GroupChains { get; }
+
+    /// <summary>
+    /// Declared groups that no mappable endpoint uses, directly or through a nested group, in
+    /// ordinal order. They get no <c>MapGroup</c> call.
+    /// </summary>
+    public List<string> UnjoinedGroups { get; }
 
     /// <summary>Groups that are nested inside themselves, so have no outermost prefix.</summary>
     public HashSet<string> CyclicGroups { get; }
@@ -73,21 +96,42 @@ internal sealed class EndpointMappingPlan
             .ToList();
 
         var parentOf = groups
-            .Where(group => !group.HasMultipleParents)
             .ToDictionary(group => group.FullyQualifiedName, group => group.ParentGroupFqn, StringComparer.Ordinal);
 
         var cyclic = FindCyclicGroups(parentOf);
 
-        // A group with two parents, or one inside a cycle, has no single prefix. It is left out of
-        // the tree rather than quietly re-rooted at the top: a working route at the wrong URL is
-        // harder to notice than a missing one, and MPEP004/MPEP005 say what happened.
-        var unusable = new HashSet<string>(
-            groups.Where(group => group.HasMultipleParents).Select(group => group.FullyQualifiedName),
-            StringComparer.Ordinal);
-        unusable.UnionWith(cyclic);
+        // A group inside a cycle has no single prefix. It is left out of the tree rather than
+        // quietly re-rooted at the top: a working route at the wrong URL is harder to notice than a
+        // missing one, and MPEP005 says what happened. (A group with two parents used to be the
+        // other unusable shape; [MemberOf<T>] with AllowMultiple = false makes it CS0579 instead.)
+        var unusable = new HashSet<string>(cyclic, StringComparer.Ordinal);
 
+        // A group generated code cannot name (MPEP024) is unusable too, and so is every group nested
+        // inside it: their MapGroup calls and prefixes would all have to name it. MPEP024 is reported
+        // on the inaccessible group only, which is the one declaration to fix.
+        var inaccessibleGroups = new HashSet<string>(
+            groups.Where(group => group.InaccessibleReason is not null).Select(group => group.FullyQualifiedName),
+            StringComparer.Ordinal);
+        foreach (var group in groups)
+        {
+            var visited = new HashSet<string>(StringComparer.Ordinal);
+            for (var current = (string?)group.FullyQualifiedName; current is not null && visited.Add(current);)
+            {
+                if (inaccessibleGroups.Contains(current))
+                {
+                    unusable.Add(group.FullyQualifiedName);
+                    break;
+                }
+
+                current = parentOf.TryGetValue(current, out var parent) ? parent : null;
+            }
+        }
+
+        // An endpoint generated code cannot name (MPEP024) is not mapped, linked or contracted: every
+        // one of those files would reference it by name and fail with CS0122. Its partial base class
+        // is still emitted where C# allows it (see DeclaredEndpoints), so nothing else cascades.
         var mappable = declared
-            .Where(endpoint => !endpoint.HasMultipleGroups)
+            .Where(endpoint => endpoint.InaccessibleReason is null)
             .Where(endpoint => endpoint.GroupTypeFqn is null || !unusable.Contains(endpoint.GroupTypeFqn))
             .ToList();
 
@@ -101,6 +145,13 @@ internal sealed class EndpointMappingPlan
                 current = parentOf.TryGetValue(current, out var parent) ? parent : null;
         }
         needed.RemoveWhere(unusable.Contains);
+
+        // The set difference MPEP016 reports. A cyclic group is excluded: it already has MPEP005,
+        // which is the real reason nothing maps through it.
+        var unjoined = groups
+            .Select(group => group.FullyQualifiedName)
+            .Where(fqn => !needed.Contains(fqn) && !unusable.Contains(fqn))
+            .ToList();
 
         var childGroups = needed
             .Where(fqn => parentOf.TryGetValue(fqn, out var parent) && parent is not null && needed.Contains(parent))
@@ -129,10 +180,54 @@ internal sealed class EndpointMappingPlan
             endpoint => ChainOf(endpoint.GroupTypeFqn, parentOf),
             StringComparer.Ordinal);
 
+        // Composed once here rather than per diagnostic: the route template is parsed and compared
+        // by several consumers, and the framework's own route analyzer has a documented
+        // 1.5-minute execution-time defect (dotnet/aspnetcore#53899) from re-parsing.
+        var prefixOf = groups.ToDictionary(
+            group => group.FullyQualifiedName,
+            group => group.Prefix,
+            StringComparer.Ordinal);
+
+        var composedRoutes = mappable.ToDictionary(
+            endpoint => endpoint.FullyQualifiedName,
+            endpoint => ComposedRoute.Compose(
+                groupChains[endpoint.FullyQualifiedName]
+                    .Select(fqn => prefixOf.TryGetValue(fqn, out var prefix) ? prefix : null)
+                    .ToList(),
+                endpoint.Route),
+            StringComparer.Ordinal);
+
+        // Ordinal, like the framework's own name lookup and like C# method names — the endpoint name
+        // is both. The first endpoint in plan order keeps the name.
+        var firstWithName = new Dictionary<string, EndpointInfo>(StringComparer.Ordinal);
+        var duplicateNames = new Dictionary<string, EndpointInfo>(StringComparer.Ordinal);
+        foreach (var endpoint in mappable)
+        {
+            if (firstWithName.TryGetValue(endpoint.EffectiveDescriptorName, out var earlier))
+                duplicateNames[endpoint.FullyQualifiedName] = earlier;
+            else
+                firstWithName[endpoint.EffectiveDescriptorName] = endpoint;
+        }
+
         return new EndpointMappingPlan(
             declared, mappable, groups, rootGroups, childGroups, endpointsByGroup,
-            factoryIndex, groupChains, cyclic);
+            factoryIndex, groupChains, cyclic, composedRoutes, unjoined, duplicateNames);
     }
+
+    /// <summary>
+    /// Mappable endpoints whose effective name an earlier endpoint in plan order already has, keyed
+    /// by fully qualified name, to that earlier endpoint. MPEP012 is reported for each.
+    /// </summary>
+    /// <remarks>
+    /// These endpoints are still mapped, but without <c>WithName</c> and without a typed link. The
+    /// build already fails on MPEP012; the point is what happens if a consumer demotes it. Naming both
+    /// would compile and then throw on the first request, and two link methods with one name in one
+    /// class would bury MPEP012 under a CS0111 in a file the consumer cannot edit.
+    /// </remarks>
+    public Dictionary<string, EndpointInfo> DuplicateNames { get; }
+
+    /// <summary>True when the endpoint is mapped with <c>WithName</c> — every mappable endpoint but an MPEP012 duplicate.</summary>
+    public bool IsNamed(EndpointInfo endpoint) => !DuplicateNames.ContainsKey(endpoint.FullyQualifiedName);
 
     private static List<string> ChainOf(string? groupFqn, Dictionary<string, string?> parentOf)
     {

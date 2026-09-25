@@ -16,7 +16,11 @@ internal static class FixtureSources
     /// <summary>
     /// Every endpoint shape the library claims to support: raw, raw multi-method, raw in a group,
     /// typed, typed-with-response, a <c>SuccessStatusCode</c> override of 201, and a two-level
-    /// group nesting with a root group that is only ever referenced as a parent.
+    /// group nesting with a root group that is only ever referenced as a parent. Since M4 it also
+    /// carries the binding shapes: a response-only GET (<c>IGetEndpoint&lt;TResponse&gt;</c>) with a
+    /// <c>[RouteParam]</c>, a raw DELETE carrying a <c>[RouteParam]</c> (so it needs a generated
+    /// <c>IParameterBinder</c> partial), a raw list endpoint with a defaulted <c>[QueryParam]</c>, and
+    /// body endpoints whose route value lives on the endpoint rather than in the body type.
     /// </summary>
     public const string Corpus = """
         using System.Collections.Generic;
@@ -29,24 +33,25 @@ internal static class FixtureSources
 
         namespace Fixtures;
 
-        public record GetUserRequest(int Id);
         public record UserResponse(int Id, string Name);
         public record CreateUserRequest(string Name);
         public record CreateUserResponse(int Id, string Name);
-        public record UpdateUserRequest(int Id, string Name);
+        public record UpdateUserBody(string Name);
 
         public class ApiGroup : IEndpointGroup
         {
             public static string Prefix => "/api";
         }
 
-        public class UsersApi : IEndpointGroup, IMemberOf<ApiGroup>
+        [MemberOf<ApiGroup>]
+        public class UsersApi : IEndpointGroup
         {
             public static string Prefix => "/users";
             static void IEndpointGroup.Configure(RouteGroupBuilder group) => group.WithTags("Users");
         }
 
-        public class ProductsApi : IEndpointGroup, IMemberOf<ApiGroup>
+        [MemberOf<ApiGroup>]
+        public class ProductsApi : IEndpointGroup
         {
             public static string Prefix => "/products";
         }
@@ -64,24 +69,29 @@ internal static class FixtureSources
             public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
         }
 
-        public class ListUsers : IGetEndpoint, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class ListUsers : IGetEndpoint
         {
             public static string Path => "/";
-            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+
+            [QueryParam] public int Page { get; set; } = 1;
+
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok(Page));
         }
 
-        public partial class GetUser : IGetEndpoint<GetUserRequest, UserResponse>, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class GetUser : IGetEndpoint<UserResponse>
         {
             public static string Path => "/{id}";
 
-            protected override ValueTask<GetUserRequest?> BindRequestAsync(HttpContext context)
-                => ValueTask.FromResult<GetUserRequest?>(new GetUserRequest(1));
+            [RouteParam] public int Id { get; set; }
 
-            public override Task<IResult> HandleAsync(GetUserRequest request, CancellationToken ct)
-                => Task.FromResult(Results.Ok(new UserResponse(request.Id, "Alice")));
+            public override Task<IResult> HandleAsync(CancellationToken ct)
+                => Task.FromResult(Results.Ok(new UserResponse(Id, "Alice")));
         }
 
-        public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserResponse>, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class CreateUser : IPostEndpoint<CreateUserRequest, CreateUserResponse>
         {
             public static string Path => "/";
 
@@ -91,34 +101,40 @@ internal static class FixtureSources
                 => Task.FromResult(Results.Ok(new CreateUserResponse(1, request.Name)));
         }
 
-        public partial class UpdateUser : IPutEndpoint<UpdateUserRequest>, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class UpdateUser : IPutEndpoint<UpdateUserBody>
         {
             public static string Path => "/{id}";
 
-            public override Task<IResult> HandleAsync(UpdateUserRequest request, CancellationToken ct)
+            [RouteParam] public int Id { get; set; }
+
+            public override Task<IResult> HandleAsync(UpdateUserBody request, CancellationToken ct)
                 => Task.FromResult(Results.Ok());
         }
 
-        public partial class PatchUser : IPatchEndpoint<UpdateUserRequest, UserResponse>, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class PatchUser : IPatchEndpoint<UpdateUserBody, UserResponse>
         {
             public static string Path => "/{id}/patch";
 
-            public override Task<IResult> HandleAsync(UpdateUserRequest request, CancellationToken ct)
-                => Task.FromResult(Results.Ok(new UserResponse(request.Id, request.Name)));
+            [RouteParam] public int Id { get; set; }
+
+            public override Task<IResult> HandleAsync(UpdateUserBody request, CancellationToken ct)
+                => Task.FromResult(Results.Ok(new UserResponse(Id, request.Name)));
         }
 
-        public partial class DeleteUser : IDeleteEndpoint<GetUserRequest>, IMemberOf<UsersApi>
+        [MemberOf<UsersApi>]
+        public partial class DeleteUser : IDeleteEndpoint
         {
             public static string Path => "/{id}";
 
-            protected override ValueTask<GetUserRequest?> BindRequestAsync(HttpContext context)
-                => ValueTask.FromResult<GetUserRequest?>(new GetUserRequest(1));
+            [RouteParam] public int Id { get; set; }
 
-            public override Task<IResult> HandleAsync(GetUserRequest request, CancellationToken ct)
-                => Task.FromResult(Results.NoContent());
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.NoContent());
         }
 
-        public class ListProducts : IGetEndpoint, IMemberOf<ProductsApi>
+        [MemberOf<ProductsApi>]
+        public class ListProducts : IGetEndpoint
         {
             public static string Path => "/";
             public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());

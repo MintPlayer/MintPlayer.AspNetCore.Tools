@@ -249,24 +249,38 @@ public class EndpointBaseTests
     }
 
     /// <summary>
-    /// <c>NonBodyEndpoint</c> must leave <c>BindRequestAsync</c> abstract.
+    /// <c>NonBodyEndpoint&lt;TRequest&gt;</c> no longer exists, and <c>GetEndpoint&lt;TRequest&gt;</c> /
+    /// <c>DeleteEndpoint&lt;TRequest&gt;</c> derive <c>BodyEndpoint&lt;TRequest&gt;</c>.
     /// </summary>
     /// <remarks>
-    /// The entire purpose of the type is to force GET and DELETE endpoints to write their own
-    /// binding, and it is one deleted keyword away from silently becoming a no-op that binds null.
-    /// Reflection is the only way to assert it.
+    /// Deliberately rewritten for M4 (PRD R2.14a, R2.14b). This used to pin that
+    /// <c>NonBodyEndpoint.BindRequestAsync</c> stayed abstract, forcing GET and DELETE endpoints to
+    /// write their own binding. Route values now bind to endpoint properties (R2.1), and a GET or
+    /// DELETE that declares a request type is saying it takes a body, so the class lost every user
+    /// and was deleted. The pin moves with the truth: if the type came back, or the per-verb bases
+    /// fell back to an abstract binder, a two-argument <c>IGetEndpoint&lt;TRequest, TResponse&gt;</c>
+    /// would stop binding its body like a POST — so both are asserted by reflection, the only way
+    /// to see either.
     /// </remarks>
     [Fact]
-    public void NonBodyEndpoint_LeavesBindRequestAsyncAbstract()
+    public void NonBodyEndpoint_IsGone_AndBodylessVerbBasesDeriveBodyEndpoint()
     {
-        var method = typeof(NonBodyEndpoint<Req>).GetMethod(
+        Assert.Null(typeof(EndpointBase<>).Assembly.GetType("MintPlayer.AspNetCore.Endpoints.NonBodyEndpoint`1"));
+
+        Assert.Equal(typeof(BodyEndpoint<Req>), typeof(GetEndpoint<Req>).BaseType);
+        Assert.Equal(typeof(BodyEndpoint<Req>), typeof(DeleteEndpoint<Req>).BaseType);
+
+        // BodyEndpoint supplies a concrete binder, so nothing on the GET/DELETE bases is left
+        // abstract for the consumer to implement.
+        var method = typeof(GetEndpoint<Req>).GetMethod(
             "BindRequestAsync",
             System.Reflection.BindingFlags.Instance
                 | System.Reflection.BindingFlags.NonPublic
                 | System.Reflection.BindingFlags.Public);
 
         Assert.NotNull(method);
-        Assert.True(method!.IsAbstract);
+        Assert.False(method!.IsAbstract);
+        Assert.Equal(typeof(BodyEndpoint<Req>), method.DeclaringType);
     }
 
     [Fact]
@@ -275,12 +289,12 @@ public class EndpointBaseTests
         Assert.True(typeof(BodyEndpoint<Req>).IsAssignableFrom(typeof(PostEndpoint<Req>)));
         Assert.True(typeof(BodyEndpoint<Req>).IsAssignableFrom(typeof(PutEndpoint<Req>)));
         Assert.True(typeof(BodyEndpoint<Req>).IsAssignableFrom(typeof(PatchEndpoint<Req>)));
-        Assert.True(typeof(NonBodyEndpoint<Req>).IsAssignableFrom(typeof(GetEndpoint<Req>)));
-        Assert.True(typeof(NonBodyEndpoint<Req>).IsAssignableFrom(typeof(DeleteEndpoint<Req>)));
+        Assert.True(typeof(BodyEndpoint<Req>).IsAssignableFrom(typeof(GetEndpoint<Req>)));
+        Assert.True(typeof(BodyEndpoint<Req>).IsAssignableFrom(typeof(DeleteEndpoint<Req>)));
 
         Assert.All<Type>(
             [
-                typeof(EndpointBase<Req>), typeof(BodyEndpoint<Req>), typeof(NonBodyEndpoint<Req>),
+                typeof(EndpointBase<Req>), typeof(BodyEndpoint<Req>), typeof(ResponseEndpoint),
                 typeof(PostEndpoint<Req>), typeof(PutEndpoint<Req>), typeof(PatchEndpoint<Req>),
                 typeof(GetEndpoint<Req>), typeof(DeleteEndpoint<Req>),
             ],

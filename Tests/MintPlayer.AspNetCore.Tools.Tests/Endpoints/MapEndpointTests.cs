@@ -52,7 +52,7 @@ public class MapEndpointTests
     private sealed class ConfiguredEndpoint : IGetEndpoint
     {
         public static string Path => "/configured";
-        public static void Configure(RouteHandlerBuilder builder) => builder.WithName("configured-by-hook");
+        public static void Configure(RouteHandlerBuilder builder) => builder.WithDisplayName("configured-by-hook");
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 
@@ -69,7 +69,8 @@ public class MapEndpointTests
         public static string Prefix => "/api";
     }
 
-    private sealed class UsersGroup : IEndpointGroup, IMemberOf<ApiGroup>
+    [MemberOf<ApiGroup>]
+    private sealed class UsersGroup : IEndpointGroup
     {
         public static string Prefix => "/users";
         public static void Configure(RouteGroupBuilder group) => group.WithTags("Users");
@@ -80,18 +81,62 @@ public class MapEndpointTests
         public static string Prefix => "/admin";
     }
 
-    private sealed class ListUsersEndpoint : IGetEndpoint, IMemberOf<UsersGroup>
+    [MemberOf<UsersGroup>]
+    private sealed class ListUsersEndpoint : IGetEndpoint
     {
         public static string Path => "/";
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 
-    private sealed class AmbiguousEndpoint : IGetEndpoint, IMemberOf<UsersGroup>, IMemberOf<AdminGroup>
+    // Membership declared on plain abstract bases, so the endpoints below differ only in where the
+    // attribute sits. The bases do not implement IGetEndpoint: a class implementing it must supply the
+    // static Path itself, and each endpoint needs its own.
+    [MemberOf<UsersGroup>]
+    private abstract class InUsersGroup;
+
+    private abstract class InUsersGroupIndirectly : InUsersGroup;
+
+    private sealed class InheritsGroupEndpoint : InUsersGroup, IGetEndpoint
     {
-        public static string Path => "/";
-        public static IEnumerable<string> Methods => ["GET"];
+        public static string Path => "/inherited";
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
+
+    private sealed class InheritsGroupTwoLevelsUpEndpoint : InUsersGroupIndirectly, IGetEndpoint
+    {
+        public static string Path => "/two-up";
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    [MemberOf<AdminGroup>]
+    private sealed class OverridesGroupEndpoint : InUsersGroup, IGetEndpoint
+    {
+        public static string Path => "/overridden";
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    [MemberOf<CycleB>]
+    private sealed class CycleA : IEndpointGroup
+    {
+        public static string Prefix => "/a";
+    }
+
+    [MemberOf<CycleA>]
+    private sealed class CycleB : IEndpointGroup
+    {
+        public static string Prefix => "/b";
+    }
+
+    [MemberOf<CycleA>]
+    private sealed class InCycleEndpoint : IGetEndpoint
+    {
+        public static string Path => "/";
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    private static bool IsMembership(object attribute)
+        => attribute.GetType() is { IsGenericType: true } type
+            && type.GetGenericTypeDefinition() == typeof(MemberOfAttribute<>);
 
     private static IReadOnlyList<RouteEndpoint> Map<TEndpoint>() where TEndpoint : class, IEndpoint
     {
@@ -197,7 +242,49 @@ public class MapEndpointTests
     {
         var endpoint = Assert.Single(Map<ConfiguredEndpoint>());
 
-        Assert.Equal("configured-by-hook", endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName);
+        Assert.Equal("configured-by-hook", endpoint.DisplayName);
+    }
+
+    /// <summary>
+    /// The manual path names the endpoint by the generator's rule — the
+    /// <see cref="EndpointDescriptorNameAttribute"/>, else the class name — as both endpoint name and
+    /// route name, so <c>LinkGenerator</c> and the OpenAPI <c>operationId</c> see the same name
+    /// whichever way the endpoint was mapped.
+    /// </summary>
+    [Fact]
+    public void MapEndpoint_NamesTheEndpoint_LikeTheGenerator()
+    {
+        var described = Assert.Single(Map<HealthEndpoint>());
+        Assert.Equal("health", described.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName);
+        Assert.Equal("health", described.Metadata.GetMetadata<IRouteNameMetadata>()?.RouteName);
+
+        var plain = Assert.Single(Map<CountingEndpoint>());
+        Assert.Equal(nameof(CountingEndpoint), plain.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName);
+    }
+
+    /// <summary>
+    /// A <c>WithName</c> inside <c>Configure</c> does not replace the endpoint's name: the name is
+    /// applied after <c>Configure</c>, on both paths.
+    /// </summary>
+    /// <remarks>
+    /// The name is what the typed links generate from and what MPEP012 proves unique. If Configure
+    /// could replace it, a typed link would stop resolving and two endpoints could share a name the
+    /// generator never saw — which throws on the first request. <see cref="EndpointDescriptorNameAttribute"/>
+    /// is the way to choose the name.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_NameFromConfigure_IsReplacedByTheEndpointName()
+    {
+        var endpoint = Assert.Single(Map<RenamingEndpoint>());
+
+        Assert.Equal(nameof(RenamingEndpoint), endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName);
+    }
+
+    private sealed class RenamingEndpoint : IGetEndpoint
+    {
+        public static string Path => "/renaming";
+        public static void Configure(RouteHandlerBuilder builder) => builder.WithName("renamed-by-hook");
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 
     /// <summary>
@@ -223,7 +310,8 @@ public class MapEndpointTests
     /// </summary>
     /// <remarks>
     /// It used to map at <c>TEndpoint.Path</c> verbatim, so an endpoint declaring
-    /// <c>IMemberOf&lt;UsersGroup&gt;</c> with <c>Path =&gt; "/"</c> landed at <c>/</c> instead of
+    /// membership of <c>UsersGroup</c> (then <c>IMemberOf&lt;UsersGroup&gt;</c>, now
+    /// <c>[MemberOf&lt;UsersGroup&gt;]</c>) with <c>Path =&gt; "/"</c> landed at <c>/</c> instead of
     /// <c>/api/users/</c>. The README advertised manual registration with no such caveat, so an
     /// application mixing generated and manual registration got two different routes for the same
     /// endpoint class depending on how it was mapped — which is the kind of difference nobody looks
@@ -250,21 +338,186 @@ public class MapEndpointTests
     }
 
     /// <summary>
-    /// An endpoint in two groups is refused, loudly, at registration time.
+    /// An endpoint in two groups can no longer reach <c>MapEndpoint</c> at all: the attribute is
+    /// single-use, so the shape is <c>CS0579</c>.
     /// </summary>
     /// <remarks>
-    /// There is no single prefix to resolve, and the generator reports MPEP003 for exactly this shape.
-    /// Picking one arbitrarily would register the endpoint at a route the author never asked for, and
-    /// silence is what made the whole class of grouping defects hard to find.
+    /// There is no single prefix to resolve for such an endpoint, and picking one arbitrarily would
+    /// register it at a route the author never asked for. Under <c>IMemberOf&lt;T&gt;</c> this method
+    /// had to refuse it with an <see cref="InvalidOperationException"/> at registration time; now the
+    /// compiler refuses it earlier, and that guard was removed. What keeps the removal safe is the
+    /// attribute's usage, so that is what is pinned here — <c>AllowMultiple = true</c> would bring the
+    /// ambiguous shape back with nothing left to catch it. (The compile error itself is asserted by
+    /// the generator suite, which can compile a fixture that does not build.)
+    /// <para>
+    /// <c>Inherited = true</c> is pinned alongside it: it is what makes membership on a base class
+    /// meaningful to anything reading the attribute through reflection.
+    /// </para>
     /// </remarks>
     [Fact]
-    public void MapEndpoint_EndpointInTwoGroups_Throws()
+    public void MemberOfAttribute_IsSingleUse_SoAnEndpointInTwoGroupsCannotBeDeclared()
+    {
+        var usage = Assert.Single(
+            typeof(MemberOfAttribute<>).GetCustomAttributes(typeof(AttributeUsageAttribute), inherit: false)
+                .Cast<AttributeUsageAttribute>());
+
+        Assert.False(usage.AllowMultiple);
+        Assert.True(usage.Inherited);
+        Assert.Equal(AttributeTargets.Class, usage.ValidOn);
+    }
+
+    /// <summary>
+    /// Cyclic group nesting is refused, loudly, at registration time.
+    /// </summary>
+    /// <remarks>
+    /// This is the one grouping mistake C# cannot forbid — <c>[MemberOf&lt;B&gt;] class A</c> and
+    /// <c>[MemberOf&lt;A&gt;] class B</c> compile — so the runtime still has to catch it, just as the
+    /// generator reports MPEP005. A cycle has no outermost group and so no prefix; without the visited
+    /// set the chain walk would never terminate.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_CyclicGroupNesting_Throws()
     {
         var app = WebApplication.CreateBuilder([]).Build();
 
-        var exception = Assert.Throws<InvalidOperationException>(() => app.MapEndpoint<AmbiguousEndpoint>());
+        var exception = Assert.Throws<InvalidOperationException>(() => app.MapEndpoint<InCycleEndpoint>());
 
-        Assert.Contains("IMemberOf", exception.Message);
-        Assert.Contains(nameof(AmbiguousEndpoint), exception.Message);
+        Assert.Contains("cyclic", exception.Message);
     }
+
+    /// <summary>Membership declared on a base class applies to the derived endpoint.</summary>
+    /// <remarks>
+    /// <c>ISymbol.GetAttributes()</c> never returns inherited attributes, so the generator walks the
+    /// base chain explicitly; this path walks <see cref="Type.BaseType"/>. Both must land here, or an
+    /// application mixing generated and manual registration maps one class at two routes.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_MembershipOnABaseClass_Applies()
+    {
+        var endpoint = Assert.Single(Map<InheritsGroupEndpoint>());
+
+        Assert.Equal("/api/users/inherited", endpoint.RoutePattern.RawText);
+    }
+
+    /// <summary>The walk does not stop at the direct base.</summary>
+    [Fact]
+    public void MapEndpoint_MembershipTwoLevelsUp_Applies()
+    {
+        var endpoint = Assert.Single(Map<InheritsGroupTwoLevelsUpEndpoint>());
+
+        Assert.Equal("/api/users/two-up", endpoint.RoutePattern.RawText);
+    }
+
+    /// <summary>
+    /// A derived endpoint's own <c>[MemberOf&lt;T&gt;]</c> overrides its base's: nearest wins.
+    /// </summary>
+    /// <remarks>
+    /// This is the case <c>GetCustomAttributes(inherit: true)</c> gets wrong, and the first assertion
+    /// proves the premise rather than assuming it: the runtime only hides an inherited
+    /// <c>AllowMultiple = false</c> attribute when the derived type carries the <i>same</i> attribute
+    /// type, and <c>MemberOfAttribute&lt;AdminGroup&gt;</c> and
+    /// <c>MemberOfAttribute&lt;UsersGroup&gt;</c> are different closed types — so it returns both. Any
+    /// reading of membership through <c>inherit: true</c> that expects one match
+    /// (<c>SingleOrDefault</c>, <c>GetCustomAttribute</c>) throws here, and one that takes an
+    /// arbitrary match depends on an enumeration order reflection does not document.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_MembershipOnSelfAndOnBase_TheDerivedDeclarationWins()
+    {
+        Assert.Equal(
+            2,
+            typeof(OverridesGroupEndpoint).GetCustomAttributes(inherit: true).Count(IsMembership));
+
+        var endpoint = Assert.Single(Map<OverridesGroupEndpoint>());
+
+        Assert.Equal("/admin/overridden", endpoint.RoutePattern.RawText);
+    }
+
+    /// <summary>
+    /// <c>[MemberOf&lt;T&gt;]</c> is an instruction to the mapper, not route metadata, and does not
+    /// reach <c>endpoint.Metadata</c> — including for an endpoint that overrides its base's group.
+    /// </summary>
+    /// <remarks>
+    /// Class-level attributes are transferred with <c>inherit: true</c>, and before R1.7 nothing
+    /// excluded membership, so every grouped endpoint carried a library-internal attribute where
+    /// middleware and OpenAPI transformers enumerate metadata. The overriding endpoint is the sharp
+    /// case: it would have carried <i>two</i> of them, naming two different groups, one of which it
+    /// is not in.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_DoesNotTransferMembershipIntoEndpointMetadata()
+    {
+        foreach (var endpoint in Map<ListUsersEndpoint>().Concat(Map<InheritsGroupEndpoint>()).Concat(Map<OverridesGroupEndpoint>()))
+            Assert.DoesNotContain(endpoint.Metadata, IsMembership);
+
+        Assert.DoesNotContain(EndpointAttributes.ForMetadata(typeof(OverridesGroupEndpoint)), IsMembership);
+        Assert.DoesNotContain(EndpointAttributes.ForMetadata(typeof(ListUsersEndpoint)), IsMembership);
+    }
+
+    // ---------- M5: request-side OpenAPI metadata on the manual path ----------
+
+    public sealed record CreateThing(string Name);
+
+    private sealed class CreateThingEndpoint : IEndpoint<CreateThing>
+    {
+        public static string Path => "/things";
+        public static IEnumerable<string> Methods => ["POST"];
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        public Task<IResult> HandleAsync(CreateThing request, CancellationToken cancellationToken) => Task.FromResult(Results.Ok());
+    }
+
+    private sealed class ThingByIdEndpoint : IGetEndpoint
+    {
+        public static string Path => "/things/{id}";
+        [RouteParam] public int Id { get; set; }
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    private static int[] ProducedStatuses(RouteEndpoint endpoint) =>
+        [.. endpoint.Metadata.OfType<Microsoft.AspNetCore.Http.Metadata.IProducesResponseTypeMetadata>().Select(m => m.StatusCode).Order()];
+
+    /// <summary>
+    /// A typed endpoint mapped by hand declares the same request body, 400 and 415 the generated
+    /// mapping declares — through the same <c>EndpointDocumentation</c> helper.
+    /// </summary>
+    /// <remarks>
+    /// Catches the two registrations drifting apart, and catches the body declaration regressing to
+    /// <c>.Accepts&lt;T&gt;("application/json")</c>: content types on the metadata switch on routing's
+    /// <c>AcceptsMatcherPolicy</c>, which then answers XML or any other type with an empty 415 before
+    /// the library's formatters or its own <c>problem+json</c> 415 get a say. The default 200 must also
+    /// survive, since ApiExplorer stops assuming it once any response is declared.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_TypedEndpoint_DeclaresRequestBodyWithoutContentTypes_And400And415()
+    {
+        var endpoint = Assert.Single(Map<CreateThingEndpoint>());
+
+        var accepts = Assert.Single(endpoint.Metadata.OfType<Microsoft.AspNetCore.Http.Metadata.IAcceptsMetadata>());
+        Assert.Equal(typeof(CreateThing), accepts.RequestType);
+        Assert.Empty(accepts.ContentTypes);
+        Assert.False(accepts.IsOptional);
+
+        Assert.Equal([200, 400, 415], ProducedStatuses(endpoint));
+    }
+
+    /// <summary>
+    /// An endpoint with a <c>[RouteParam]</c> declares the 400 its conversion can produce, and no body.
+    /// </summary>
+    /// <remarks>
+    /// The manual path cannot declare the path parameter itself — it has no compile-time shadow type
+    /// to hand ApiExplorer; that divergence is documented on <c>MapEndpoint</c>. This pins what it can do.
+    /// </remarks>
+    [Fact]
+    public void MapEndpoint_EndpointWithBoundProperty_Declares400_AndNoBody()
+    {
+        var endpoint = Assert.Single(Map<ThingByIdEndpoint>());
+
+        Assert.Empty(endpoint.Metadata.OfType<Microsoft.AspNetCore.Http.Metadata.IAcceptsMetadata>());
+        Assert.Equal([200, 400], ProducedStatuses(endpoint));
+    }
+
+    /// <summary>An endpoint that binds nothing declares nothing extra — not even the default 200.</summary>
+    [Fact]
+    public void MapEndpoint_EndpointWithNothingToBind_DeclaresNoResponses()
+        => Assert.Empty(ProducedStatuses(Assert.Single(Map<HealthEndpoint>())));
 }

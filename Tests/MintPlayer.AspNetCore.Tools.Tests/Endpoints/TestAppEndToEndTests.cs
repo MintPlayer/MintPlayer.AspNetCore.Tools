@@ -79,27 +79,114 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
     [Fact]
     public async Task GetTypedEndpoint_BindsRouteValueAndReturnsPayload()
     {
-        var response = await Client.GetAsync("/api/users/7");
+        // Since the sample reads users from its scoped IUserStore, only a stored id answers 200: 1 is
+        // the seeded Alice, and no test in this class renames or deletes her.
+        var response = await Client.GetAsync("/api/users/1");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("\"id\":7", await response.Content.ReadAsStringAsync());
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"id\":1", body);
+        Assert.Contains("Alice", body);
+    }
+
+    /// <summary>An id the store does not hold is a 404 from the handler — binding succeeded.</summary>
+    [Fact]
+    public async Task GetTypedEndpoint_UnknownId_Returns404()
+    {
+        Assert.Equal(HttpStatusCode.NotFound, (await Client.GetAsync("/api/users/987654")).StatusCode);
     }
 
     /// <summary>
-    /// A non-numeric route value is a 400, because the sample's own binder now says so.
+    /// The goal check for scoped injection: the <c>IUserStore</c> in an endpoint's primary
+    /// constructor is the request's scoped instance, created afresh for every request, through the
+    /// generated <c>MapTestAppEndpoints()</c>.
     /// </summary>
     /// <remarks>
-    /// The library cannot translate this for the endpoint: a <c>FormatException</c> out of a
-    /// hand-written binder could equally be a bug, and guessing 400 would swallow real ones. What it
-    /// provides is the way to say it — <c>EndpointBindingException</c> — and the sample uses it, which
-    /// is the point of demonstrating it here. Left unsaid, this is still a 500.
+    /// Within a request the constructor's instance and <c>RequestServices</c>' instance are one object,
+    /// so the endpoint was built from the request scope, not the root provider (which would also throw
+    /// for a scoped service with scope validation on). Across two requests the instances differ, so it
+    /// is not cached as if it were a singleton. And the data behind the store — a singleton — survives:
+    /// a user created in one request is found by the next.
     /// </remarks>
     [Fact]
-    public async Task GetTypedEndpoint_NonNumericRouteValue_Returns400()
+    public async Task ScopedService_IsInjectedPerRequest_ThroughTheGeneratedMapping()
     {
-        var response = await Client.GetAsync("/api/users/not-a-number");
+        var client = Client;
+
+        var first = await client.GetFromJsonAsync<StoreScope>("/api/users/store-scope");
+        var second = await client.GetFromJsonAsync<StoreScope>("/api/users/store-scope");
+
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+        Assert.NotEqual(Guid.Empty, first.ConstructorInstance);
+        Assert.Equal(first.ConstructorInstance, first.RequestInstance);
+        Assert.Equal(second.ConstructorInstance, second.RequestInstance);
+        Assert.NotEqual(first.ConstructorInstance, second.ConstructorInstance);
+
+        var created = await client.PostAsJsonAsync("/api/users/", new { name = "Scoped", email = "scoped@example.com" });
+        var id = (await created.Content.ReadFromJsonAsync<CreatedUser>())!.Id;
+        Assert.Contains("Scoped", await client.GetStringAsync($"/api/users/{id}"));
+    }
+
+    private sealed record StoreScope(Guid ConstructorInstance, Guid RequestInstance);
+
+    private sealed record CreatedUser(int Id, string Name, string Email);
+
+    /// <summary>
+    /// A non-numeric route value is a 400 naming the parameter, the value and the expected type
+    /// (R2.11) — not a 500, and not a 404.
+    /// </summary>
+    /// <remarks>
+    /// Since M4 the sample writes no binder at all: <c>GetUser</c> declares <c>[RouteParam] int Id</c>
+    /// and the generated <c>BindParameters</c> override rejects the value. Before M4 the sample's own
+    /// hand-written binder threw <c>EndpointBindingException</c>; left unsaid, this was a 500. No route
+    /// constraint is emitted (R2.10), which is why this is a 400 rather than a 404.
+    /// </remarks>
+    [Fact]
+    public async Task GetTypedEndpoint_NonNumericRouteValue_Returns400WithTheReason()
+    {
+        var response = await Client.GetAsync("/api/users/abc");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("The route parameter 'Id' must be a valid Int32; 'abc' is not.", await DetailOf(response));
+    }
+
+    /// <summary>A nested endpoint in a partial container binds its route value too.</summary>
+    [Fact]
+    public async Task NestedResponseOnlyEndpoint_BindsRouteValue()
+    {
+        var response = await Client.GetAsync("/api/users/nested/42");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("\"id\":42", await response.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// The raw <c>ListUsers</c> endpoint's <c>[QueryParam] int Page = 1</c>: absent keeps the
+    /// initializer, present binds, malformed is a 400.
+    /// </summary>
+    /// <remarks>
+    /// The initializer is the default only because the generator emits the <c>Try…</c> form for a
+    /// property that has one. The required form would make the bare URL a 400; the optional form
+    /// would overwrite 1 with 0. Raw endpoints bind through the generated explicit
+    /// <c>IParameterBinder</c>, which the generated <c>Map&lt;TEndpoint&gt;</c> calls before
+    /// <c>HandleAsync</c>.
+    /// </remarks>
+    [Fact]
+    public async Task RawListEndpoint_QueryParameter_DefaultsBindsAndRejects()
+    {
+        Assert.Contains("\"page\":1", await Client.GetStringAsync("/api/users"));
+        Assert.Contains("\"page\":3", await Client.GetStringAsync("/api/users?page=3"));
+
+        var bad = await Client.GetAsync("/api/users?page=xyz");
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        Assert.Equal("The query parameter 'Page' must be a valid Int32; 'xyz' is not.", await DetailOf(bad));
+    }
+
+    private static async Task<string?> DetailOf(HttpResponseMessage response)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("detail").GetString();
     }
 
     [Fact]
@@ -109,6 +196,31 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         Assert.Contains("Carol", await response.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>
+    /// An invalid body for the sample's <c>[ValidatableType]</c> request is a 400 problem response
+    /// naming both fields, and the handler never runs.
+    /// </summary>
+    /// <remarks>
+    /// This is the whole of PRD P9 in one request: the sample calls <c>AddValidation()</c> and marks
+    /// <c>CreateUserRequest</c>, yet before M7 this returned 201 with an empty name, because the
+    /// framework cannot discover types through a generated <c>Map</c> call. It also pins that the
+    /// attributes on the record's <i>positional parameters</i> are honoured, which is where the
+    /// sample puts them.
+    /// </remarks>
+    [Fact]
+    public async Task PostTypedEndpoint_InvalidBody_Returns400ProblemWithFieldErrors()
+    {
+        var response = await Client.PostAsJsonAsync("/api/users/", new { name = "", email = "not-an-email" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+
+        using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var errors = document.RootElement.GetProperty("errors");
+        Assert.True(errors.TryGetProperty("Name", out _), errors.ToString());
+        Assert.True(errors.TryGetProperty("Email", out _), errors.ToString());
     }
 
     /// <summary>
@@ -177,14 +289,55 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
         var response = await Client.PutAsJsonAsync("/api/users/7", new { name = "Updated", email = "u@example.com" });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("\"id\":7", await response.Content.ReadAsStringAsync());
     }
 
+    /// <summary>
+    /// P10, closed by construction: the route owns the id. An <c>id</c> in the PUT body cannot
+    /// override it, because <c>UpdateUserBody</c> no longer has an <c>Id</c> member at all.
+    /// </summary>
+    /// <remarks>
+    /// Before M4, <c>UpdateUserRequest(Id, Name, Email)</c> was the body, so a client could send
+    /// <c>PUT /api/users/1</c> with <c>{"id":999}</c> and the handler saw 999.
+    /// </remarks>
     [Fact]
-    public async Task DeleteTypedEndpoint_Returns204()
+    public async Task PutTypedEndpoint_IdInBody_IsIgnored_RouteWins()
     {
-        var response = await Client.DeleteAsync("/api/users/7");
+        // Id 8, not the seeded 1: PUT now writes to the shared store (an upsert), and renaming Alice
+        // would change what the other tests in this class read.
+        var response = await Client.PutAsJsonAsync("/api/users/8", new { id = 999, name = "Updated", email = "u@example.com" });
 
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"id\":8", body);
+        Assert.DoesNotContain("999", body);
+    }
+
+    /// <summary>
+    /// A malformed route value on a body endpoint is a 400 on the route value, even with a valid
+    /// body (R2.11) — parameters bind before the body.
+    /// </summary>
+    [Fact]
+    public async Task PutTypedEndpoint_NonNumericRouteValue_WithValidBody_Returns400OnTheRouteValue()
+    {
+        var response = await Client.PutAsJsonAsync("/api/users/abc", new { name = "Updated", email = "u@example.com" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("The route parameter 'Id' must be a valid Int32; 'abc' is not.", await DetailOf(response));
+    }
+
+    /// <summary>
+    /// <c>DeleteUser</c> is now a raw <c>IDeleteEndpoint</c> with a <c>[RouteParam]</c>: 204 on a good
+    /// id, 400 on a bad one — which is only possible if the generated <c>IParameterBinder</c> ran.
+    /// </summary>
+    [Fact]
+    public async Task DeleteRawEndpoint_Returns204_AndRejectsABadRouteValue()
+    {
+        Assert.Equal(HttpStatusCode.NoContent, (await Client.DeleteAsync("/api/users/5")).StatusCode);
+
+        var bad = await Client.DeleteAsync("/api/users/abc");
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+        Assert.Equal("The route parameter 'Id' must be a valid Int32; 'abc' is not.", await DetailOf(bad));
     }
 
     [Theory]
@@ -252,8 +405,16 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
         Assert.Contains(produces, metadata => metadata.StatusCode == 201);
     }
 
+    /// <summary>
+    /// The response-only <c>GetUser : IGetEndpoint&lt;UserResponse&gt;</c> gets <c>Produces</c> metadata
+    /// through the generated <c>ProducesResponse</c>, at the default 200, naming its response type.
+    /// </summary>
+    /// <remarks>
+    /// Before M4 this endpoint was typed-with-response; the assertion survived the reshape because
+    /// the response-only rung must document itself exactly as well.
+    /// </remarks>
     [Fact]
-    public void TypedWithResponseEndpoint_WithoutOverride_ProducesMetadataDefaultsTo200()
+    public void ResponseOnlyEndpoint_WithoutOverride_ProducesMetadataDefaultsTo200()
     {
         var getUser = Endpoints().Single(endpoint =>
             endpoint.RoutePattern.RawText == "/api/users/{id}"
@@ -263,21 +424,32 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
             .OfType<Microsoft.AspNetCore.Http.Metadata.IProducesResponseTypeMetadata>()
             .ToArray();
 
-        Assert.Contains(produces, metadata => metadata.StatusCode == 200);
+        Assert.Contains(produces, metadata => metadata.StatusCode == 200 && metadata.Type?.Name == "UserResponse");
     }
 
     /// <summary>
-    /// A typed endpoint with no declared response type gets no <c>Produces</c> metadata, because
-    /// there is no type to describe.
+    /// A typed endpoint with no declared response type gets no <i>typed</i> <c>Produces</c>
+    /// metadata, because there is no type to describe — only the untyped default 200 plus the 400
+    /// and 415 its body can fail with.
     /// </summary>
+    /// <remarks>
+    /// Rewritten for M5. It used to assert no produces metadata at all; M5 adds
+    /// <c>ProducesProblem(400/415)</c>, and because ApiExplorer only assumes a 200 for an endpoint with
+    /// no response metadata, the library restores that 200 itself. The failure this still catches is a
+    /// response <i>type</i> being invented for a level that declares none.
+    /// </remarks>
     [Fact]
-    public void TypedEndpointWithoutResponseType_HasNoProducesMetadata()
+    public void TypedEndpointWithoutResponseType_HasNoTypedProducesMetadata()
     {
         var updateUser = Endpoints().Single(endpoint =>
             endpoint.RoutePattern.RawText == "/api/users/{id}"
             && endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains("PUT") == true);
 
-        Assert.Empty(updateUser.Metadata.OfType<Microsoft.AspNetCore.Http.Metadata.IProducesResponseTypeMetadata>());
+        var produces = updateUser.Metadata.OfType<Microsoft.AspNetCore.Http.Metadata.IProducesResponseTypeMetadata>().ToArray();
+
+        Assert.Equal([200, 400, 415], produces.Select(m => m.StatusCode).Order().ToArray());
+        var success = Assert.Single(produces, m => m.StatusCode == 200);
+        Assert.True(success.Type is null || success.Type == typeof(void));
     }
 
     [Fact]
@@ -290,5 +462,78 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
         Assert.Contains("/api/users/{id}", patterns);
         Assert.Contains("/api/products/", patterns);
         Assert.Contains("/api/{**path}", patterns);
+    }
+
+    // ---------- names and typed links (M8) ----------
+
+    /// <summary>
+    /// Every generated endpoint carries its effective name as both endpoint name and route name —
+    /// the class name, or its <c>[EndpointDescriptorName]</c>.
+    /// </summary>
+    /// <remarks>
+    /// Endpoints the sample maps by hand (<c>MapOpenApi</c>) are excluded by the absence of a
+    /// library type in their metadata rather than by name, so a generated endpoint that lost its
+    /// name cannot slip out of the assertion.
+    /// </remarks>
+    [Fact]
+    public void GeneratedEndpoints_CarryTheirEffectiveNames()
+    {
+        var generated = Endpoints()
+            .Where(endpoint => endpoint.RoutePattern.RawText != "/openapi/{documentName}.json")
+            .ToArray();
+
+        var names = generated
+            .Select(endpoint => endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName ?? "(unnamed)")
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+            ["CreateUser", "DeleteUser", "FindUserByName", "GetUser", "HealthCheck", "ListProducts", "ListUsers", "NestedGetUser", "PreflightEndpoint", "UpdateUser", "UserStoreScope"],
+            names);
+        Assert.All(generated, endpoint => Assert.Equal(
+            endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName,
+            endpoint.Metadata.GetMetadata<IRouteNameMetadata>()?.RouteName));
+    }
+
+    /// <summary>
+    /// The framework's own <see cref="LinkGenerator"/> resolves a generated endpoint by its name —
+    /// which is what <c>EndpointRoute.Path</c> and the typed links rely on.
+    /// </summary>
+    [Fact]
+    public void LinkGenerator_ResolvesGetUserByName()
+    {
+        var links = factory.Services.GetRequiredService<LinkGenerator>();
+
+        Assert.Equal("/api/users/42", links.GetPathByName("GetUser", new { id = 42 }));
+        Assert.Equal("/api/users/nested/7", links.GetPathByName("NestedGetUser", new { id = 7 }));
+    }
+
+    /// <summary>
+    /// <c>CreateUser</c>'s <c>Location</c> header now comes from <c>Routes.Api.Users.GetUser(id: …)</c>
+    /// rather than a magic string — and it points at a URL the app actually answers.
+    /// </summary>
+    /// <remarks>
+    /// Following the header, not just comparing it, is what makes this more than a restatement of
+    /// the literal it replaced: a typed link whose template drifted from the mapping would produce a
+    /// well-formed Location that 404s.
+    /// </remarks>
+    [Fact]
+    public async Task CreateUser_LocationHeader_IsTheTypedLink_AndResolves()
+    {
+        var client = Client;
+        var response = await client.PostAsJsonAsync("/api/users/", new { name = "Dave", email = "dave@example.com" });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        // The id comes from the store now (it used to be a fixed 42), so the header is compared with
+        // the id the response reports, and following it must find the user just created.
+        var created = (await response.Content.ReadFromJsonAsync<CreatedUser>())!;
+        Assert.Equal($"/api/users/{created.Id}", response.Headers.Location?.OriginalString);
+
+        var followed = await client.GetAsync(response.Headers.Location);
+        Assert.Equal(HttpStatusCode.OK, followed.StatusCode);
+        var body = await followed.Content.ReadAsStringAsync();
+        Assert.Contains($"\"id\":{created.Id}", body);
+        Assert.Contains("Dave", body);
     }
 }

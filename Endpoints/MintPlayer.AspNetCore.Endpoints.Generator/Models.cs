@@ -4,7 +4,14 @@ using MintPlayer.SourceGenerators.Tools;
 
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
 
-internal enum EndpointLevel { Raw, Typed, TypedWithResponse }
+/// <summary>How much the endpoint declares, which decides its generated base class.</summary>
+/// <remarks>
+/// <see cref="ResponseOnly"/> is <c>IGetEndpoint&lt;TResponse&gt;</c>/<c>IDeleteEndpoint&lt;TResponse&gt;</c>:
+/// a typed response and no request body. It is recognised from <c>IResponseEndpoint&lt;T&gt;</c>
+/// rather than from arity, because its single type argument is the <i>response</i> — reading it by
+/// arity would take the response type for a request and try to bind a body into it.
+/// </remarks>
+internal enum EndpointLevel { Raw, Typed, TypedWithResponse, ResponseOnly }
 internal enum HttpMethodKind { Custom, Get, Post, Put, Delete, Patch }
 
 internal sealed class EndpointInfo : IEquatable<EndpointInfo>
@@ -12,10 +19,23 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public EndpointInfo(string fqn, string ns, string className, bool isPartial, bool hasExistingBaseClass,
         EndpointLevel level, HttpMethodKind httpMethod,
         string? requestTypeFqn, string? responseTypeFqn,
-        string? groupTypeFqn, bool hasMultipleGroups,
+        string? groupTypeFqn,
         bool baseChainReachesEndpointBase = false,
-        string? descriptorName = null, LocationKey? location = null)
+        string? descriptorName = null, LocationKey? location = null,
+        PathSpec? pathSpec = null, string? route = null,
+        ImmutableArray<BoundProperty> boundProperties = default,
+        string? knownMethods = null,
+        RequestValidationGap validationGap = RequestValidationGap.None,
+        string? inaccessibleReason = null,
+        bool isInFileLocalType = false)
     {
+        InaccessibleReason = inaccessibleReason;
+        IsInFileLocalType = isInFileLocalType;
+        ValidationGap = validationGap;
+        KnownMethods = knownMethods;
+        BoundProperties = boundProperties.IsDefault ? ImmutableArray<BoundProperty>.Empty : boundProperties;
+        PathSpec = pathSpec;
+        Route = route;
         FullyQualifiedName = fqn;
         Namespace = ns;
         ClassName = className;
@@ -26,7 +46,6 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         RequestTypeFqn = requestTypeFqn;
         ResponseTypeFqn = responseTypeFqn;
         GroupTypeFqn = groupTypeFqn;
-        HasMultipleGroups = hasMultipleGroups;
         BaseChainReachesEndpointBase = baseChainReachesEndpointBase;
         DescriptorName = descriptorName;
         Location = location;
@@ -42,7 +61,68 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public string? RequestTypeFqn { get; }
     public string? ResponseTypeFqn { get; }
     public string? GroupTypeFqn { get; }
-    public bool HasMultipleGroups { get; }
+
+    /// <summary>
+    /// The chain of types this endpoint is nested inside, or null when it sits directly in its
+    /// namespace.
+    /// </summary>
+    /// <remarks>
+    /// Emitting a nested endpoint's partial into a flat <c>namespace { }</c> block produces code
+    /// that does not compile, because the containing types are never reopened. Nothing in the
+    /// fixture corpus was nested, which is why a 988-test suite did not catch it.
+    /// <para>
+    /// <see cref="MintPlayer.SourceGenerators.Tools.PathSpec.AllPartial"/> also answers the
+    /// follow-up question the flat form could not even ask: whether every containing type is
+    /// <c>partial</c>. If one is not, the endpoint cannot be extended from a generated file at
+    /// all, and that is a diagnostic rather than a silent miscompile.
+    /// </para>
+    /// </remarks>
+    public PathSpec? PathSpec { get; }
+
+    /// <summary>
+    /// The group-relative route this endpoint declares, recovered at compile time, or
+    /// <see langword="null"/> when it could not be.
+    /// </summary>
+    /// <remarks>
+    /// <b>Null means "unknown", never "empty".</b> It is unrecoverable for a non-constant
+    /// expression and for any endpoint in a referenced assembly, both of which are legitimate, so
+    /// every check built on this must stay silent rather than guess. See <see cref="RouteLiteral"/>.
+    /// </remarks>
+    public string? Route { get; }
+
+    /// <summary>
+    /// The endpoint's <c>[RouteParam]</c>/<c>[QueryParam]</c> properties, own and inherited, nearest
+    /// declaration first and de-duplicated by name.
+    /// </summary>
+    public ImmutableArray<BoundProperty> BoundProperties { get; }
+
+    /// <summary>
+    /// The verbs this endpoint answers, encoded by <see cref="MethodsLiteral"/>, or
+    /// <see langword="null"/> when they are not known at compile time.
+    /// </summary>
+    /// <remarks>
+    /// Null is "unknown", and MPEP007 treats unknown as "no conflict" — never as a conflict.
+    /// </remarks>
+    public string? KnownMethods { get; }
+
+    /// <summary>
+    /// Whether the request type has validation rules but no <c>[ValidatableType]</c> — the MPEP015
+    /// shape. Always <see cref="RequestValidationGap.None"/> for levels without a request body.
+    /// </summary>
+    public RequestValidationGap ValidationGap { get; }
+
+    /// <summary>
+    /// Why generated code outside the endpoint cannot name it (MPEP024), or <see langword="null"/>
+    /// when it can. Such an endpoint is not mapped, linked or contracted.
+    /// </summary>
+    /// <remarks>See <see cref="GeneratedCodeAccess"/>.</remarks>
+    public string? InaccessibleReason { get; }
+
+    /// <summary>
+    /// True when the endpoint or a type it is nested in is a <c>file</c> type, so no generated
+    /// partial can join it.
+    /// </summary>
+    public bool IsInFileLocalType { get; }
 
     /// <summary>
     /// True when the user's own base class already derives from one of the library's endpoint bases.
@@ -73,6 +153,7 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public string? GetBaseClassName()
     {
         if (Level == EndpointLevel.Raw) return null;
+        if (Level == EndpointLevel.ResponseOnly) return "global::MintPlayer.AspNetCore.Endpoints.ResponseEndpoint";
         var name = HttpMethod switch
         {
             HttpMethodKind.Post => "PostEndpoint",
@@ -97,10 +178,18 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         RequestTypeFqn == other.RequestTypeFqn &&
         ResponseTypeFqn == other.ResponseTypeFqn &&
         GroupTypeFqn == other.GroupTypeFqn &&
-        HasMultipleGroups == other.HasMultipleGroups &&
         BaseChainReachesEndpointBase == other.BaseChainReachesEndpointBase &&
         DescriptorName == other.DescriptorName &&
-        LocationKeys.AreEqual(Location, other.Location);
+        LocationKeys.AreEqual(Location, other.Location) &&
+        PathSpecs.AreEqual(PathSpec, other.PathSpec) &&
+        Route == other.Route &&
+        KnownMethods == other.KnownMethods &&
+        ValidationGap == other.ValidationGap &&
+        InaccessibleReason == other.InaccessibleReason &&
+        IsInFileLocalType == other.IsInFileLocalType &&
+        // ImmutableArray's own equality compares the backing array by reference. Using it here
+        // would make every run look like a change and kill incremental caching, silently.
+        SequenceComparer<BoundProperty>.Instance.Equals(BoundProperties, other.BoundProperties);
 
     public override bool Equals(object? obj) => Equals(obj as EndpointInfo);
     public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
@@ -108,27 +197,39 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
 
 internal sealed class GroupInfo : IEquatable<GroupInfo>
 {
-    public GroupInfo(string fullyQualifiedName, string? parentGroupFqn, bool hasMultipleParents, LocationKey? location = null)
+    public GroupInfo(string fullyQualifiedName, string? parentGroupFqn,
+        LocationKey? location = null, string? prefix = null, string? inaccessibleReason = null)
     {
+        InaccessibleReason = inaccessibleReason;
         FullyQualifiedName = fullyQualifiedName;
         ParentGroupFqn = parentGroupFqn;
-        HasMultipleParents = hasMultipleParents;
         Location = location;
+        Prefix = prefix;
     }
 
     public string FullyQualifiedName { get; }
     public string? ParentGroupFqn { get; }
-    public bool HasMultipleParents { get; }
+
+    /// <inheritdoc cref="EndpointInfo.Route"/>
+    public string? Prefix { get; }
 
     /// <inheritdoc cref="EndpointInfo.Location"/>
     public LocationKey? Location { get; }
+
+    /// <summary>
+    /// Why generated code cannot name the group (MPEP024), or <see langword="null"/> when it can.
+    /// Such a group is not mapped, and neither is anything that joins it, directly or through a
+    /// nested group.
+    /// </summary>
+    public string? InaccessibleReason { get; }
 
     public bool Equals(GroupInfo? other) =>
         other is not null &&
         FullyQualifiedName == other.FullyQualifiedName &&
         ParentGroupFqn == other.ParentGroupFqn &&
-        HasMultipleParents == other.HasMultipleParents &&
-        LocationKeys.AreEqual(Location, other.Location);
+        LocationKeys.AreEqual(Location, other.Location) &&
+        Prefix == other.Prefix &&
+        InaccessibleReason == other.InaccessibleReason;
 
     public override bool Equals(object? obj) => Equals(obj as GroupInfo);
     public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
@@ -136,14 +237,43 @@ internal sealed class GroupInfo : IEquatable<GroupInfo>
 
 internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
 {
-    public AssemblyInfo(string assemblyName, string? methodNameOverride)
+    public AssemblyInfo(string assemblyName, string? methodNameOverride, bool hasOpenApiTransformers = false, bool canMapEndpoints = true)
     {
         AssemblyName = assemblyName;
         MethodNameOverride = methodNameOverride;
+        HasOpenApiTransformers = hasOpenApiTransformers;
+        CanMapEndpoints = canMapEndpoints;
     }
 
     public string AssemblyName { get; }
     public string? MethodNameOverride { get; }
+
+    /// <summary>
+    /// True when the compilation can resolve <c>IEndpointRouteBuilder</c>, which every line of
+    /// <c>EndpointMapping.g.cs</c> needs.
+    /// </summary>
+    /// <remarks>
+    /// False in a typed-client project (M9): the client references the generator package for
+    /// <see cref="EndpointClientGenerator"/>, but it has no ASP.NET Core — a Blazor WebAssembly
+    /// client cannot have it (NETSDK1082, PRD R7.4). The mapping file would be nothing but errors
+    /// there, so nothing is emitted and MPEP006 stays silent.
+    /// </remarks>
+    public bool CanMapEndpoints { get; }
+
+    /// <summary>
+    /// True when the consumer's compilation can register an OpenAPI operation transformer — it
+    /// references a <c>Microsoft.AspNetCore.OpenApi</c> built on <c>Microsoft.OpenApi</c> 2.x or
+    /// later.
+    /// </summary>
+    /// <remarks>
+    /// The runtime library deliberately does not reference <c>Microsoft.AspNetCore.OpenApi</c>:
+    /// <c>AddOpenApiOperationTransformer</c> is not in the shared framework, so taking it would force
+    /// the package on every consumer, including those that never produce a document (PRD R4.7).
+    /// The generated file is the one place that can depend on it conditionally — it is compiled
+    /// in the consumer's project, against the consumer's references. So the schema transformer is
+    /// emitted only when this is true, and a consumer without OpenAPI pays nothing.
+    /// </remarks>
+    public bool HasOpenApiTransformers { get; }
 
     /// <summary>
     /// The name of the generated mapping extension method — always a valid C# identifier.
@@ -224,7 +354,11 @@ internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
     }
 
     public bool Equals(AssemblyInfo? other) =>
-        other is not null && AssemblyName == other.AssemblyName && MethodNameOverride == other.MethodNameOverride;
+        other is not null &&
+        AssemblyName == other.AssemblyName &&
+        MethodNameOverride == other.MethodNameOverride &&
+        HasOpenApiTransformers == other.HasOpenApiTransformers &&
+        CanMapEndpoints == other.CanMapEndpoints;
 
     public override bool Equals(object? obj) => Equals(obj as AssemblyInfo);
     public override int GetHashCode() => AssemblyName?.GetHashCode() ?? 0;
@@ -291,6 +425,43 @@ internal sealed class SequenceComparer<T> : IEqualityComparer<ImmutableArray<T>>
     }
 
     public int GetHashCode(ImmutableArray<T> obj) => obj.IsDefault ? 0 : obj.Length;
+}
+
+internal static class PathSpecs
+{
+    /// <summary>
+    /// Field-wise equality for <see cref="PathSpec"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="PathSpec"/> carries a <c>[ValueComparer]</c> attribute, but using the generated
+    /// comparer would put <c>MintPlayer.ValueComparerGenerator.Attributes.dll</c> on this
+    /// generator's analyzer-load path — a dependency this package deliberately does not have, and
+    /// one whose absence fails at load time with an error naming an assembly the consumer never
+    /// referenced. Fifteen hand-written lines are the cheaper trade, and they match how
+    /// <see cref="LocationKeys"/> already handles the same problem.
+    /// </remarks>
+    public static bool AreEqual(PathSpec? left, PathSpec? right)
+    {
+        if (ReferenceEquals(left, right)) return true;
+        if (left is null || right is null) return false;
+        if (left.ContainingNamespace != right.ContainingNamespace) return false;
+        if (left.Parents.Length != right.Parents.Length) return false;
+
+        for (var i = 0; i < left.Parents.Length; i++)
+        {
+            var a = left.Parents[i];
+            var b = right.Parents[i];
+            if (a.Name != b.Name
+                || a.Type != b.Type
+                || a.IsPartial != b.IsPartial
+                || a.GenericTypeParameters != b.GenericTypeParameters)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }
 
 internal static class LocationKeys

@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+
+		<!--
+		Deliberately NOT EnforceExtendedAnalyzerRules. That switch turns on the RS10xx band, whose
+		RS1038 says "compiler extensions must not reference Workspaces". It is right for the generator
+		project, which csc loads, and wrong here: a CodeFixProvider cannot exist without Workspaces, and
+		csc only ever scans this assembly and finds no generator or analyzer in it (spike S5).
+		-->
+
+		<!--
+		Not a package of its own. MintPlayer.AspNetCore.Endpoints.Generator and
+		MintPlayer.AspNetCore.Endpoints both pack this assembly into their analyzer folder,
+		$(EndpointsAnalyzerPackPath), beside the generator.
+		-->
+		<IsPackable>false</IsPackable>
+
+		<Authors>Pieterjan De Clippel</Authors>
+		<Company>MintPlayer</Company>
+		<Product>MintPlayer.AspNetCore.Endpoints</Product>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(Configuration)'=='Release'">
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!--
+		Pinned to the SAME Roslyn the generator compiles against: 4.14.0, which
+		MintPlayer.SourceGenerators.Tools 10.16.0 injects into the generator project. A code fix built
+		against a HIGHER Roslyn than the IDE host loads fails to load there, and the consumer gets no
+		lightbulb and nothing to act on.
+
+		ExcludeAssets="runtime" is the point of these references: they satisfy the compiler and ship
+		nothing. Microsoft.CodeAnalysis.Workspaces.dll is supplied by the IDE's analyzer host; a copy in
+		the analyzer folder would bind against the wrong Roslyn (S5: CommunityToolkit.Mvvm,
+		Meziantou.Analyzer, GraphQL.Analyzers and Avalonia all ship this way).
+		-->
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" ExcludeAssets="runtime" />
+		<PackageReference Include="Microsoft.CodeAnalysis.Workspaces.Common" Version="4.14.0" PrivateAssets="all" ExcludeAssets="runtime" />
+	</ItemGroup>
+
+</Project>

@@ -1,8 +1,8 @@
 namespace MintPlayer.AspNetCore.Endpoints;
 
 /// <summary>
-/// A <see cref="IEndpoint"/> routed on <c>GET</c>. Implementing this saves declaring
-/// <c>Methods</c>; it adds nothing else.
+/// A raw <see cref="IEndpoint"/> routed on <c>GET</c>: the handler receives <c>HttpContext</c> and
+/// writes whatever it likes. Implementing this saves declaring <c>Methods</c>; it adds nothing else.
 /// </summary>
 public interface IGetEndpoint : IEndpoint
 {
@@ -10,22 +10,31 @@ public interface IGetEndpoint : IEndpoint
 }
 
 /// <summary>
-/// A <see cref="IEndpoint{TRequest}"/> routed on <c>GET</c>. The generator bases the class on
-/// <c>GetEndpoint&lt;TRequest&gt;</c>, which leaves <c>BindRequestAsync</c> abstract: a GET carries
-/// no body, so there is nothing to bind by default and the endpoint must read
-/// <typeparamref name="TRequest"/> out of the route, query string, or headers itself.
+/// A <c>GET</c> with a typed response and no request body — the common case.
 /// </summary>
-/// <typeparam name="TRequest">The bound request.</typeparam>
-public interface IGetEndpoint<TRequest> : IEndpoint<TRequest>
+/// <remarks>
+/// <b>The single type argument is the response, not a request.</b> A GET has no body to bind, so
+/// there is nothing to name there; route and query values arrive through <c>[RouteParam]</c> and
+/// <c>[QueryParam]</c> properties. This is the one place the endpoint ladder is asymmetric —
+/// <c>IPostEndpoint&lt;T&gt;</c>'s single argument is the request body — and it mirrors HTTP rather
+/// than inventing a placeholder request that would mean nothing. If your API does send a body on a
+/// GET, use <see cref="IGetEndpoint{TRequest, TResponse}"/>.
+/// </remarks>
+/// <typeparam name="TResponse">The success response body.</typeparam>
+public interface IGetEndpoint<TResponse> : IResponseEndpoint<TResponse>
 {
     static IEnumerable<string> IEndpointBase.Methods => HttpVerbs.Get;
 }
 
 /// <summary>
-/// A <see cref="IEndpoint{TRequest, TResponse}"/> routed on <c>GET</c>: the binding is the
-/// endpoint's own (see <see cref="IGetEndpoint{TRequest}"/>) and the response type reaches OpenAPI.
+/// A <c>GET</c> that takes a request body anyway, and declares a typed response.
 /// </summary>
-/// <typeparam name="TRequest">The bound request.</typeparam>
+/// <remarks>
+/// Declaring a request on a body-less verb is the signal that this endpoint deviates from the
+/// usual — some APIs (search endpoints, notably) accept a body on GET. It is bound exactly like a
+/// POST body: content-negotiated through MVC's input formatters, JSON otherwise.
+/// </remarks>
+/// <typeparam name="TRequest">The type the request body is deserialized into.</typeparam>
 /// <typeparam name="TResponse">The success response body.</typeparam>
 public interface IGetEndpoint<TRequest, TResponse> : IEndpoint<TRequest, TResponse>
 {

@@ -8,6 +8,12 @@
 		<IsTestProject>true</IsTestProject>
 	</PropertyGroup>
 
+	<!-- The validation tests declare [ValidatableType] fixtures, which is [Experimental("ASP0029")]
+	     — an error — on net10.0 only; it graduated in net11.0 (PRD R5.6). -->
+	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+		<NoWarn>$(NoWarn);ASP0029</NoWarn>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<!-- The libraries under test are Microsoft.NET.Sdk.Web; this brings the same types
 		     without dragging in the web publish pipeline. -->
@@ -80,6 +86,10 @@
 		     coverage by assembly name in coverlet.runsettings — it is IsPackable=false and
 		     must not enter the denominator. -->
 		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints.TestApp\MintPlayer.AspNetCore.Endpoints.TestApp.csproj" />
+
+		<!-- The typed client generated from the TestApp's contracts (M9), driven against the real app by
+		     TestAppTypedClientTests. Sample code like the TestApp, and excluded from coverage the same way. -->
+		<ProjectReference Include="..\..\Endpoints\MintPlayer.AspNetCore.Endpoints.TestApp.Client\MintPlayer.AspNetCore.Endpoints.TestApp.Client.csproj" />
 	</ItemGroup>
 
 </Project>

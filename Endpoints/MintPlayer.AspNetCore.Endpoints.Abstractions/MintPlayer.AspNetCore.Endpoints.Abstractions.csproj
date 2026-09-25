@@ -5,10 +5,12 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<OutputType>Library</OutputType>
+		<!-- Measured clean (zero IL2xxx/IL3xxx on both TFMs); kept on as a regression gate (PRD R6.4). -->
+		<IsAotCompatible>true</IsAotCompatible>
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints.Abstractions</PackageId>
-		<Version>11.0.1-rc.0</Version>
+		<Version>11.1.0-rc.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>Interfaces and attributes for MintPlayer.AspNetCore.Endpoints - a class-per-endpoint mapping library for ASP.NET Core.</Description>
@@ -20,7 +22,12 @@
 		<Authors>Pieterjan De Clippel</Authors>
 		<Company>MintPlayer</Company>
 		<Product>MintPlayer.AspNetCore.Endpoints</Product>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
+
+	<ItemGroup>
+		<None Include="README.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
 
 	<!-- Include XML markups in the nupkg -->
 	<PropertyGroup Condition="'$(Configuration)'=='Release'">
