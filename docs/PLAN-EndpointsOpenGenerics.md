@@ -53,3 +53,35 @@ one sweep on both TFMs (generator tests, `Tools.Tests`, solution `-t:Rebuild`, 3
 PR closing #34, not merged.
 
 PR [#35](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/35) opened 2026-09-25, CI green, and the oasdiff gate ran for the first time: "No breaking changes to report, but the specs are different" (the three added closed paths). Not merged; version 11.2.0-rc.0 is proposed and the release is the owner's decision.
+
+## Phase 5 — Tools 12 and generated model equality (PRD addendum D10–D18)
+
+Investigated 2026-09-25 by three agents (upstream #185, downstream map, end-to-end spike). The spike patch is `scratchpad\spike185\spike.patch`
+(373/375 net10.0; the 2 failures are the hash-pinning tests).
+
+1. **Packages:**
+   - `MintPlayer.SourceGenerators.Tools` 11.0.0 → 12.0.0 in all three references: Generator, the runtime with `ExcludeAssets=all`, and Generator.Tests.
+   - Add `MintPlayer.ValueComparerGenerator` 12.0.0 (`PrivateAssets=all`) and `.Attributes` 12.0.0 (`PrivateAssets=all`, `GeneratePathProperty=true`) to the generator.
+2. **Breaking changes:**
+   - Remove the `ICompilationCache` parameter from `EndpointGenerator.Initialize`.
+   - Remove `using MintPlayer.SourceGenerators.Tools.ValueComparers;`.
+3. **Models:** all 14 become `[GenerateEquality] internal sealed partial class`, with the hand-written `Equals`/`GetHashCode` deleted. Add `[EqualityIgnore]` on `ClientServer.IsCacheable` (semantics) and on `EffectiveDescriptorName`, `IsEmpty`, `MethodNameWasSanitised` and `RequestedMethodName` (cost).
+4. **Comparers:**
+   - Delete `SequenceComparer<T>`, `LocationKeys.AreEqual`, `PathSpecs.AreEqual`, and the two `.WithComparer()` calls after `Collect()`.
+   - `openEndpointNamesProvider` returns `.ToEquatableArray()`, and its call site unwraps with `AsImmutableArray()`.
+5. **Build and pack:**
+   - A named target sets `IncludeRuntimeDependency=false` on the attributes item. This works around the upstream MSB4018 in `GenerateDepsFile`.
+   - No extra `GetDependencyTargetPaths` line: the package target already feeds `GetTargetPath`.
+   - Pack guards in `PackAnalyzerAssemblies` and `PackEndpointsGenerator`: the attributes dll is present and only in `$(EndpointsAnalyzerPackPath)`.
+   - An error when `$(PkgMintPlayer_ValueComparerGenerator_Attributes)` is empty.
+   - Trigger each guard once, deliberately.
+6. **Warning baseline:** handle the CS1591 from the generated public `IncrementalValueProviderAdditionalEx` per D16 (a documenting partial if the class is partial, otherwise a type-scoped suppression). Keep the baseline at 36.
+7. **Tests:**
+   - Rewrite the two hash-pinning tests to the equal-models-equal-hashes contract.
+   - Add a `ClientServer` `IsCacheable`-ignored test.
+   - Incremental and cache test expectations stay unchanged.
+8. **Docs and comments** per D18: appended blockquotes in older PRDs, and code comments rewritten where they state the old mechanism.
+9. **Line endings:** normalise the edited csprojs to the repo convention. The OpenAPI snapshot must come out byte-identical; the spike showed an EOL-only change.
+10. **Sweep:** once, in Release, on net10.0 and net11.0. Generator tests (baseline 375) and Tools.Tests (1085). Solution `-t:Rebuild` warnings deduplicated (36). `dotnet list package --outdated` must be empty. List both nupkgs.
+11. **Upstream:** file the MintPlayer.Dotnet.Tools issue(s) for the MSB4018 `IncludeRuntimeDependency`, the public `JoinMethods.g.cs` type, and the contradicted load-time claim.
+12. **Commit and push to PR #35,** and update the PR description.

@@ -408,6 +408,160 @@ release remains the owner's decision.
 > - **Verification:** generator tests 375 per TFM (374 + the new one), runtime tests 1085 per TFM;
 >   rebuild warnings unchanged at 36 CS1591, all in MustChangePassword/SitemapXml generated code.
 
+## Addendum — Tools 12 and generated model equality (MintPlayer.Dotnet.Tools #184 / #185)
+
+*(Added 2026-09-25. Same PR: #35 is still open, and the one-PR rule applies.)*
+
+### Background
+
+`ClosedGenericInfo`, a model added for #34, had to choose between hand-written `IEquatable<T>` and
+`[AutoValueComparer]`. Only `IEquatable<T>` is safe at every Roslyn step: Roslyn compares pipeline
+outputs with `EqualityComparer<T>.Default`, and a generated comparer is a separate object. That led to
+MintPlayer/MintPlayer.Dotnet.Tools#184, and #185 (merged 2026-09-25) shipped the fix as
+`MintPlayer.SourceGenerators.Tools`, `MintPlayer.ValueComparerGenerator` and
+`MintPlayer.ValueComparerGenerator.Attributes` **12.0.0**:
+- `[GenerateEquality]` generates `IEquatable<T>`, `Equals` and `GetHashCode` on the partial model itself.
+- The value-comparer runtime (`ValueComparer<T>`, `ComparerRegistry`, the generated `.WithComparer()`
+  extensions, `ICompilationCache`) is deleted.
+- `LocationKey`, `PathSpec` and `PathSpecElement` implement `IEquatable<T>`.
+
+#185 proposed six downstream steps for this repo:
+1. Bump Tools and add the two ValueComparerGenerator packages.
+2. Convert the 14 hand-written models.
+3. Delete `SequenceComparer<T>` and the 3 `.WithComparer()` calls.
+4. Delete `LocationKeys.AreEqual`/`PathSpecs.AreEqual`.
+5. Drop `ICompilationCache`.
+6. Pack the attributes dll in `GetDependencyTargetPaths` and guard it.
+
+### Investigation (three agents, 2026-09-25)
+
+Three agents looked into it:
+- **U** read #185's diff and the 12.0.0 packages.
+- **D** mapped this repo read-only.
+- **S** did the migration end to end in a worktree. Its patch is kept at
+  `scratchpad\spike185\spike.patch`.
+
+Findings:
+
+- **Tools 12 breaks exactly three things here** (S, verbatim):
+  - `CS0534 'EndpointGenerator' does not implement inherited abstract member
+    'IncrementalGenerator.Initialize(IncrementalGeneratorInitializationContext, IncrementalValueProvider<Settings>)'`
+  - `CS0246 … 'ICompilationCache'`
+  - `CS0234 … 'ValueComparers' does not exist in the namespace 'MintPlayer.SourceGenerators.Tools'`
+
+  `Producer`, `ProduceCode`, `IDiagnosticReporter`/`IConditionalDiagnosticReporter`, `LocationKey`,
+  `PathSpec`, `GetPathSpec`, `OpenPathSpec` and `GetAllBaseTypes` are unchanged. The client generator
+  (a plain `IIncrementalGenerator`) is unaffected.
+- **13 of the 14 models already compare every stored member** (D). **`ClientServer` deliberately
+  excludes `IsCacheable`,** which drives only the reference-read memo, so a generated `Equals` would
+  change its meaning.
+- **`[GenerateEquality]` compares computed get-only properties too:** `EndpointInfo.EffectiveDescriptorName`,
+  `ClientServer.IsEmpty`, and `AssemblyInfo.MethodNameWasSanitised`/`RequestedMethodName`. The last two
+  would re-run the method-name sanitising on every comparison. These are derived values, so equality is
+  unchanged, but it costs work.
+- **The helpers are equivalent:**
+  - `ValueEquality.ImmutableArray` treats `default` as equal only to `default` and hashes it to 0,
+    exactly as `SequenceComparer` did.
+  - Tools 12's `LocationKey.Equals` is the same as `LocationKeys.AreEqual`.
+  - `PathSpec.Equals` additionally compares the derived `AllPartial` and each element's
+    `GenericTypeParameters`, which the old comparer missed. That is stricter and correct.
+- **`.WithComparer()`:** `.WithComparer()` after `Collect()` can simply be deleted. S measured that all
+  16 incremental tests and the client cache test stay green. The step that *builds* a new
+  `ImmutableArray<string>` (`openEndpointNamesProvider`) must return `EquatableArray<T>`
+  (`.ToEquatableArray()`); otherwise it and the closing step after it re-run on every edit.
+- **Two tests pin the old one-field hash codes and fail:**
+  - `EndpointInfoTests.GetHashCode_IsDerivedFromTheFullyQualifiedNameOnly`
+  - `AssemblyInfoTests.GetHashCode_IsDerivedFromTheAssemblyNameOnly`
+
+  The first test's comment claims a `GroupBy` depends on that hash. It does not: every `GroupBy` keys
+  on the name string. Nothing hashes models into collections. All other tests pass (373/375 on
+  net10.0).
+- **Packaging needs *less* than #185 proposed.** `MintPlayer.ValueComparerGenerator`'s own
+  `build/*.targets` already adds the attributes dll to `GetTargetPath`, and both of this repo's pack
+  targets read `GetTargetPath`. So the dll lands in `analyzers/dotnet/cs` next to the Generator,
+  CodeFixes and Tools dlls with no new line, and a second line would duplicate it (NU5118 risk). The
+  package's `roslyn5.9/cs` copy is already removed by `SuppressToolsAnalyzerCopies`, and the
+  stray-folder guard stays quiet.
+- **Two things the proposal did not foresee** (S):
+  1. The package's target adds the attributes dll with `IncludeRuntimeDependency="true"`. That breaks
+     the test project's plain `ProjectReference` with `MSB4018: The "GenerateDepsFile" task failed
+     unexpectedly … An item with the same key has already been added`. A local target setting it to
+     `false` fixes it.
+  2. The ValueComparerGenerator emits an empty **public** class
+     `Microsoft.CodeAnalysis.IncrementalValueProviderAdditionalEx` (`JoinMethods.g.cs`) into our
+     generator dll. That adds one CS1591, making 37 against the 36 baseline.
+- **Is the attributes dll needed at load time? S measured no.** A scratch consumer built against packages
+  *without* the dll loads and runs the generator: no CS8032/CS8784, and the same files are emitted, also
+  with the shared compiler off. The attribute is metadata on internal types that the analyzer loader
+  never resolves. This contradicts the load-time claim in Dotnet.Tools' `valuecomparergenerator.targets`.
+  IDE hosts that reflect over attributes were not tested.
+- **Roslyn floor:** every 12.0.0 package targets Microsoft.CodeAnalysis **5.9.0**, and the attributes dll
+  references only netstandard, so the owner's Roslyn 5.9 floor holds.
+
+### Decisions
+
+- **D10 — Adopt Tools 12 and `[GenerateEquality]` in this PR.** All 14 models become
+  `[GenerateEquality] internal sealed partial class`, and every hand-written `Equals(T)`,
+  `Equals(object)` and `GetHashCode()` is deleted. Keeping any of them suppresses generation (MINT002),
+  and keeping half of the object pair is a warning.
+- **D11 — `[EqualityIgnore]`:**
+  - on `ClientServer.IsCacheable`, to preserve today's semantics;
+  - on the four computed properties, to keep the work out of every comparison.
+
+  Any other difference from today's equality is a bug.
+- **D12 — Pipeline comparers:**
+  - Delete `SequenceComparer<T>` and the two `.WithComparer()` calls after `Collect()`.
+  - `openEndpointNamesProvider` returns `EquatableArray<string>`.
+  - `EndpointClosing.Build` keeps its `ImmutableArray` signature, and the call site unwraps with
+    `AsImmutableArray()`.
+- **D13 — Delete `LocationKeys.AreEqual` and `PathSpecs.AreEqual`;** Tools 12's `IEquatable<T>`
+  replaces them. Drop the `ICompilationCache` parameter and the `using …ValueComparers`.
+- **D14 — Ship the attributes dll** (6.6 KB) even though S showed consumers load without it:
+  - Upstream ships it the same way.
+  - An IDE host was not tested.
+  - Removing it later is cheaper than debugging a missing-assembly load failure in a user's IDE.
+
+  It arrives through the package's own target, so this repo adds **no** `GetDependencyTargetPaths` line
+  (that corrects #185's step 6). It gets pack guards like the code-fix dll:
+  - in both packages' pack targets, present and only in `$(EndpointsAnalyzerPackPath)`;
+  - an error if `$(PkgMintPlayer_ValueComparerGenerator_Attributes)` is empty. The attributes package
+    reference gets an explicit `GeneratePathProperty="true"`; its own props' `Update` runs too early.
+- **D15 — The `IncludeRuntimeDependency` workaround** is a named target with a comment that cites the
+  MSB4018. The upstream defect is filed as an issue on MintPlayer.Dotnet.Tools.
+- **D16 — The warning baseline must not grow.** The empty public `IncrementalValueProviderAdditionalEx`
+  is an upstream defect: a generator should not add public API to its consumer. It is filed upstream.
+  - If the generated class is `partial`, this repo documents it with a one-line partial declaration,
+    which is honest and removable.
+  - Otherwise the CS1591 is suppressed for that type only, by a targeted `#pragma` in a partial or an
+    `.editorconfig` rule scoped to generated code. Never project-wide.
+- **D17 — Tests:**
+  - The two hash-pinning tests are rewritten to assert the contract the model actually needs: equal
+    models have equal hashes, and a changed member changes `Equals`.
+  - A new test pins `ClientServer` ignoring `IsCacheable`.
+  - The incremental and cache tests are the migration's proof; none may change its expectations.
+- **D18 — Docs and comments** that describe the hand-written equality or its reasons are updated:
+  - `Models.cs`, around the old `SequenceComparer`, `PathSpecs` and `LocationKeys` remarks;
+  - `EndpointGenerator.cs` and `EndpointsProducer.cs` ("Tools 11.0.0");
+  - the CodeFixes csproj comment;
+  - the test comments;
+  - `PRD-EndpointsErgonomics.md` R6.7 and `PRD-TestCoverage.md` ("IEquatable ceremony"), with
+    appended blockquotes, never rewritten.
+
+### Acceptance criteria (addendum)
+
+12. The generator builds against Tools 12.0.0. `dotnet list package --outdated` reports nothing.
+13. No hand-written `IEquatable<T>`, `SequenceComparer`, `LocationKeys`/`PathSpecs` helper or
+    `.WithComparer()` remains in the generator.
+14. All incremental and cache tests are green with unchanged expectations. The rewritten hash tests and
+    the `IsCacheable` test are green on net10.0 and net11.0.
+15. Both nupkgs carry exactly one analyzer folder:
+    `analyzers/dotnet/cs/{Generator, Generator.CodeFixes, SourceGenerators.Tools, ValueComparerGenerator.Attributes}.dll`.
+    The new pack guards fail when the attributes dll is removed or misplaced (triggered deliberately).
+16. Solution `-t:Rebuild -c Release` stays at the 36 CS1591 baseline.
+17. Two upstream issues are filed on MintPlayer.Dotnet.Tools: the `IncludeRuntimeDependency` MSB4018,
+    and the public `JoinMethods.g.cs` type. A third item goes in the same issue or its own: the
+    load-time claim contradicted by S's measurement.
+
 ## Version
 
 Created 2026-09-25 from issue #34. Branch `fix/endpoints-open-generics` (from `master` at `c04ffac`).
