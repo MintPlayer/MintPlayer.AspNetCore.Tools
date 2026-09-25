@@ -1359,6 +1359,63 @@ messages teach it at the moment it matters.
 16. The full suite passes on both `net10.0` and `net11.0` with an identical test count per
     TFM, and incrementality tests still show a cache hit on an unchanged compilation.
 
+> **Outcome (verified 2026-09-25 against `bdfd6a9`; measurements in the PLAN's "M1–M14 outcome"):
+> 12 met, 4 partially met.** Test names are in `Tests\MintPlayer.AspNetCore.Endpoints.Generator.Tests`
+> (generator) and `Tests\MintPlayer.AspNetCore.Tools.Tests\Endpoints` (runtime).
+>
+> 1. **Met.** 8 lines for the corpus's GET-by-id and for the README's `GetUser`; neither declares
+>    `BindRequestAsync`.
+> 2. **Met, narrowly.** 97 → 57 over the corpus, −41.2% (−48.5% with `[MemberOf<T>]` on the class
+>    line). The "before" is Appendix B's 97, not P1's 122: P1's figure came from protoB's differently
+>    shaped corpus (the PLAN explains the difference).
+> 3. **Met.** `IMemberOf` appears in no Endpoints source except one historical doc comment in the generator;
+>    `MemberOfAttribute_IsMatched_AndAKnownGoodFixtureProducesGroupedEndpoints`; the TestApp,
+>    grouped by `[MemberOf<UsersApi>]`, still serves `/api/users/{id}`.
+> 4. **Partially met.** MPEP009 is an Error (`MPEP009_BoundPropertyMatchingNoToken_IsAnError_OnTheProperty`);
+>    MPEP008 is a **Warning**, per the "Adjusted for design A before M6" note under R3.3
+>    (`MPEP008_UnboundTokenOnATypedEndpoint_Warns_NamingTheBoundKeys`). The `{userId}`-token-without-member
+>    direction therefore fails the build only under `TreatWarningsAsErrors`.
+> 5. **Met.** `MPEP007_PartialVerbOverlapOfLiteralMethods_NamesOnlyTheSharedVerb`;
+>    `MPEP007_DoesNotFire_WhereTheMatcherResolvesBoth` includes `/users/me` against `/users/{id}`.
+> 6. **Met**, with 415 limited to body endpoints per the note under R4.3. In the committed snapshot,
+>    7 of 7 templated operations have one required path parameter per token, POST and PUT declare a
+>    body, every typed endpoint documents 400, and `DELETE /api/users/{id}` documents 204 and not 200.
+>    Tests: `EveryPathToken_HasExactlyOneRequiredPathParameter_OfTheSameName`,
+>    `EveryBodyVerb_HasAJsonRequestBody`, `Endpoints_DocumentTheirFailureAndSuccessResponses`,
+>    `DeleteUser_Documents204_AndNot200`.
+> 7. **Met.** The seven-scenario corpus rebuilt with `GenerateDocumentationFile=true` reports 58 CS1591,
+>    all on its own types and none in a `.g.cs`; every producer writes `#pragma warning disable CS1591`.
+> 8. **Partially met.** It compiles: `NestedEndpoint_WithBoundProperties_Compiles`, the TestApp's
+>    `NestedEndpoint.cs` (`/api/users/nested/{id}` is in the snapshot) and
+>    `NestedResponseOnlyEndpoint_BindsRouteValue`. But `FixtureSources.Corpus` declares no nested
+>    endpoint; the case lives in an inline fixture and the TestApp.
+> 9. **Partially met.** Removing the generator output fails the pack (M1: "PackEndpointsGenerator
+>    resolved … but that file does not exist"), and the code-fix guards were triggered on purpose in
+>    M11. Re-packed at HEAD, both packages in both configurations ship the same three `analyzers/dotnet/cs`
+>    entries, and within a configuration the two packages ship the same bytes. **Across configurations
+>    they are not byte-identical**, though: `…Generator.dll` and `…Generator.CodeFixes.dll` differ
+>    between Debug and Release (unoptimised against optimised IL), and only `MintPlayer.SourceGenerators.Tools.dll`
+>    matches. What was checked in the spikes and the M1 gate was identical entries.
+> 10. **Met by construction.** `UpdateUserBody(string Name, string Email)` has no `Id`.
+>     `PutTypedEndpoint_IdInBody_IsIgnored_RouteWins` uses id 8 rather than 1, because PUT became an
+>     upsert in M9.
+> 11. **Met.** `InvalidBody_Returns400ProblemDetails_WithFieldKeys` covers `[ValidatableType]` with
+>     `[Range(1, 120)]`; `RouteParamRange_IsNotEvaluated` covers the other half; the README states it.
+> 12. **Partially met.** No test sends `application/xml` to a body endpoint that has a route parameter.
+>     The pieces are tested separately: formatter selection
+>     (`WithMvcRegistered_UsesTheFirstFormatterThatCanRead`, custom `IInputFormatter`, no route
+>     parameter), route plus body (`GoodRouteValue_OnABodyEndpoint_BindsBothTheRouteAndTheBody`), and
+>     routing not intercepting content types (`UnsupportedContentType_IsStillTheLibrarys415`).
+> 13. **Met.** `BadRouteValue_OnABodyEndpoint_Is400_AndTheBodyIsNeverRead`.
+> 14. **Met.** No placeholder request type exists in the shipped projects. `IGetEndpoint<TResponse>` and
+>     `IDeleteEndpoint<TResponse>` derive from `IResponseEndpoint<TResponse>`
+>     (`BodylessEndpoints_GetTheResponseOnlyBaseOrARawBinder`, MPEP018).
+> 15. **Met.** `MapHelper_ConstructsTheEndpointInsideTheRequestDelegate`; also
+>     `MapEndpoint_DoesNotConstructTheEndpointAtRegistrationTime` on the manual path.
+> 16. **Met.** Generator 324 and `Tools.Tests` 1071 on both net10.0 and net11.0 (the M13 sweep at
+>     `fafbe7d`), CI green on #32; `RerunOverAnIdenticalCompilation_DoesNotRebuildTheModel` and the
+>     other `EndpointGeneratorIncrementalTests` pass.
+
 ## Risks
 
 | Risk | Mitigation |
@@ -1472,3 +1529,6 @@ spike that settles it.
 ## Version
 
 Created 2026-09-24. Branch `feature/endpoints-ergonomics`.
+
+Status 2026-09-25: implemented on the branch, [PR #32](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/32)
+open with CI green, proposed as `11.1.0-rc.0`; awaiting the release decision (M14). Not merged.

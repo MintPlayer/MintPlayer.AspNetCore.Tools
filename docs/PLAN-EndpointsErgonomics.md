@@ -675,11 +675,11 @@ appended blockquotes; this section records only where the work stands.)*
 | M5 OpenAPI | `308d870` | generator 207, runtime 139 |
 | M6 route diagnostics + packaging (R6.5a) | `9dbe320` | generator 255, runtime 139 |
 | M7 validation | `3fdbf22` | generator 268, runtime 151 |
-| M8 typed links + `.WithName()` + MPEP012 | see `git log` ("M8: …") | generator 290, runtime 215 |
-| M9 contract + typed client, scoped store in the TestApp | see `git log` ("M9: …") | generator 305, runtime 269 (Tools.Tests whole project 1071) |
-| M10 contract snapshot + CI gate | uncommitted at time of writing | no new tests; swept together with M11 |
+| M8 typed links + `.WithName()` + MPEP012 | `c38008d` | generator 290, runtime 215 |
+| M9 contract + typed client, scoped store in the TestApp | `ccaa36d` | generator 305, runtime 269 (Tools.Tests whole project 1071) |
+| M10 contract snapshot + CI gate | `dda6c70` (with M11) | no new tests; swept together with M11 |
 | M11 `partial` code fix (MPEP001/014/019) | `dda6c70` (with M10) | generator 312, Tools.Tests 1071 (runtime 269) |
-| M12 README + MPEP024 + global-namespace fix + `IsAotCompatible` on | uncommitted at time of writing | generator 324, Tools.Tests 1071; `-t:Rebuild` 36 CS1591 (baseline), OpenAPI snapshot unchanged |
+| M12 README + MPEP024 + global-namespace fix + `IsAotCompatible` on | `fafbe7d` | generator 324, Tools.Tests 1071; `-t:Rebuild` 36 CS1591 (baseline), OpenAPI snapshot unchanged |
 
 "Runtime" means `Tests\MintPlayer.AspNetCore.Tools.Tests --filter "FullyQualifiedName~Endpoints"`.
 
@@ -753,7 +753,7 @@ note under R7.4a):
   `operationId` lists gain the two new endpoints, the manual-mapping comparison host registers the store,
   and `OpenApiEmissionTests` expects the new `EndpointContracts.g.cs`.
 
-### Remaining, with the constraints already learned
+### Milestone status after the work (all done; M14 awaits the owner)
 
 - **Goal check (session goal, 2026-09-24) — done with M9**: scoped constructor injection already
   worked on both mapping paths; the TestApp now shows it through the generated `MapTestAppEndpoints()`
@@ -816,6 +816,9 @@ note under R7.4a):
   snapshot byte-identical. Coverage is measured by the PR's CI upload rather than locally.
 - **M14 release gate** — **the user's decision; do not merge.** Merging to `master` publishes to
   nuget.org. Open the PR with a proposed version and flag it.
+  **Opened as [#32](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/32)**,
+  CI green (clean-tree snapshot check passed; the oasdiff gate reported its notice because
+  `master` has no snapshot yet). Not merged.
   **Proposed:** `11.1.0-rc.0` for the three Endpoints packages (breaking API change on top of
   `11.0.1-rc.0`; the other packages keep their versions). A major bump would break the
   convention that the major version tracks .NET. The version is set in the PR; change it before
@@ -835,9 +838,70 @@ note under R7.4a):
 
 ## M1–M14 outcome
 
-*(Written after the work. A `| Measure | Before (master) | After |` table covering consumer
-lines over the seven-scenario corpus, concept count, diagnostic count, OpenAPI validity,
-warning count and test count. Corrections to the PRD are appended there as blockquotes.)*
+*(Measured 2026-09-25 against `bdfd6a9`; `master` is `5ddf048`. Every "after" figure below came
+from a run; the method follows each table. Corrections to the PRD are appended there as blockquotes.)*
+
+| Measure | Before (master) | After |
+|---|---|---|
+| Consumer lines, seven-scenario corpus (PRD Appendix A rule) | **97** — 12 / 15 / 15 / 12 / 12 / 19 / 6 per scenario + 6 lines of request records | **57** — 8 / 9 / 8 / 8 / 8 / 9 / 7, no request records: **−41.2%** (50, −48.5%, with `[MemberOf<T>]` written on the class line instead of its own) |
+| GET with one route parameter (acceptance 1) | 12 in the corpus (17 in the PRD's README-style count); hand-written `BindRequestAsync` | **8**; no `BindRequestAsync` |
+| Concepts to bind one route value correctly | 11, none checked at build time | **7**, five of them backed by a diagnostic (see below) |
+| Active diagnostics | 6 — MPEP001–006 (5 Error, 1 Warning) | **21** — MPEP001, 002, 005–016, 018–024 (10 Error, 8 Warning, 3 Info); MPEP003/004 retired (CS0579 enforces them), MPEP017 reserved; MPEP001/014/019 have a code fix |
+| OpenAPI (`TestApp`) | spec-invalid: 3 of 3 templated operations declare **no** path parameter, 0 of 2 body verbs declare a request body, no 400/415, `DELETE /api/users/{id}` documents 200 | committed snapshot (OpenAPI 3.1.1, 12 operations): 7 of 7 templated operations declare exactly one required path parameter per `{token}`, 2 of 2 body verbs declare a request body, every typed endpoint documents 400 (plus 415 where there is a body), `DELETE /api/users/{id}` documents 204 and not 200 |
+| Warnings, solution `-t:Rebuild -c Release`, deduplicated | 36, all CS1591 from MustChangePassword/SitemapXml; **0** from Endpoints | 36, the same baseline; **0** from Endpoints |
+| CS1591 a consumer gets from generated files (`GenerateDocumentationFile=true`) | 3, from `EndpointMapping.g.cs` (PRD P6) | **0** from any generated file |
+| Trim/AOT analyzers on the shipped projects | not enabled (ILC found 2 + 4 warnings, PRD P11) | `IsAotCompatible` on, **0** warnings on both TFMs |
+| Generator tests (per TFM, net10.0 = net11.0) | 95 | **324** |
+| `Tools.Tests` (per TFM) | 893 | **1071** |
+| of which Endpoints runtime tests (`FullyQualifiedName~Endpoints`) | 91 | **269** (+178, the whole `Tools.Tests` delta) |
+
+**Which "before" line count.** The PRD quotes two status-quo figures, and they are different
+measurements, not a contradiction. The Problem statement's **122 → 68** came from protoB: each
+scenario counted as a standalone file with its own request record, the baselines held to a stricter
+bar (invariant culture, `Enum.IsDefined`, S1 carrying an extra `bool` query flag), and a seventh
+scenario that was a four-value report GET rather than a raw endpoint. Appendix B's **97** came from
+protoC, which is exactly Appendix A's seven scenarios — request records counted once as a 6-line
+prelude, shared response records excluded, the raw endpoint a 6-line `Health`. The as-built corpus
+follows protoC's shape, so **97 is the matching "before"**; re-running protoC's own `count.sh`
+reproduces 97, and the same counting code over protoC's design A reproduces its 51.
+
+**Consumer-line method.** `scratchpad\outcome\Outcome` is a net10.0 + net11.0 Web project referencing
+the local runtime project and the generator as an analyzer; `Endpoints\AsBuilt.cs` writes the seven
+scenarios in the shipped idiom (`[MemberOf<AsBuiltGroup>]` on its own line as the README does,
+`partial` classes, `[RouteParam]`/`[QueryParam]`, `IGetEndpoint<TResponse>` and
+`IPutEndpoint<TRequest, TResponse>`), against protoC's shared response models. `dotnet build
+-t:Rebuild`: 0 errors, 0 warnings, all seven routes in the generated `Routes`. `outcome\count.sh`
+applies Appendix A's rule with protoC's block logic. Against design A's prediction of 51 the as-built
+form costs +6: seven own-line `[MemberOf<T>]` attributes, less one line in S3 because the body is
+`TRequest` rather than a `[FromBody]` property.
+
+**Concept count, as built** (the PRD's scope: what a consumer must know to get one route value into
+the handler correctly): `[RouteParam]` marks the property; the class is `partial` (MPEP001/014, code
+fix); the property needs a `set` (MPEP020); the key is the property name, case-insensitive, or
+`[RouteParam("x")]` (MPEP008/009); supported types are `string`, a defined enum or `IParsable<T>`,
+invariant culture (MPEP013); nullable or initialised means optional; and one type argument on GET is
+the response, read in `HandleAsync(CancellationToken)` (MPEP018). Seven — the PRD's predicted figure —
+of which five are enforced by a diagnostic. The 400 and its message are no longer the consumer's
+concern.
+
+**Other methods.** Diagnostics: `git show master:…/DiagnosticDescriptors.cs` against the branch file.
+OpenAPI: master from the PRD's P4 dump; after from a script over the committed
+`openapi\MintPlayer.AspNetCore.Endpoints.TestApp.json`. Warnings and tests on master: the M13 sweep
+commands (`dotnet build MintPlayer.AspNetCore.Tools.sln -t:Rebuild -c Release`, then `dotnet test
+--no-build` per project, and once more with the Endpoints filter) run in a throwaway `git worktree` of
+`master`, removed afterwards; every run passed with identical counts on both TFMs. After: the M13
+sweep logs at `fafbe7d` (324 and 1071 on both TFMs, 36 CS1591, none from Endpoints) and the ledger's
+269; the consumer CS1591 figure from rebuilding the corpus project with
+`-p:GenerateDocumentationFile=true`, which reported 58 CS1591, every one on the corpus's own
+undocumented types and none in a `.g.cs`.
+
+**Acceptance criteria:** of 16, 12 met, 4 partially met, none wholly unmet. Partial: **4** (MPEP008 is a
+Warning by the recorded pre-M6 decision, so one direction is not a build error), **8** (the nested
+endpoint compiles and is in the TestApp and an inline generator fixture, but `FixtureSources.Corpus`
+has none), **9** (identical `analyzers/**` entries and the `<Error>` guards hold, but Debug and Release
+`Generator.dll`/`CodeFixes.dll` are not byte-identical), **12** (no test sends `application/xml` to a
+body endpoint that has a route parameter). The per-criterion evidence is in the PRD's "Outcome" note
+under "Acceptance criteria".
 
 ---
 
