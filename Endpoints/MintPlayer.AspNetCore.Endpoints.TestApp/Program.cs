@@ -3,6 +3,13 @@ using MintPlayer.AspNetCore.Endpoints.TestApp.Models;
 
 [assembly: EndpointsMethodName("MapTestAppEndpoints")]
 
+// Closes the TestLibrary's endpoints that are generic over its user type (issue #34): every type
+// parameter constrained to LibUser becomes AppUser, and MapTestAppEndpoints() maps Passkeys<AppUser>
+// and WhoAmI<AppUser> like endpoints of this app. Echo<TPayload> has no constraint type to key on,
+// so it is closed explicitly.
+[assembly: EndpointTypeArgument<MintPlayer.AspNetCore.Endpoints.TestLibrary.LibUser, AppUser>]
+[assembly: EndpointTypeArgument(typeof(MintPlayer.AspNetCore.Endpoints.TestLibrary.Echo<>), typeof(string))]
+
 // Every build of this project also runs this file: Microsoft.Extensions.ApiDescription.Server launches
 // it under GetDocument.Insider to write the committed contract snapshot, openapi/*.json (PRD R7.5).
 // Registrations and endpoint mappings must run so the document is complete; anything with a real side

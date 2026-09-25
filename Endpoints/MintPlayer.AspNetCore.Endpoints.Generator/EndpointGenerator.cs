@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -13,6 +14,7 @@ internal static class TrackingNames
     public const string Endpoints = "Endpoints";
     public const string Groups = "Groups";
     public const string AssemblyInfo = "AssemblyInfo";
+    public const string ClosedEndpoints = "ClosedEndpoints";
     public const string Model = "EndpointModel";
 }
 
@@ -51,10 +53,33 @@ public partial class EndpointGenerator : IncrementalGenerator
             .Select(static (compilation, _) => GetAssemblyInfo(compilation))
             .WithTrackingName(TrackingNames.AssemblyInfo);
 
+        // Issue #34: the open endpoints this compilation declares, by metadata name, so the closing
+        // step can re-resolve them against each compilation without holding a symbol.
+        var openEndpointNamesProvider = endpointsProvider
+            .Select(static (endpoints, _) => endpoints
+                .Where(endpoint => endpoint.Open is not null)
+                .Select(endpoint => endpoint.Open!.MetadataName)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToImmutableArray())
+            .WithComparer(SequenceComparer<string>.Instance);
+
+        // The one step that reads the Compilation for the model, because closing an endpoint needs
+        // symbols: the application's [assembly: EndpointTypeArgument] attributes, the referenced
+        // libraries' records, and constructed types. It runs on every compilation and returns a
+        // value-equal ClosingModel, so an edit that closes nothing new leaves everything downstream
+        // cached. References are read only when the compilation declares an EndpointTypeArgument, and
+        // memoised per MetadataReference (PRD D3).
+        var closingProvider = context.CompilationProvider
+            .Combine(openEndpointNamesProvider)
+            .Select(static (pair, cancellationToken) => EndpointClosing.Build(pair.Left, pair.Right, cancellationToken))
+            .WithTrackingName(TrackingNames.ClosedEndpoints);
+
         var modelProvider = endpointsProvider
             .Join(groupsProvider)
             .Join(assemblyInfoProvider)
-            .Select(static (tuple, _) => new EndpointModel(tuple.Item1, tuple.Item2, tuple.Item3))
+            .Combine(closingProvider)
+            .Select(static (pair, _) => new EndpointModel(pair.Left.Item1, pair.Left.Item2, pair.Left.Item3, pair.Right))
             .WithTrackingName(TrackingNames.Model);
 
         // Deliberately NOT GeneratorExtensions.ProduceCode: that helper combines the producer with
@@ -122,9 +147,41 @@ public partial class EndpointGenerator : IncrementalGenerator
         var symbol = context.SemanticModel.GetDeclaredSymbol(classDecl, ct);
         if (symbol is null || symbol.IsAbstract) return null;
 
-        if (!symbol.AllInterfaces.Any(i => i.Name == "IEndpointBase" && i.ContainingNamespace?.ToDisplayString() == EndpointsNamespace))
+        if (!IsEndpoint(symbol))
             return null;
 
+        return DescribeDeclaredEndpoint(symbol, context.SemanticModel.Compilation, ct);
+    }
+
+    /// <summary>True when <paramref name="symbol"/> implements <c>IEndpointBase</c>.</summary>
+    internal static bool IsEndpoint(INamedTypeSymbol symbol) =>
+        symbol.AllInterfaces.Any(i => i.Name == "IEndpointBase" && i.ContainingNamespace?.ToDisplayString() == EndpointsNamespace);
+
+    /// <summary>The level, verb, and request and response types an endpoint's interfaces declare.</summary>
+    internal readonly struct EndpointShape
+    {
+        public EndpointShape(EndpointLevel level, HttpMethodKind httpMethod, string? requestTypeFqn, string? responseTypeFqn, ITypeSymbol? requestType)
+        {
+            Level = level;
+            HttpMethod = httpMethod;
+            RequestTypeFqn = requestTypeFqn;
+            ResponseTypeFqn = responseTypeFqn;
+            RequestType = requestType;
+        }
+
+        public EndpointLevel Level { get; }
+        public HttpMethodKind HttpMethod { get; }
+        public string? RequestTypeFqn { get; }
+        public string? ResponseTypeFqn { get; }
+        public ITypeSymbol? RequestType { get; }
+    }
+
+    /// <summary>
+    /// Reads the endpoint's shape from its interfaces. Works on a constructed type too, where the
+    /// interfaces come back substituted: <c>Create&lt;AppRequest&gt;</c> has request type <c>AppRequest</c>.
+    /// </summary>
+    internal static EndpointShape ShapeOf(INamedTypeSymbol symbol)
+    {
         // AllInterfaces, not Interfaces: an endpoint that inherits its endpoint interfaces through a
         // base class of its own lists none of them directly, and reading only the direct set silently
         // degrades it to Raw/Custom — losing its verb, its request type and its Produces metadata,
@@ -197,6 +254,18 @@ public partial class EndpointGenerator : IncrementalGenerator
             _ => null,
         };
 
+        return new EndpointShape(
+            level, httpMethod, requestTypeFqn, responseTypeFqn,
+            level is EndpointLevel.Typed or EndpointLevel.TypedWithResponse ? carrier!.TypeArguments[0] : null);
+    }
+
+    /// <summary>Describes an endpoint declared in this compilation, exactly as the syntax pipeline does.</summary>
+    internal static EndpointInfo DescribeDeclaredEndpoint(INamedTypeSymbol symbol, Compilation compilation, CancellationToken ct)
+    {
+        var shape = ShapeOf(symbol);
+        var level = shape.Level;
+        var httpMethod = shape.HttpMethod;
+
         // Both of these are properties of the *symbol*, not of one declaration. Reading them from
         // the single ClassDeclarationSyntax that triggered this callback makes a partial class split
         // across files produce two contradictory infos, and GroupBy().First() then keeps whichever
@@ -214,6 +283,22 @@ public partial class EndpointGenerator : IncrementalGenerator
             symbol.BaseType is { SpecialType: not SpecialType.System_Object };
         var baseChainReachesEndpointBase = ReachesEndpointBase(symbol.BaseType);
 
+        // The route the runtime uses: the interface implementation, not merely the nearest Path
+        // (PRD D7). They differ only under a 'new static Path', which MPEP032 reports.
+        var route = RouteLiteral.ReadImplementation(symbol, "IEndpointBase", "Path", compilation, out var ignoredNewPath, ct);
+
+        OpenGenericInfo? open = null;
+        if (GenericTypes.IsOpen(symbol))
+        {
+            open = new OpenGenericInfo(
+                symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+                GenericTypes.MetadataNameOf(symbol),
+                GenericTypes.UnboundTypeOf(symbol),
+                symbol.TypeParameters.Length == 0 ? null : "<" + string.Join(", ", symbol.TypeParameters.Select(parameter => parameter.Name)) + ">");
+        }
+
+        var groupSymbol = GroupMembership.ResolveSymbol(symbol, EndpointsNamespace);
+
         return new EndpointInfo(
             symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             symbol.ContainingNamespace is { IsGlobalNamespace: false } containingNamespace ? containingNamespace.ToDisplayString() : "",
@@ -221,20 +306,82 @@ public partial class EndpointGenerator : IncrementalGenerator
             isPartial,
             hasExistingBaseClass,
             level, httpMethod,
-            requestTypeFqn, responseTypeFqn,
-            GroupMembership.Resolve(symbol, EndpointsNamespace),
+            shape.RequestTypeFqn, shape.ResponseTypeFqn,
+            groupSymbol?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             baseChainReachesEndpointBase,
             GetDescriptorName(symbol),
             symbol.FromSymbol().AsKey(),
             symbol.GetPathSpec(ct),
-            RouteLiteral.Read(symbol, "Path", context.SemanticModel, ct),
+            route,
             BoundProperties.Collect(symbol, EndpointsNamespace, ct),
-            MethodsLiteral.Read(symbol, httpMethod, context.SemanticModel, ct),
-            level is EndpointLevel.Typed or EndpointLevel.TypedWithResponse
-                ? RequestValidationGaps.Inspect(carrier!.TypeArguments[0], context.SemanticModel.Compilation)
+            MethodsLiteral.Read(symbol, httpMethod, compilation, ct),
+            shape.RequestType is { } requestType
+                ? RequestValidationGaps.Inspect(requestType, compilation)
                 : RequestValidationGap.None,
             GeneratedCodeAccess.WhyInaccessible(symbol),
-            GeneratedCodeAccess.IsInFileLocalType(symbol));
+            GeneratedCodeAccess.IsInFileLocalType(symbol),
+            open,
+            closed: null,
+            referencedGroups: open is null ? ConstructedGroupChain(groupSymbol, compilation, ct) : default,
+            hasIgnoredNewPath: ignoredNewPath);
+    }
+
+    /// <summary>
+    /// The constructed generic groups on the chain starting at <paramref name="group"/>
+    /// (<c>[MemberOf&lt;Api&lt;string&gt;&gt;]</c>), described from their constructions (PRD D7).
+    /// </summary>
+    /// <remarks>
+    /// The group declaration is the open <c>Api&lt;T&gt;</c>, which generated code cannot name and
+    /// whose fully qualified name never matches the membership's <c>Api&lt;string&gt;</c>. That mismatch
+    /// used to leave the endpoint without a composed route — no link, no contract — and reported the
+    /// declaration as never joined (MPEP016).
+    /// </remarks>
+    internal static ImmutableArray<GroupInfo> ConstructedGroupChain(INamedTypeSymbol? group, Compilation compilation, CancellationToken ct)
+    {
+        var builder = ImmutableArray.CreateBuilder<GroupInfo>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+
+        for (var current = group; current is not null;)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var fqn = current.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+            if (!visited.Add(fqn)) break;
+
+            var parent = ParentGroupOf(current, compilation);
+            if (IsConstruction(current))
+                builder.Add(DescribeGroup(current, parent, compilation, prefix: null, useRecordedPrefix: false, ct));
+
+            current = parent;
+        }
+
+        return builder.ToImmutable();
+    }
+
+    /// <summary>The parent group of <paramref name="group"/>, substituted through the group's own construction.</summary>
+    internal static INamedTypeSymbol? ParentGroupOf(INamedTypeSymbol group, Compilation compilation)
+    {
+        var parent = GroupMembership.ResolveSymbol(group, EndpointsNamespace);
+        if (parent is null || !IsConstruction(group)) return parent;
+
+        return GenericTypes.Substitute(parent, GenericTypes.MapOf(group), compilation) as INamedTypeSymbol;
+    }
+
+    /// <summary>True for a constructed generic type (<c>Api&lt;string&gt;</c>), as opposed to a definition.</summary>
+    internal static bool IsConstruction(INamedTypeSymbol type) =>
+        !SymbolEqualityComparer.Default.Equals(type, type.OriginalDefinition);
+
+    /// <summary>A group as generated code sees it: its name, parent, prefix and whether it can be named.</summary>
+    internal static GroupInfo DescribeGroup(INamedTypeSymbol group, INamedTypeSymbol? parent, Compilation compilation, string? prefix, bool useRecordedPrefix, CancellationToken ct)
+    {
+        var location = group.Locations.FirstOrDefault() is { IsInSource: true } inSource ? inSource.AsKey() : null;
+
+        return new GroupInfo(
+            group.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            parent?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+            location,
+            useRecordedPrefix ? prefix : RouteLiteral.ReadImplementation(group, "IEndpointGroup", "Prefix", compilation, out _, ct),
+            GeneratedCodeAccess.WhyInaccessible(group));
     }
 
     private static bool IsMoreDerived(INamedTypeSymbol candidate, INamedTypeSymbol? incumbent)
@@ -248,7 +395,7 @@ public partial class EndpointGenerator : IncrementalGenerator
             incumbent.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)) < 0;
     }
 
-    private static string? GetDescriptorName(INamedTypeSymbol symbol)
+    internal static string? GetDescriptorName(INamedTypeSymbol symbol)
     {
         foreach (var attribute in symbol.GetAttributes())
         {
@@ -290,8 +437,10 @@ public partial class EndpointGenerator : IncrementalGenerator
             symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
             GroupMembership.Resolve(symbol, EndpointsNamespace),
             symbol.FromSymbol().AsKey(),
-            RouteLiteral.Read(symbol, "Prefix", context.SemanticModel, ct),
-            GeneratedCodeAccess.WhyInaccessible(symbol));
+            RouteLiteral.ReadImplementation(symbol, "IEndpointGroup", "Prefix", context.SemanticModel.Compilation, out _, ct),
+            GeneratedCodeAccess.WhyInaccessible(symbol),
+            GenericTypes.IsOpen(symbol),
+            GenericTypes.UnboundTypeOf(symbol));
     }
 
     private static bool ReachesEndpointBase(INamedTypeSymbol? type)
@@ -331,7 +480,8 @@ public partial class EndpointGenerator : IncrementalGenerator
             assemblyName,
             methodNameOverride,
             HasOpenApiTransformers(compilation),
-            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.IEndpointRouteBuilder") is not null);
+            compilation.GetTypeByMetadataName("Microsoft.AspNetCore.Routing.IEndpointRouteBuilder") is not null,
+            compilation.GetTypeByMetadataName(OpenEndpointRecords.AttributeNamespace + "." + OpenEndpointRecords.EndpointAttributeName) is not null);
     }
 
     /// <summary>

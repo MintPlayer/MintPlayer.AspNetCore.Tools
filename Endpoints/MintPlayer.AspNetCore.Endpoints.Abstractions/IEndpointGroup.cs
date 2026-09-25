@@ -26,4 +26,16 @@ public interface IEndpointGroup
     /// Default implementation is a no-op.
     /// </summary>
     static virtual void Configure(RouteGroupBuilder group) { }
+
+    /// <summary>
+    /// Whether this group, its endpoints and every group nested in it are mapped at all. Evaluated
+    /// once, when the routes are mapped, against the application's services — so a library can map
+    /// an optional cluster of endpoints only when its options enable it. Default <see langword="true"/>.
+    /// </summary>
+    /// <remarks>
+    /// Honoured by the generated <c>Map…Endpoints()</c> and by <c>MapEndpoint&lt;T&gt;()</c>. The
+    /// generated <c>Endpoints</c> descriptor list is static and still lists what is declared.
+    /// </remarks>
+    /// <param name="services">The application's root service provider.</param>
+    static virtual bool IsEnabled(IServiceProvider services) => true;
 }

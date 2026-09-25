@@ -15,7 +15,7 @@ The grill session produced PRD decisions D1–D9: application-side closing throu
 `[assembly: EndpointTypeArgument<TConstraint, TArgument>]`, group-level `IsEnabled`, and a closed
 endpoint treated as an ordinary endpoint. Prototype: `C:\Repos\WebApplication9`.
 
-## Phase 2 — Red
+## Phase 2 — Red: done
 
 - Update the 12 investigation tests to D6: an open endpoint is not mapped in its own assembly, compiles,
   keeps a type-parameterised partial, and gets the Info diagnostic.
@@ -27,7 +27,7 @@ endpoint treated as an ordinary endpoint. Prototype: `C:\Repos\WebApplication9`.
   in both states. Manual-path naming for two closings.
 All must fail on the unfixed code for the right reason.
 
-## Phase 3 — Green
+## Phase 3 — Green: done
 
 1. Abstractions: `EndpointTypeArgumentAttribute<TConstraint, TArgument>`, the explicit
    `EndpointTypeArgumentAttribute(Type, params Type[])`, the assembly marker, and
@@ -46,7 +46,7 @@ Rules: netstandard2.0 without list patterns, ranges or `Index`; value-equatable 
 code fully qualified, extension methods in static form, zero `using`s; no `CompilationProvider`
 combine that defeats caching.
 
-## Phase 4 — Docs, version, sweep, PR
+## Phase 4 — Docs, version, sweep, PR: done except the PR
 
 README "Generic endpoints" section (compiled) and diagnostics rows; version `11.2.0-rc.0` (a proposal);
 one sweep on both TFMs (generator tests, `Tools.Tests`, solution `-t:Rebuild`, 36 CS1591 baseline);

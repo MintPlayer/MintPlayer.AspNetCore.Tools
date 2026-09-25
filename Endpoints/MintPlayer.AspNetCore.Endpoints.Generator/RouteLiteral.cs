@@ -50,10 +50,65 @@ internal static class RouteLiteral
         string memberName,
         SemanticModel model,
         CancellationToken cancellationToken)
+        => ValueOf(FindStaticStringProperty(symbol, memberName), model.Compilation, cancellationToken);
+
+    /// <summary>
+    /// Reads the <c>Path</c> (or <c>Prefix</c>) <b>the runtime uses</b>: the implementation of the
+    /// interface member, which is what <c>TEndpoint.Path</c> dispatches to (PRD D7).
+    /// </summary>
+    /// <remarks>
+    /// The nearest declaration and the implementation differ in one shape: a derived class that hides
+    /// its base's <c>Path</c> with <c>new static</c> without listing the endpoint interface again. The
+    /// interface map still points at the base's member, so that is the route the endpoint answers on,
+    /// and <paramref name="newMemberIgnored"/> reports the discrepancy (MPEP032). Falls back to the
+    /// nearest declaration when the implementation cannot be found.
+    /// </remarks>
+    /// <param name="symbol">The endpoint or group type; constructed types work.</param>
+    /// <param name="interfaceName"><c>IEndpointBase</c> or <c>IEndpointGroup</c>.</param>
+    /// <param name="memberName"><c>Path</c> or <c>Prefix</c>.</param>
+    /// <param name="compilation">The compilation the symbol belongs to.</param>
+    /// <param name="newMemberIgnored">True when a nearer <c>new static</c> member is not the one used.</param>
+    /// <param name="cancellationToken">Cancellation.</param>
+    public static string? ReadImplementation(
+        INamedTypeSymbol symbol,
+        string interfaceName,
+        string memberName,
+        Compilation compilation,
+        out bool newMemberIgnored,
+        CancellationToken cancellationToken)
     {
-        var property = FindStaticStringProperty(symbol, memberName);
+        var nearest = FindStaticStringProperty(symbol, memberName);
+        var implementation = FindImplementation(symbol, interfaceName, memberName);
+
+        newMemberIgnored = implementation is not null && nearest is not null &&
+                           !SymbolEqualityComparer.Default.Equals(implementation.OriginalDefinition, nearest.OriginalDefinition);
+
+        return ValueOf(implementation ?? nearest, compilation, cancellationToken);
+    }
+
+    private static IPropertySymbol? FindImplementation(INamedTypeSymbol symbol, string interfaceName, string memberName)
+    {
+        foreach (var iface in symbol.AllInterfaces)
+        {
+            if (iface.Name != interfaceName || iface.ContainingNamespace?.ToDisplayString() != "MintPlayer.AspNetCore.Endpoints") continue;
+
+            foreach (var member in iface.GetMembers(memberName))
+            {
+                if (member is IPropertySymbol { IsStatic: true } property &&
+                    symbol.FindImplementationForInterfaceMember(property) is IPropertySymbol implementation)
+                    return implementation;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ValueOf(IPropertySymbol? property, Compilation compilation, CancellationToken cancellationToken)
+    {
         if (property is null) return null;
 
+        // DeclaringSyntaxReferences of a member of a constructed type are its definition's, so a
+        // closed construction of a source endpoint reads the same literal as its definition.
         foreach (var reference in property.DeclaringSyntaxReferences)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -61,7 +116,7 @@ internal static class RouteLiteral
             var expression = ValueExpressionOf(reference.GetSyntax(cancellationToken));
             if (expression is null) continue;
 
-            var treeModel = model.Compilation.GetSemanticModel(expression.SyntaxTree);
+            var treeModel = compilation.GetSemanticModel(expression.SyntaxTree);
             var constant = treeModel.GetConstantValue(expression, cancellationToken);
             if (constant.HasValue && constant.Value is string value)
                 return value;

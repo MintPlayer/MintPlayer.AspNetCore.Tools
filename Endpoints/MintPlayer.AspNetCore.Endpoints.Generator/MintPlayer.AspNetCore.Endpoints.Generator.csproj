@@ -10,7 +10,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints.Generator</PackageId>
-		<Version>11.1.0-rc.0</Version>
+		<Version>11.2.0-rc.0</Version>
 		<IncludeSymbols>false</IncludeSymbols>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<DevelopmentDependency>true</DevelopmentDependency>

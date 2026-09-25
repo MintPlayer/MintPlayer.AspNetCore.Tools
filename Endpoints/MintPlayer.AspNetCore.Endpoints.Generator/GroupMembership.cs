@@ -38,6 +38,18 @@ internal static class GroupMembership
     /// <see langword="null"/> when it belongs to no group.
     /// </summary>
     public static string? Resolve(INamedTypeSymbol symbol, string endpointsNamespace)
+        => ResolveSymbol(symbol, endpointsNamespace)?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+    /// <summary>
+    /// The group type itself, as the attribute names it.
+    /// </summary>
+    /// <remarks>
+    /// Roslyn does not substitute an attribute's type arguments when the attribute is read through a
+    /// constructed type: <c>[MemberOf&lt;Api&gt;]</c> inside <c>Outer&lt;T&gt;</c> comes back as
+    /// <c>Outer&lt;T&gt;.Api</c> for <c>Outer&lt;AppUser&gt;.Inner</c> too. A caller holding a
+    /// construction substitutes with <see cref="GenericTypes.Substitute"/>.
+    /// </remarks>
+    public static INamedTypeSymbol? ResolveSymbol(INamedTypeSymbol symbol, string endpointsNamespace)
     {
         // GetAllBaseTypes is self-inclusive and ends at System.Object, so the first hit is the
         // nearest declaration.
@@ -50,7 +62,7 @@ internal static class GroupMembership
                 if (attributeClass.ContainingNamespace?.ToDisplayString() != endpointsNamespace) continue;
                 if (attributeClass.TypeArguments.Length != 1) continue;
 
-                return attributeClass.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                return attributeClass.TypeArguments[0] as INamedTypeSymbol;
             }
         }
 

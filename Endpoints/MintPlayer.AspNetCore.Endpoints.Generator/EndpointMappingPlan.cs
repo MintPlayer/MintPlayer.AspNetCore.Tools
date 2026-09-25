@@ -89,7 +89,20 @@ internal sealed class EndpointMappingPlan
             .OrderBy(endpoint => endpoint.FullyQualifiedName, StringComparer.Ordinal)
             .ToList();
 
-        var groups = model.Groups
+        var declaredGroups = model.Groups
+            .GroupBy(group => group.FullyQualifiedName, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(group => group.FullyQualifiedName, StringComparer.Ordinal)
+            .ToList();
+
+        // An open group declaration (Api<T>, or a group nested in a generic type) cannot be named by
+        // generated code; the constructions endpoints join are described instead — by the endpoints
+        // that join them (PRD D7) and by the closing step for a library's groups (PRD D3a). Declared
+        // groups come first, so a group described twice keeps its declaration's location.
+        var groups = declaredGroups
+            .Where(group => !group.IsOpen)
+            .Concat(declared.Where(endpoint => endpoint.Open is null).SelectMany(endpoint => endpoint.ReferencedGroups))
+            .Concat(model.Closing.Groups)
             .GroupBy(group => group.FullyQualifiedName, StringComparer.Ordinal)
             .Select(group => group.First())
             .OrderBy(group => group.FullyQualifiedName, StringComparer.Ordinal)
@@ -130,9 +143,17 @@ internal sealed class EndpointMappingPlan
         // An endpoint generated code cannot name (MPEP024) is not mapped, linked or contracted: every
         // one of those files would reference it by name and fail with CS0122. Its partial base class
         // is still emitted where C# allows it (see DeclaredEndpoints), so nothing else cascades.
+        //
+        // An open-generic endpoint is not mapped either (issue #34): no generated file outside the class
+        // can name its type parameters. Its partial is still emitted (with them repeated), and the
+        // application closes it. The closed constructions the application produced join here as
+        // ordinary endpoints (PRD D4), in the same ordinal order, so nothing changes without them.
         var mappable = declared
+            .Where(endpoint => endpoint.Open is null)
             .Where(endpoint => endpoint.InaccessibleReason is null)
+            .Concat(model.Closing.Endpoints)
             .Where(endpoint => endpoint.GroupTypeFqn is null || !unusable.Contains(endpoint.GroupTypeFqn))
+            .OrderBy(endpoint => endpoint.FullyQualifiedName, StringComparer.Ordinal)
             .ToList();
 
         // Only groups something actually needs get mapped: the groups endpoints join, plus every
@@ -146,11 +167,21 @@ internal sealed class EndpointMappingPlan
         }
         needed.RemoveWhere(unusable.Contains);
 
+        // A group an open endpoint joins is used — by the applications that close it — even though
+        // nothing maps through it here (issue #34). A library whose groups only hold open endpoints
+        // would otherwise report every one of them as never joined.
+        var joinedByOpen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var endpoint in declared.Where(endpoint => endpoint.Open is not null))
+        {
+            for (var current = endpoint.GroupTypeFqn; current is not null && joinedByOpen.Add(current);)
+                current = parentOf.TryGetValue(current, out var parent) ? parent : null;
+        }
+
         // The set difference MPEP016 reports. A cyclic group is excluded: it already has MPEP005,
         // which is the real reason nothing maps through it.
         var unjoined = groups
             .Select(group => group.FullyQualifiedName)
-            .Where(fqn => !needed.Contains(fqn) && !unusable.Contains(fqn))
+            .Where(fqn => !needed.Contains(fqn) && !unusable.Contains(fqn) && !joinedByOpen.Contains(fqn))
             .ToList();
 
         var childGroups = needed
@@ -211,8 +242,21 @@ internal sealed class EndpointMappingPlan
 
         return new EndpointMappingPlan(
             declared, mappable, groups, rootGroups, childGroups, endpointsByGroup,
-            factoryIndex, groupChains, cyclic, composedRoutes, unjoined, duplicateNames);
+            factoryIndex, groupChains, cyclic, composedRoutes, unjoined, duplicateNames)
+        {
+            DeclaredGroups = declaredGroups,
+        };
     }
+
+    /// <summary>
+    /// Every group declared in this compilation, open ones included, deduplicated and ordered — what
+    /// the open-endpoint records describe for applications (PRD D3a).
+    /// </summary>
+    public List<GroupInfo> DeclaredGroups { get; private set; } = new();
+
+    /// <summary>The declared open-generic endpoints generated code can name, which the assembly records (PRD D3a).</summary>
+    public IEnumerable<EndpointInfo> RecordableOpenEndpoints =>
+        DeclaredEndpoints.Where(endpoint => endpoint.Open is not null && endpoint.InaccessibleReason is null);
 
     /// <summary>
     /// Mappable endpoints whose effective name an earlier endpoint in plan order already has, keyed

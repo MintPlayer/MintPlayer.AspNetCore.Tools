@@ -222,6 +222,28 @@ release remains the owner's decision.
 > **D9 — Version:** proposed **`11.2.0-rc.0`**, a new feature on top of `11.1.0-rc.0`. The release stays
 > the owner's decision.
 
+> **D3a — What the library marker must carry (found while mapping the generator, 2026-09-25).** A symbol
+> constructed from the application's own source hands back its original definition's syntax, so
+> everything recovers as usual. A symbol from a **referenced library** has no syntax: `Path` and group
+> `Prefix` (read by `RouteLiteral` from syntax) come back null, which would silently drop links, contracts
+> and route checks. `IsPartial` comes back false, so bound properties lose their types. Library groups
+> are not discovered at all. So the library generator emits, per open endpoint, an assembly-level record
+> carrying: the open type (`typeof(Passkeys<>)`), its `Path` literal, a custom `Methods` literal, whether it
+> has a generated binder, and for each group on its chain the group type, `Prefix` and parent. The
+> application's generator reads the records (the M9 reference loop and `ConditionalWeakTable` memo, strings
+> only), resolves and `Construct`s the type per compilation, and never runs per-declaration diagnostics
+> (MPEP001/002/011/013/014/019/020) on a closed endpoint: those belong to the declaring assembly. Closing
+> diagnostics are located on the application's `EndpointTypeArgument` attribute. "Accessible" for a library
+> endpoint means `public`, not `internal`.
+>
+> Also from the mapping:
+> - `new static Path`: `RouteLiteral` takes the nearest `Path`, while the runtime uses the interface map.
+>   `FindImplementationForInterfaceMember(IEndpointBase.Path)` gives the runtime's choice, and a
+>   difference between the two is the D7 warning.
+> - A static virtual `IsEnabled` cannot be called as `G.IsEnabled(...)` on a class that does not declare it,
+>   so the generated code uses an `IsEnabled<TGroup>()` helper, like the existing `Prefix<TGroup>()`.
+> - The static `Endpoints` descriptor list cannot honour `IsEnabled`; it lists what is declared.
+
 ## Acceptance criteria
 
 1. A generator test with the issue's exact repro is **red** on `master` (CS0246 in generated code)
@@ -247,6 +269,60 @@ release remains the owner's decision.
 > 9. Every D2 error has a generator test, and none of them produces a compile error in generated code.
 > 10. The 12 investigation red tests are green, with their expectations updated to D6.
 > 11. The README's "Generic endpoints" section compiles, like every other block.
+
+> **As built (2026-09-25, Phases 2–4).** D1–D9 and D3a are implemented as decided. Decisions the PRD left
+> open, and corrections:
+> - **The records are public Abstractions attributes**, `[assembly: OpenEndpoint(typeof(X<>), Path = …,
+>   Methods = …, HasBinder = …, Version = 1)]` and `[assembly: OpenEndpointGroup(typeof(G), Prefix = …)]`
+>   (`[EditorBrowsable(Never)]`), not an internal attribute generated per assembly like the M9 contract:
+>   the application references Abstractions anyway, since it writes `EndpointTypeArgument`. Their presence
+>   is the D3 marker. They are written at the top of `EndpointMapping.g.cs`, only for open endpoints
+>   generated code can name, and only when the compilation resolves `OpenEndpointAttribute` (an older
+>   Abstractions gets no records rather than a compile error). When an assembly has any open endpoint,
+>   every nameable declared group is recorded, not only those on an open chain: a chain can pass through
+>   a construction (`Api<string>`) whose declaration is the open `Api<T>`, and prefixes are looked up by
+>   definition. A record with a newer `Version` is ignored.
+> - **Diagnostics.** MPEP025 Info (open endpoint not mapped here; suppressed when the same compilation
+>   closes it), MPEP026 Error (constraint violated; one per closing, the first violation, checked in the
+>   order `class`, `unmanaged`, `struct`, `notnull`, `new()`, constraint types), MPEP027 Error (two
+>   attributes bind one parameter), MPEP028 Error (explicit arity), MPEP029 **Warning** (endpoint, group on
+>   its chain or type argument cannot be named by the application — a warning, not an error, because an
+>   application cannot fix a library's internal endpoint except by dropping the attribute), MPEP030 Warning
+>   (attribute closes nothing), **MPEP031 Warning (new: some type parameters bound, others not)**, MPEP032
+>   Warning (`new static Path` ignored). MPEP026–MPEP031 are located on the application's attribute.
+>   An attribute whose type arguments do not resolve is ignored (its own CS0246 already fires; the IDE
+>   can briefly lack references).
+> - **Closed endpoints in the route checks.** MPEP007 and MPEP012 run on them (D4) and name them by
+>   their closed name (`Echo_String`), since closings share a class name; MPEP009 and MPEP010 are
+>   declaration checks and are skipped for them, like the other per-declaration diagnostics.
+> - **The name rule (D4)**, identical in `GenericTypes.NameSuffix` and the runtime's `EndpointNameOf`:
+>   `{Name}` plus `_{Argument}` for every type argument, outermost containing type first, each by its CLR
+>   name without arity; a generic argument is followed by its own arguments (`Echo_List_Int32`), an array
+>   by `Array` (`Echo_Int32Array`). `[EndpointDescriptorName("x")]` keeps the suffix (`x_String`).
+> - **Open groups** (a group with type parameters of its own or of a container) are left out of the plan;
+>   the constructions endpoints join are described by those endpoints (D7) or by the closing step (a
+>   library's groups, from the records). A group joined only by open endpoints is not MPEP016 in the
+>   declaring assembly. MPEP024 for a group is now reported from the declarations, so an inaccessible open
+>   group still gets it.
+> - **`Prefix` too** is resolved through the interface implementation, like `Path` (D7), without a
+>   warning of its own. `Methods` is not: it still takes the nearest declaration (unchanged; the same
+>   divergence is possible there and is not addressed).
+> - **IsEnabled (D5)** wraps every group block, which changes the generated text of every grouped
+>   endpoint (`{` becomes `if (IsEnabled<G>(app.ServiceProvider)) {`), not its behaviour. The manual path
+>   checks every group on the chain before creating any, and maps nothing when one is disabled.
+> - **Acceptance 2** holds for the mapping, contract and route output of the non-generic endpoints; the
+>   mapping file additionally carries the open class's records (D3a). A test strips the record lines and
+>   compares the rest byte for byte.
+> - **Acceptance 4**, the OpenAPI half: the manual-path test in Tools.Tests asserts distinct endpoint
+>   names and both routes answering, not the document, because calling `AddOpenApi()` there switches on
+>   the OpenAPI package's XML-comment interceptors (CS9137). Closed endpoints' `operationId`s are asserted
+>   on the TestApp's document instead.
+> - **Test library shape.** `MintPlayer.AspNetCore.Endpoints.TestLibrary` answers with BCL types only
+>   (`string`), so the TestApp's typed client (which does not reference the library) resolves every
+>   contract without MPEP021.
+> - **Order of work.** The Abstractions API (attributes, `IsEnabled`) was added before the red run, so the
+>   red tests fail on behaviour rather than on unresolved attribute types. Red: 35 of 360 generator tests
+>   (the 11 investigation tests plus all 24 new ones); the TestLibrary did not build (CS0246, CS0534).
 
 ## Version
 

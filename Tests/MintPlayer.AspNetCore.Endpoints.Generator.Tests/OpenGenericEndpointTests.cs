@@ -78,6 +78,12 @@ public class OpenGenericEndpointTests
         Assert.DoesNotContain("Echo<TPayload>", GeneratedFile(source, "EndpointMapping.g.cs"));
         Assert.DoesNotContain("Echo<TPayload>", GeneratedFile(source, "EndpointContracts.g.cs"));
         Assert.DoesNotContain("Echo<TPayload>", GeneratedFile(source, "EndpointRoutes.g.cs"));
+
+        // D6: an Info on the class says it is not mapped here and how an application closes it.
+        var info = Assert.Single(EndpointGeneratorHarness.Run("Fixtures", source).Diagnostics, d => d.Id == "MPEP025");
+        Assert.Equal(DiagnosticSeverity.Info, info.Severity);
+        Assert.Contains("Echo<TPayload>", info.GetMessage());
+        Assert.Contains("EndpointTypeArgument", info.GetMessage());
     }
 
     /// <summary>
@@ -107,8 +113,54 @@ public class OpenGenericEndpointTests
 
         var mapping = GeneratedFile(source, "EndpointMapping.g.cs");
         Assert.Contains("global::Fixtures.Health", mapping);
-        Assert.DoesNotContain("global::Fixtures.Echo<", mapping);
+        Assert.DoesNotContain("Echo<TPayload>", mapping);
+        Assert.DoesNotContain("Map<global::Fixtures.Echo", mapping);
+
+        // Recorded instead, unbound, for an application to close (PRD D3a).
+        Assert.Contains("OpenEndpointAttribute(typeof(global::Fixtures.Echo<>)", mapping);
         Assert.Contains("typeof(global::Fixtures.Health)", GeneratedFile(source, "EndpointContracts.g.cs"));
+    }
+
+    /// <summary>
+    /// PRD acceptance 2: the non-generic endpoints' mapping, contract and route output is byte for byte
+    /// the same with and without the open-generic class beside them. The only addition to the mapping
+    /// file is the block of <c>[assembly: OpenEndpoint…]</c> records for the open class (PRD D3a).
+    /// </summary>
+    [Fact]
+    public void OpenGenericEndpoint_LeavesItsNeighboursOutputByteIdentical()
+    {
+        const string health = """
+            [MemberOf<ApiGroup>]
+            public class Health : IGetEndpoint
+            {
+                public static string Path => "/health";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+
+            """;
+        const string echo = """
+            [MemberOf<ApiGroup>]
+            public class Echo<TPayload> : IPostEndpoint where TPayload : class
+            {
+                public static string Path => "/echo";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok(typeof(TPayload).Name));
+            }
+            """;
+
+        var without = FixturePreamble + health;
+        var with = FixturePreamble + health + echo;
+
+        Assert.Equal(GeneratedFile(without, "EndpointContracts.g.cs"), GeneratedFile(with, "EndpointContracts.g.cs"));
+        Assert.Equal(GeneratedFile(without, "EndpointRoutes.g.cs"), GeneratedFile(with, "EndpointRoutes.g.cs"));
+
+        var mappingWith = GeneratedFile(with, "EndpointMapping.g.cs");
+        Assert.Contains("[assembly: global::MintPlayer.AspNetCore.Endpoints.OpenEndpointAttribute(typeof(global::Fixtures.Echo<>)", mappingWith);
+        var records = mappingWith.Split('\n')
+            .Where(line => line.StartsWith("[assembly: global::MintPlayer.AspNetCore.Endpoints.OpenEndpoint", StringComparison.Ordinal))
+            .ToArray();
+        var stripped = string.Join("\n", mappingWith.Split('\n').Where(line => !records.Contains(line)))
+            .Replace("\r\n\r\n\r\n", "\r\n\r\n").Replace("\n\n\n", "\n\n");
+        Assert.Equal(GeneratedFile(without, "EndpointMapping.g.cs"), stripped);
     }
 
     /// <summary>
@@ -184,8 +236,8 @@ public class OpenGenericEndpointTests
     /// already compiles and maps at <c>/gapi/ping</c> at run time. But the plan keys groups by the
     /// open FQN <c>Api&lt;T&gt;</c>, so the membership <c>Api&lt;string&gt;</c> is never matched:
     /// MPEP016 misfires on <c>Api&lt;T&gt;</c> ("not joined"), and <c>Ping</c>'s composed route is
-    /// null, so it silently gets no typed link and no contract. Red today on the MPEP016 misfire;
-    /// the exact expected outcome depends on the Phase 1 decision for open groups (R1/R4).
+    /// null, so it silently gets no typed link and no contract. PRD D7: the closed group is keyed by
+    /// its closed type, so it keeps its link and contract, and the open declaration is not reported.
     /// </summary>
     [Fact]
     public void OpenGroupJoinedThroughClosedConstruction_IsNotReportedAsUnjoined()
@@ -211,7 +263,9 @@ public class OpenGenericEndpointTests
         AssertCompilesWithoutErrors(source);
 
         var diagnostics = EndpointGeneratorHarness.Run("Fixtures", source).Diagnostics;
-        Assert.DoesNotContain(diagnostics, d => d.Id == "MPEP016" && d.GetMessage().Contains("'Api<T>'"));
+        Assert.DoesNotContain(diagnostics, d => d.Id == "MPEP016");
+        Assert.Contains("typeof(global::Fixtures.Ping), \"Ping\", \"/gapi/ping\"", GeneratedFile(source, "EndpointContracts.g.cs"));
+        Assert.Contains("Ping()", GeneratedFile(source, "EndpointRoutes.g.cs"));
     }
 
     /// <summary>

@@ -39,6 +39,10 @@ internal static class MethodsLiteral
     /// interface, exactly as it does at run time: the interface's implementation is only a default.
     /// </remarks>
     public static string? Read(INamedTypeSymbol symbol, HttpMethodKind verb, SemanticModel model, CancellationToken cancellationToken)
+        => Read(symbol, verb, model.Compilation, cancellationToken);
+
+    /// <inheritdoc cref="Read(INamedTypeSymbol, HttpMethodKind, SemanticModel, CancellationToken)"/>
+    public static string? Read(INamedTypeSymbol symbol, HttpMethodKind verb, Compilation compilation, CancellationToken cancellationToken)
     {
         var property = FindMethodsProperty(symbol);
         if (property is null)
@@ -61,7 +65,7 @@ internal static class MethodsLiteral
             var expression = RouteLiteral.ValueExpressionOf(reference.GetSyntax(cancellationToken));
             if (expression is null) continue;
 
-            var treeModel = model.Compilation.GetSemanticModel(expression.SyntaxTree);
+            var treeModel = compilation.GetSemanticModel(expression.SyntaxTree);
             var verbs = VerbsOf(expression, treeModel, cancellationToken);
             if (verbs is not null) return Encode(verbs);
         }

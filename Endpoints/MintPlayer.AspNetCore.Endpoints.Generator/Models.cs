@@ -27,8 +27,16 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         string? knownMethods = null,
         RequestValidationGap validationGap = RequestValidationGap.None,
         string? inaccessibleReason = null,
-        bool isInFileLocalType = false)
+        bool isInFileLocalType = false,
+        OpenGenericInfo? open = null,
+        ClosedGenericInfo? closed = null,
+        ImmutableArray<GroupInfo> referencedGroups = default,
+        bool hasIgnoredNewPath = false)
     {
+        Open = open;
+        Closed = closed;
+        ReferencedGroups = referencedGroups.IsDefault ? ImmutableArray<GroupInfo>.Empty : referencedGroups;
+        HasIgnoredNewPath = hasIgnoredNewPath;
         InaccessibleReason = inaccessibleReason;
         IsInFileLocalType = isInFileLocalType;
         ValidationGap = validationGap;
@@ -147,6 +155,33 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     /// </remarks>
     public LocationKey? Location { get; }
 
+    /// <summary>
+    /// Set when the endpoint, or a type it is nested in, has type parameters (issue #34). Generated
+    /// code outside the class cannot name it, so it is not mapped, linked or contracted in this
+    /// assembly; an application closes it (PRD D6).
+    /// </summary>
+    public OpenGenericInfo? Open { get; }
+
+    /// <summary>
+    /// Set when this is a closed construction of an open endpoint, produced by the application's
+    /// <c>[assembly: EndpointTypeArgument]</c> (PRD D4). It is mapped like any endpoint, but it has
+    /// no declaration here: no partial is emitted and no per-declaration diagnostic runs on it.
+    /// </summary>
+    public ClosedGenericInfo? Closed { get; }
+
+    /// <summary>
+    /// The constructed generic groups on this endpoint's chain (<c>[MemberOf&lt;Api&lt;string&gt;&gt;]</c>),
+    /// which no group declaration describes: the declaration is the open <c>Api&lt;T&gt;</c> (PRD D7).
+    /// </summary>
+    public ImmutableArray<GroupInfo> ReferencedGroups { get; }
+
+    /// <summary>
+    /// True when a <c>new static Path</c> on the class (or a base between it and the interface
+    /// implementation) is not the <c>Path</c> the runtime uses, because the endpoint interface is not
+    /// re-implemented below it (PRD D7, MPEP032). <see cref="Route"/> is the runtime's.
+    /// </summary>
+    public bool HasIgnoredNewPath { get; }
+
     /// <summary>The name this endpoint is recorded under in the descriptor list.</summary>
     public string EffectiveDescriptorName => DescriptorName ?? ClassName;
 
@@ -187,6 +222,10 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
         ValidationGap == other.ValidationGap &&
         InaccessibleReason == other.InaccessibleReason &&
         IsInFileLocalType == other.IsInFileLocalType &&
+        HasIgnoredNewPath == other.HasIgnoredNewPath &&
+        Equals(Open, other.Open) &&
+        Equals(Closed, other.Closed) &&
+        SequenceComparer<GroupInfo>.Instance.Equals(ReferencedGroups, other.ReferencedGroups) &&
         // ImmutableArray's own equality compares the backing array by reference. Using it here
         // would make every run look like a change and kill incremental caching, silently.
         SequenceComparer<BoundProperty>.Instance.Equals(BoundProperties, other.BoundProperties);
@@ -195,11 +234,128 @@ internal sealed class EndpointInfo : IEquatable<EndpointInfo>
     public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
 }
 
+/// <summary>What the declaring assembly knows about an open-generic endpoint (issue #34, PRD D6).</summary>
+internal sealed class OpenGenericInfo : IEquatable<OpenGenericInfo>
+{
+    public OpenGenericInfo(string displayName, string metadataName, string unboundTypeOf, string? ownTypeParameters)
+    {
+        DisplayName = displayName;
+        MetadataName = metadataName;
+        UnboundTypeOf = unboundTypeOf;
+        OwnTypeParameters = ownTypeParameters;
+    }
+
+    /// <summary>For messages: <c>Echo&lt;TPayload&gt;</c>, <c>Outer&lt;T&gt;.Inner</c>.</summary>
+    public string DisplayName { get; }
+
+    /// <summary>The metadata name the closing step re-resolves the symbol by: <c>Ns.Outer`1+Inner</c>.</summary>
+    public string MetadataName { get; }
+
+    /// <summary>The <c>typeof</c> operand of the unbound type: <c>global::Ns.Outer&lt;&gt;.Inner</c>.</summary>
+    public string UnboundTypeOf { get; }
+
+    /// <summary>The class's own type parameter list, <c>&lt;T&gt;</c>, repeated on its generated partial (PRD R3); null when only a container is generic.</summary>
+    public string? OwnTypeParameters { get; }
+
+    public bool Equals(OpenGenericInfo? other) =>
+        other is not null &&
+        DisplayName == other.DisplayName &&
+        MetadataName == other.MetadataName &&
+        UnboundTypeOf == other.UnboundTypeOf &&
+        OwnTypeParameters == other.OwnTypeParameters;
+
+    public override bool Equals(object? obj) => Equals(obj as OpenGenericInfo);
+    public override int GetHashCode() => MetadataName.GetHashCode();
+}
+
+/// <summary>Where a closed construction came from (issue #34, PRD D4).</summary>
+internal sealed class ClosedGenericInfo : IEquatable<ClosedGenericInfo>
+{
+    public ClosedGenericInfo(string openFullyQualifiedName, bool fromReference)
+    {
+        OpenFullyQualifiedName = openFullyQualifiedName;
+        FromReference = fromReference;
+    }
+
+    /// <summary>The open definition's fully qualified name, <c>global::Lib.Passkeys&lt;TUser&gt;</c>.</summary>
+    public string OpenFullyQualifiedName { get; }
+
+    /// <summary>True when the open endpoint is declared in a referenced assembly rather than in this compilation.</summary>
+    public bool FromReference { get; }
+
+    public bool Equals(ClosedGenericInfo? other) =>
+        other is not null &&
+        OpenFullyQualifiedName == other.OpenFullyQualifiedName &&
+        FromReference == other.FromReference;
+
+    public override bool Equals(object? obj) => Equals(obj as ClosedGenericInfo);
+    public override int GetHashCode() => OpenFullyQualifiedName.GetHashCode();
+}
+
+/// <summary>A diagnostic the closing step found, as value-equal strings (see <see cref="ClosingModel"/>).</summary>
+internal sealed class ClosingProblem : IEquatable<ClosingProblem>
+{
+    public ClosingProblem(string id, ImmutableArray<string> arguments, LocationKey? location)
+    {
+        Id = id;
+        Arguments = arguments;
+        Location = location;
+    }
+
+    public string Id { get; }
+    public ImmutableArray<string> Arguments { get; }
+    public LocationKey? Location { get; }
+
+    public bool Equals(ClosingProblem? other) =>
+        other is not null &&
+        Id == other.Id &&
+        SequenceComparer<string>.Instance.Equals(Arguments, other.Arguments) &&
+        LocationKeys.AreEqual(Location, other.Location);
+
+    public override bool Equals(object? obj) => Equals(obj as ClosingProblem);
+    public override int GetHashCode() => Id.GetHashCode();
+}
+
+/// <summary>
+/// What the application's <c>[assembly: EndpointTypeArgument]</c> attributes produce: the closed
+/// endpoints, the groups on their chains that no declaration of this compilation describes, and the
+/// problems (PRD D2, D6). Value-equal, because it is computed from the <c>Compilation</c> on every run
+/// and only equality keeps everything downstream cached.
+/// </summary>
+internal sealed class ClosingModel : IEquatable<ClosingModel>
+{
+    public static readonly ClosingModel Empty = new(
+        ImmutableArray<EndpointInfo>.Empty, ImmutableArray<GroupInfo>.Empty, ImmutableArray<ClosingProblem>.Empty);
+
+    public ClosingModel(ImmutableArray<EndpointInfo> endpoints, ImmutableArray<GroupInfo> groups, ImmutableArray<ClosingProblem> problems)
+    {
+        Endpoints = endpoints;
+        Groups = groups;
+        Problems = problems;
+    }
+
+    public ImmutableArray<EndpointInfo> Endpoints { get; }
+    public ImmutableArray<GroupInfo> Groups { get; }
+    public ImmutableArray<ClosingProblem> Problems { get; }
+
+    public bool Equals(ClosingModel? other) =>
+        other is not null &&
+        SequenceComparer<EndpointInfo>.Instance.Equals(Endpoints, other.Endpoints) &&
+        SequenceComparer<GroupInfo>.Instance.Equals(Groups, other.Groups) &&
+        SequenceComparer<ClosingProblem>.Instance.Equals(Problems, other.Problems);
+
+    public override bool Equals(object? obj) => Equals(obj as ClosingModel);
+    public override int GetHashCode() => unchecked((Endpoints.Length * 31) ^ Groups.Length ^ (Problems.Length * 7));
+}
+
 internal sealed class GroupInfo : IEquatable<GroupInfo>
 {
     public GroupInfo(string fullyQualifiedName, string? parentGroupFqn,
-        LocationKey? location = null, string? prefix = null, string? inaccessibleReason = null)
+        LocationKey? location = null, string? prefix = null, string? inaccessibleReason = null,
+        bool isOpen = false, string? unboundTypeOf = null)
     {
+        IsOpen = isOpen;
+        UnboundTypeOf = unboundTypeOf;
         InaccessibleReason = inaccessibleReason;
         FullyQualifiedName = fullyQualifiedName;
         ParentGroupFqn = parentGroupFqn;
@@ -223,13 +379,28 @@ internal sealed class GroupInfo : IEquatable<GroupInfo>
     /// </summary>
     public string? InaccessibleReason { get; }
 
+    /// <summary>
+    /// True for a group declaration with type parameters (its own or a container's). Generated code
+    /// cannot name it; the constructions endpoints actually join are described instead (PRD D7).
+    /// </summary>
+    public bool IsOpen { get; }
+
+    /// <summary>
+    /// The <c>typeof</c> operand of the group's unbound declaration (<c>global::Ns.Api&lt;&gt;</c>), for a
+    /// group declared in this compilation; recorded for applications that close this assembly's open
+    /// endpoints (PRD D3a). Null for a group that is not a declaration of this compilation.
+    /// </summary>
+    public string? UnboundTypeOf { get; }
+
     public bool Equals(GroupInfo? other) =>
         other is not null &&
         FullyQualifiedName == other.FullyQualifiedName &&
         ParentGroupFqn == other.ParentGroupFqn &&
         LocationKeys.AreEqual(Location, other.Location) &&
         Prefix == other.Prefix &&
-        InaccessibleReason == other.InaccessibleReason;
+        InaccessibleReason == other.InaccessibleReason &&
+        IsOpen == other.IsOpen &&
+        UnboundTypeOf == other.UnboundTypeOf;
 
     public override bool Equals(object? obj) => Equals(obj as GroupInfo);
     public override int GetHashCode() => FullyQualifiedName?.GetHashCode() ?? 0;
@@ -237,8 +408,9 @@ internal sealed class GroupInfo : IEquatable<GroupInfo>
 
 internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
 {
-    public AssemblyInfo(string assemblyName, string? methodNameOverride, bool hasOpenApiTransformers = false, bool canMapEndpoints = true)
+    public AssemblyInfo(string assemblyName, string? methodNameOverride, bool hasOpenApiTransformers = false, bool canMapEndpoints = true, bool canRecordOpenEndpoints = true)
     {
+        CanRecordOpenEndpoints = canRecordOpenEndpoints;
         AssemblyName = assemblyName;
         MethodNameOverride = methodNameOverride;
         HasOpenApiTransformers = hasOpenApiTransformers;
@@ -259,6 +431,13 @@ internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
     /// there, so nothing is emitted and MPEP006 stays silent.
     /// </remarks>
     public bool CanMapEndpoints { get; }
+
+    /// <summary>
+    /// True when the compilation resolves <c>OpenEndpointAttribute</c> (Abstractions 11.2 or later),
+    /// which the open-endpoint records are written with (issue #34). Against an older Abstractions the
+    /// records are left out rather than emitted as a compile error.
+    /// </summary>
+    public bool CanRecordOpenEndpoints { get; }
 
     /// <summary>
     /// True when the consumer's compilation can register an OpenAPI operation transformer — it
@@ -358,7 +537,8 @@ internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
         AssemblyName == other.AssemblyName &&
         MethodNameOverride == other.MethodNameOverride &&
         HasOpenApiTransformers == other.HasOpenApiTransformers &&
-        CanMapEndpoints == other.CanMapEndpoints;
+        CanMapEndpoints == other.CanMapEndpoints &&
+        CanRecordOpenEndpoints == other.CanRecordOpenEndpoints;
 
     public override bool Equals(object? obj) => Equals(obj as AssemblyInfo);
     public override int GetHashCode() => AssemblyName?.GetHashCode() ?? 0;
@@ -374,20 +554,25 @@ internal sealed class AssemblyInfo : IEquatable<AssemblyInfo>
 /// </remarks>
 internal sealed class EndpointModel : IEquatable<EndpointModel>
 {
-    public EndpointModel(ImmutableArray<EndpointInfo> endpoints, ImmutableArray<GroupInfo> groups, AssemblyInfo assembly)
+    public EndpointModel(ImmutableArray<EndpointInfo> endpoints, ImmutableArray<GroupInfo> groups, AssemblyInfo assembly, ClosingModel? closing = null)
     {
         Endpoints = endpoints;
         Groups = groups;
         Assembly = assembly;
+        Closing = closing ?? ClosingModel.Empty;
     }
 
     public ImmutableArray<EndpointInfo> Endpoints { get; }
     public ImmutableArray<GroupInfo> Groups { get; }
     public AssemblyInfo Assembly { get; }
 
+    /// <summary>The open endpoints this compilation closes, and what went wrong closing them.</summary>
+    public ClosingModel Closing { get; }
+
     public bool Equals(EndpointModel? other) =>
         other is not null &&
         Assembly.Equals(other.Assembly) &&
+        Closing.Equals(other.Closing) &&
         SequenceComparer<EndpointInfo>.Instance.Equals(Endpoints, other.Endpoints) &&
         SequenceComparer<GroupInfo>.Instance.Equals(Groups, other.Groups);
 

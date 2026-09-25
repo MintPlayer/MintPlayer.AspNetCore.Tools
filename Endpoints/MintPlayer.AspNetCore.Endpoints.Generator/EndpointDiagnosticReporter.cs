@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using MintPlayer.SourceGenerators.Tools;
 
@@ -17,12 +18,23 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
     {
         var plan = EndpointMappingPlan.From(model);
 
+        // Open endpoints this compilation closes itself are mapped here, so MPEP025 would be wrong.
+        var closedHere = new HashSet<string>(
+            model.Closing.Endpoints.Where(endpoint => endpoint.Closed is { FromReference: false }).Select(endpoint => endpoint.Closed!.OpenFullyQualifiedName),
+            StringComparer.Ordinal);
+
         foreach (var endpoint in plan.DeclaredEndpoints)
         {
             var location = endpoint.Location.ToLocation(compilation);
 
             if (endpoint.InaccessibleReason is { } whyEndpoint)
                 yield return DiagnosticDescriptors.TypeNotAccessibleToGeneratedCode.Create(location, "Endpoint class", endpoint.ClassName, whyEndpoint);
+
+            if (endpoint.Open is { } open && !closedHere.Contains(endpoint.FullyQualifiedName))
+                yield return DiagnosticDescriptors.OpenEndpointNotMapped.Create(location, open.DisplayName);
+
+            if (endpoint.HasIgnoredNewPath)
+                yield return DiagnosticDescriptors.NewStaticPathIgnored.Create(location, endpoint.ClassName, endpoint.Route ?? "?");
 
             foreach (var property in endpoint.BoundProperties)
             {
@@ -81,13 +93,16 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
 
         foreach (var group in plan.Groups)
         {
-            var location = group.Location.ToLocation(compilation);
-
             if (plan.CyclicGroups.Contains(group.FullyQualifiedName))
-                yield return DiagnosticDescriptors.GroupNestingIsCyclic.Create(location, ShortNameOf(group.FullyQualifiedName));
+                yield return DiagnosticDescriptors.GroupNestingIsCyclic.Create(group.Location.ToLocation(compilation), ShortNameOf(group.FullyQualifiedName));
+        }
 
+        // On the declarations, which is where the fix goes — an open group's too, although only its
+        // constructions are in the plan (a construction of an inaccessible declaration is inaccessible).
+        foreach (var group in plan.DeclaredGroups)
+        {
             if (group.InaccessibleReason is { } whyGroup)
-                yield return DiagnosticDescriptors.TypeNotAccessibleToGeneratedCode.Create(location, "Endpoint group", ShortNameOf(group.FullyQualifiedName), whyGroup);
+                yield return DiagnosticDescriptors.TypeNotAccessibleToGeneratedCode.Create(group.Location.ToLocation(compilation), "Endpoint group", ShortNameOf(group.FullyQualifiedName), whyGroup);
         }
 
         foreach (var groupFqn in plan.UnjoinedGroups)
@@ -111,6 +126,13 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
                 endpoint.FullyQualifiedName.Replace("global::", ""),
                 endpoint.EffectiveDescriptorName,
                 earlier.FullyQualifiedName.Replace("global::", ""));
+        }
+
+        // MPEP026-MPEP031, found by the closing step and located on the application's attribute.
+        foreach (var problem in model.Closing.Problems)
+        {
+            if (DescriptorFor(problem.Id) is { } descriptor)
+                yield return descriptor.Create(problem.Location.ToLocation(compilation), problem.Arguments.Cast<object>().ToArray());
         }
 
         if (model.Assembly.CanMapEndpoints && model.Assembly.MethodNameWasSanitised)
@@ -199,9 +221,11 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
             if (composed is null) continue;
 
             // MPEP009 — checked against the composed route, so a parameter contributed by a group
-            // prefix counts as present.
+            // prefix counts as present. Like MPEP010, it is about the declaration, so it is skipped
+            // for a closed construction (issue #34): those diagnostics belong to the declaring assembly.
             var tokens = ComposedRoute.Parameters(composed);
-            foreach (var property in endpoint.BoundProperties)
+            var isDeclaration = endpoint.Closed is null;
+            foreach (var property in isDeclaration ? endpoint.BoundProperties : ImmutableArray<BoundProperty>.Empty)
             {
                 if (property.Source != BoundSource.Route) continue;
                 if (tokens.Contains(property.Key, StringComparer.OrdinalIgnoreCase)) continue;
@@ -215,7 +239,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
 
             // MPEP010 — the endpoint's own Path starts with the prefix its chain already supplies.
             var chain = plan.GroupChains[endpoint.FullyQualifiedName];
-            if (endpoint.Route is not null && chain.Count > 0)
+            if (isDeclaration && endpoint.Route is not null && chain.Count > 0)
             {
                 var prefix = ComposedRoute.Compose(
                     chain.Select(fqn => prefixOf.TryGetValue(fqn, out var value) ? value : null).ToList(),
@@ -261,14 +285,32 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
 
                     yield return DiagnosticDescriptors.DuplicateRoute.Create(
                         bucket[later].Location,
-                        bucket[later].Endpoint.ClassName,
+                        NameOf(bucket[later].Endpoint),
                         string.Join(", ", shared),
                         bucket[later].ComposedRoute,
-                        bucket[earlier].Endpoint.ClassName);
+                        NameOf(bucket[earlier].Endpoint));
                 }
             }
         }
     }
+
+    private static DiagnosticDescriptor? DescriptorFor(string id) => id switch
+    {
+        "MPEP026" => DiagnosticDescriptors.TypeArgumentViolatesConstraint,
+        "MPEP027" => DiagnosticDescriptors.TypeParameterBoundTwice,
+        "MPEP028" => DiagnosticDescriptors.ExplicitTypeArgumentCountMismatch,
+        "MPEP029" => DiagnosticDescriptors.ClosedEndpointNotAccessible,
+        "MPEP030" => DiagnosticDescriptors.TypeArgumentClosesNothing,
+        "MPEP031" => DiagnosticDescriptors.EndpointPartiallyBound,
+        _ => null,
+    };
+
+    /// <summary>
+    /// How a diagnostic names an endpoint: its class name, or for a closed construction its name,
+    /// since two closings of one class share the class name (<c>Echo_String</c>, <c>Echo_Int32</c>).
+    /// </summary>
+    private static string NameOf(EndpointInfo endpoint) =>
+        endpoint.Closed is null ? endpoint.ClassName : endpoint.EffectiveDescriptorName;
 
     private static List<string> RouteKeysOf(EndpointInfo endpoint) => endpoint.BoundProperties
         .Where(property => property.Source == BoundSource.Route)

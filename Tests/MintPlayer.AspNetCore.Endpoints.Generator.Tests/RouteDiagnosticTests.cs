@@ -625,22 +625,45 @@ public class RouteDiagnosticTests
     [Fact]
     public void TheTestApp_ProducesNoWarningOrErrorFromTheGenerator()
     {
-        var testApp = Path.Combine(RepositoryRoot(), "Endpoints", "MintPlayer.AspNetCore.Endpoints.TestApp");
-        var sources = Directory.EnumerateFiles(testApp, "*.cs", SearchOption.AllDirectories)
-            .Where(file => !IsBuildOutput(testApp, file))
-            .OrderBy(file => file, StringComparer.Ordinal)
-            .Select(File.ReadAllText)
-            .Prepend(WebSdkImplicitUsings)
-            .ToArray();
+        // The TestApp closes the TestLibrary's generic endpoints (issue #34), so the library is compiled
+        // through the generator first and referenced as metadata, exactly as the real build does.
+        var library = SourcesOf("MintPlayer.AspNetCore.Endpoints.TestLibrary");
+        var libraryCompilation = EndpointGeneratorHarness.CreateCompilation("MintPlayer.AspNetCore.Endpoints.TestLibrary", library);
+        Microsoft.CodeAnalysis.CSharp.CSharpGeneratorDriver
+            .Create(new EndpointGenerator())
+            .RunGeneratorsAndUpdateCompilation(libraryCompilation, out var libraryUpdated, out var libraryDiagnostics);
+        Assert.DoesNotContain(libraryDiagnostics, d => d.Severity >= DiagnosticSeverity.Warning);
+        Assert.DoesNotContain(libraryUpdated.GetDiagnostics(), d => d.Severity == DiagnosticSeverity.Error);
 
-        var result = EndpointGeneratorHarness.Run("MintPlayer.AspNetCore.Endpoints.TestApp", sources);
+        using var image = new MemoryStream();
+        Assert.True(libraryUpdated.Emit(image).Success);
+
+        var compilation = EndpointGeneratorHarness
+            .CreateCompilation("MintPlayer.AspNetCore.Endpoints.TestApp", SourcesOf("MintPlayer.AspNetCore.Endpoints.TestApp"))
+            .AddReferences(MetadataReference.CreateFromImage(image.ToArray()));
+        var result = Microsoft.CodeAnalysis.CSharp.CSharpGeneratorDriver
+            .Create(new EndpointGenerator())
+            .RunGenerators(compilation)
+            .GetRunResult();
 
         var generated = string.Join("\n", result.GeneratedTrees.Select(tree => tree.ToString()));
         Assert.Contains("GetUser", generated);
         Assert.Contains("PreflightEndpoint", generated);
+        Assert.Contains("Passkeys_AppUser", generated);
 
         var noisy = result.Diagnostics.Where(d => d.Severity >= DiagnosticSeverity.Warning).ToArray();
         Assert.True(noisy.Length == 0, string.Join(" | ", noisy.Select(d => $"{d.Id}: {d.GetMessage()}")));
+    }
+
+    private static string[] SourcesOf(string project)
+    {
+        var directory = Path.Combine(RepositoryRoot(), "Endpoints", project);
+        return Directory.EnumerateFiles(directory, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !IsBuildOutput(directory, file))
+            .OrderBy(file => file, StringComparer.Ordinal)
+            .Select(File.ReadAllText)
+            .Prepend(WebSdkImplicitUsings)
+            .ToArray();
     }
 
     private const string WebSdkImplicitUsings = """

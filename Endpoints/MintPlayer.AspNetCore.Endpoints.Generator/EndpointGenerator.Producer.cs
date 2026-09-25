@@ -42,6 +42,14 @@ partial class EndpointGenerator
             writer.WriteLine($"global using global::{GeneratedNamespace};");
             writer.WriteLine();
 
+            // Issue #34, PRD D3a: this assembly's open-generic endpoints, and the groups they may sit
+            // in, recorded for the application that closes them — it sees this assembly as metadata,
+            // where a Path's body and the declaring syntax are gone. Assembly attributes must follow
+            // the global using and precede every namespace member (CS1730). Nothing is written for an
+            // assembly without open endpoints, so its output is unchanged.
+            if (assembly.CanRecordOpenEndpoints && EmitOpenEndpointRecords(writer, plan))
+                writer.WriteLine();
+
             // No using directives, deliberately. Every type is global::-qualified AND every
             // extension method is invoked in static form — EndpointRouteBuilderExtensions
             // .MapMethods(routes, …) rather than routes.MapMethods(…) — because an extension
@@ -151,7 +159,11 @@ partial class EndpointGenerator
 
             var varName = $"grp{groupCounter++}";
             writer.WriteLine();
-            using (writer.OpenBlock(""))
+
+            // PRD D5: a group that is not enabled maps nothing, nested groups included, decided once at
+            // map time. Through a helper: a static virtual member cannot be called on a class that does
+            // not declare it (G.IsEnabled is CS0117 unless G overrides it).
+            using (writer.OpenBlock($"if (IsEnabled<{groupFqn}>(app.ServiceProvider))"))
             {
                 writer.WriteLine($"var {varName} = MapGroup<{groupFqn}>({parentVar});");
 
@@ -224,16 +236,21 @@ partial class EndpointGenerator
             // flat namespace block used to produce a file that did not compile. An endpoint in the global
             // namespace gets no namespace block at all: "namespace <global namespace>" is what
             // ToDisplayString() gives for it, and that emitted a file that did not compile either.
+            // A generic endpoint's partial repeats its type parameter list (PRD R3): without it the part
+            // declares a second, non-generic class of the same name, and the real class never gets its
+            // base class or binder. Constraints need not be repeated on a partial part.
+            var typeParameters = endpoint.Open?.OwnTypeParameters ?? "";
+
             using (endpoint.Namespace.Length > 0 ? writer.OpenBlock($"namespace {endpoint.Namespace}") : (IDisposable?)null)
             using (writer.OpenPathSpec(endpoint.PathSpec))
             {
                 if (bindable.Count == 0)
                 {
-                    writer.WriteLine($"partial class {endpoint.ClassName}{baseClause} {{ }}");
+                    writer.WriteLine($"partial class {endpoint.ClassName}{typeParameters}{baseClause} {{ }}");
                 }
                 else
                 {
-                    using (writer.OpenBlock($"partial class {endpoint.ClassName}{baseClause}"))
+                    using (writer.OpenBlock($"partial class {endpoint.ClassName}{typeParameters}{baseClause}"))
                     {
                         if (endpoint.Level == EndpointLevel.Raw)
                             EmitRawBinder(writer, bindable);
@@ -417,6 +434,12 @@ partial class EndpointGenerator
             }
             writer.WriteLine();
 
+            using (writer.OpenBlock("private static bool IsEnabled<TGroup>(global::System.IServiceProvider services) where TGroup : global::MintPlayer.AspNetCore.Endpoints.IEndpointGroup"))
+            {
+                writer.WriteLine("return TGroup.IsEnabled(services);");
+            }
+            writer.WriteLine();
+
             // groupPrefix is baked in by the generator, which is the only component that knows the
             // group chain. TEndpoint.Path on its own is group-relative, so a descriptor built from it
             // describes an endpoint in /api/users as "/{id}" — useless for the diagnostics or
@@ -523,6 +546,43 @@ partial class EndpointGenerator
                 }
                 writer.WriteLine();
             }
+        }
+
+        /// <summary>
+        /// Writes one <c>[assembly: OpenEndpoint(…)]</c> per nameable open endpoint and, when there is
+        /// any, one <c>[assembly: OpenEndpointGroup(…)]</c> per nameable declared group (PRD D3a).
+        /// </summary>
+        /// <remarks>
+        /// Every declared group is recorded, not only those on an open endpoint's chain: a chain can pass
+        /// through a construction (<c>Api&lt;string&gt;</c>) whose declaration is the open <c>Api&lt;T&gt;</c>,
+        /// and the application looks prefixes up by definition. A group record costs one attribute.
+        /// </remarks>
+        private static bool EmitOpenEndpointRecords(IndentedTextWriter writer, EndpointMappingPlan plan)
+        {
+            var endpoints = plan.RecordableOpenEndpoints.ToList();
+            if (endpoints.Count == 0) return false;
+
+            foreach (var endpoint in endpoints)
+            {
+                var arguments = new List<string> { $"typeof({endpoint.Open!.UnboundTypeOf})" };
+                if (endpoint.Route is not null) arguments.Add($"Path = {Literal(endpoint.Route)}");
+                if (endpoint.KnownMethods is not null) arguments.Add($"Methods = {Literal(endpoint.KnownMethods)}");
+                if (ShadowParameters.EmitsBinder(endpoint)) arguments.Add("HasBinder = true");
+                arguments.Add($"Version = {OpenEndpointRecords.Version}");
+
+                writer.WriteLine($"[assembly: global::{OpenEndpointRecords.AttributeNamespace}.{OpenEndpointRecords.EndpointAttributeName}({string.Join(", ", arguments)})]");
+            }
+
+            foreach (var group in plan.DeclaredGroups)
+            {
+                if (group.InaccessibleReason is not null || group.UnboundTypeOf is null) continue;
+
+                writer.WriteLine(group.Prefix is null
+                    ? $"[assembly: global::{OpenEndpointRecords.AttributeNamespace}.{OpenEndpointRecords.GroupAttributeName}(typeof({group.UnboundTypeOf}))]"
+                    : $"[assembly: global::{OpenEndpointRecords.AttributeNamespace}.{OpenEndpointRecords.GroupAttributeName}(typeof({group.UnboundTypeOf}), Prefix = {Literal(group.Prefix)})]");
+            }
+
+            return true;
         }
 
         private static string Literal(string value) =>

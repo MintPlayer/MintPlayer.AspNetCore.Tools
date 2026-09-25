@@ -27,7 +27,8 @@ public static class EndpointRouteBuilderExtensions
     /// class — is mapped under that group's prefix, exactly as the generated mapping would map it,
     /// so an application that mixes generated and manual registration gets the same route either
     /// way. Each call creates its own <c>RouteGroupBuilder</c> chain, so the group's
-    /// <c>Configure</c> hook runs once per call.
+    /// <c>Configure</c> hook runs once per call. When a group on the chain is not enabled
+    /// (<see cref="IEndpointGroup.IsEnabled"/>), nothing is mapped.
     /// <para>
     /// <b>OpenAPI: this path documents less than the generated one, deliberately.</b> It declares
     /// the same request body, 400 and 415 (through the same <see cref="EndpointDocumentation"/>
@@ -44,8 +45,10 @@ public static class EndpointRouteBuilderExtensions
     /// <para>
     /// <b>The endpoint is named, and this path cannot prove the name is unique.</b> It applies
     /// <c>WithName</c> with the same name the generated mapping uses — the
-    /// <see cref="EndpointDescriptorNameAttribute"/> value, else the class name — so the endpoint
-    /// gets the same route name and OpenAPI <c>operationId</c> either way. But ASP.NET Core only
+    /// <see cref="EndpointDescriptorNameAttribute"/> value, else the class name, followed for a closed
+    /// generic endpoint by its type arguments (<c>Echo_String</c>) — so the endpoint gets the same
+    /// route name and OpenAPI <c>operationId</c> either way, and two closings of one endpoint do not
+    /// collide. But ASP.NET Core only
     /// checks endpoint names for uniqueness on the <i>first request</i>, where a duplicate throws
     /// <c>InvalidOperationException: Duplicate endpoint name</c>, and this method sees one endpoint
     /// at a time. The generator reports a duplicate at build time (MPEP012) because it sees every
@@ -70,10 +73,19 @@ public static class EndpointRouteBuilderExtensions
         this IEndpointRouteBuilder app)
         where TEndpoint : class, IEndpoint
     {
+        var chain = ResolveGroupChain(typeof(TEndpoint));
+
+        // A group that is not enabled maps nothing, as in the generated mapping (IEndpointGroup.IsEnabled).
+        foreach (var groupType in chain)
+        {
+            if (!IsGroupEnabled(groupType, app.ServiceProvider))
+                return app;
+        }
+
         var factory = ActivatorUtilities.CreateFactory<TEndpoint>(Type.EmptyTypes);
 
         var routes = app;
-        foreach (var groupType in ResolveGroupChain(typeof(TEndpoint)))
+        foreach (var groupType in chain)
             routes = MapGroupOf(routes, groupType);
 
         var builder = routes.MapMethods(
@@ -126,16 +138,47 @@ public static class EndpointRouteBuilderExtensions
 
     /// <summary>
     /// The endpoint's name: its <see cref="EndpointDescriptorNameAttribute"/>, else its class name —
-    /// the rule the generator applies (<c>EndpointInfo.EffectiveDescriptorName</c>).
+    /// the rule the generator applies (<c>EndpointInfo.EffectiveDescriptorName</c>) — followed, for a
+    /// closed generic endpoint, by its type arguments: <c>Passkeys_AppUser</c>.
     /// </summary>
     /// <remarks>
     /// Read from the type itself only, not inherited: the attribute is <c>Inherited = false</c>, and
     /// the generator reads it from the endpoint's own symbol. An empty name is ignored there too.
+    /// <para>
+    /// The type-argument suffix (issue #34, PRD D4) is what keeps two closings of one endpoint apart:
+    /// with <c>Type.Name</c> alone both were named <c>Echo`1</c>, and ASP.NET Core threw
+    /// <c>Duplicate endpoint name</c> on the first request. Every type argument counts, those of the
+    /// types it is nested in first — <c>Type.GetGenericArguments()</c>' order — each by its CLR name
+    /// without arity (<c>String</c>, <c>Int32</c>), a generic one followed by its own arguments
+    /// (<c>List_Int32</c>) and an array by <c>Array</c> (<c>Int32Array</c>). The generator's
+    /// <c>GenericTypes.NameSuffix</c> implements the same rule.
+    /// </para>
     /// </remarks>
-    internal static string EndpointNameOf(Type endpointType) =>
-        endpointType.GetCustomAttribute<EndpointDescriptorNameAttribute>(inherit: false) is { Name.Length: > 0 } attribute
+    internal static string EndpointNameOf(Type endpointType)
+    {
+        var name = endpointType.GetCustomAttribute<EndpointDescriptorNameAttribute>(inherit: false) is { Name.Length: > 0 } attribute
             ? attribute.Name
-            : endpointType.Name;
+            : WithoutArity(endpointType.Name);
+
+        return endpointType.IsGenericType ? name + NameSuffix(endpointType.GetGenericArguments()) : name;
+    }
+
+    private static string NameSuffix(Type[] typeArguments) =>
+        string.Concat(typeArguments.Select(argument => "_" + ArgumentName(argument)));
+
+    private static string ArgumentName(Type type)
+    {
+        if (type.IsArray) return ArgumentName(type.GetElementType()!) + "Array";
+
+        var name = WithoutArity(type.Name);
+        return type.IsGenericType ? name + NameSuffix(type.GetGenericArguments()) : name;
+    }
+
+    private static string WithoutArity(string name)
+    {
+        var tick = name.IndexOf('`');
+        return tick < 0 ? name : name.Substring(0, tick);
+    }
 
     /// <summary>
     /// The request body type of a typed endpoint — the <c>TRequest</c> of the
@@ -249,4 +292,16 @@ public static class EndpointRouteBuilderExtensions
         TGroup.Configure(group);
         return group;
     }
+
+    private static readonly MethodInfo isGroupEnabled =
+        typeof(EndpointRouteBuilderExtensions).GetMethod(nameof(IsGroupEnabledCore), BindingFlags.NonPublic | BindingFlags.Static)!;
+
+    [RequiresUnreferencedCode(ManualMappingIsReflective)]
+    [RequiresDynamicCode(ManualMappingIsReflective)]
+    private static bool IsGroupEnabled(Type groupType, IServiceProvider services) =>
+        (bool)isGroupEnabled.MakeGenericMethod(groupType).Invoke(null, [services])!;
+
+    private static bool IsGroupEnabledCore<TGroup>(IServiceProvider services)
+        where TGroup : IEndpointGroup
+        => TGroup.IsEnabled(services);
 }

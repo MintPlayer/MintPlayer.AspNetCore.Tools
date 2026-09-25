@@ -357,6 +357,7 @@ public class EndpointGeneratorIncrementalTests
     [InlineData("Endpoints")]
     [InlineData("Groups")]
     [InlineData("AssemblyInfo")]
+    [InlineData("ClosedEndpoints")]
     [InlineData(TrackedModelStep)]
     public void EveryProvider_IsTracked(string stepName)
     {

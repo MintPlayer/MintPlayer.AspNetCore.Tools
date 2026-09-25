@@ -62,6 +62,19 @@
         }
       }
     },
+    "/lib/echo": {
+      "get": {
+        "tags": [
+          "MintPlayer.AspNetCore.Endpoints.TestApp"
+        ],
+        "operationId": "Echo_String",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/api/products": {
       "get": {
         "tags": [
@@ -394,6 +407,64 @@
           }
         }
       }
+    },
+    "/lib/auth/whoami": {
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "operationId": "WhoAmI_AppUser",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/lib/auth/passkeys/{id}": {
+      "get": {
+        "tags": [
+          "Library"
+        ],
+        "operationId": "Passkeys_AppUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -525,6 +596,9 @@
     },
     {
       "name": "Users"
+    },
+    {
+      "name": "Library"
     }
   ]
 }
