@@ -364,6 +364,50 @@ release remains the owner's decision.
 >   runtime maps as `GET`) and both MPEP033 cases (no diagnostic); the others passed at once. The README's
 >   new block was compiled with the other blocks in the scratch server, as before.
 
+> **Dependency update (2026-09-25, owner's instruction), and the compiler floor it sets.**
+> - **Versions:** `MintPlayer.SourceGenerators.Tools` 10.16.0 → 11.0.0 (Generator, runtime package
+>   with `ExcludeAssets="all"`, generator tests); `MintPlayer.SourceGenerators` and `.Attributes`
+>   10.13.0 → 11.0.0 (MustChangePassword, SitemapXml); `Microsoft.CodeAnalysis.CSharp` /
+>   `.Workspaces.Common` (CodeFixes) and `.CSharp.Workspaces` (generator tests) 4.14.0 → 5.9.0;
+>   `Microsoft.CodeAnalysis.CSharp.CodeFix.Testing` 1.1.2 → 1.1.4; `Microsoft.NET.Test.Sdk` 18.9.0 →
+>   18.10.1; `Microsoft.AspNetCore.Mvc.Testing` (net10.0) 10.0.11 → 10.0.12.
+> - **Owner decision: Roslyn 5.9 is the minimum; older Roslyn versions are not supported.** Tools
+>   11.0.0 binds `Microsoft.CodeAnalysis 5.9.0`, and so does the generator it ships beside. The
+>   requirement is **.NET SDK 10.0.400+ or 11.x, or Visual Studio 2026 (with Roslyn 5.9+)**, stated in
+>   both package READMEs. No multi-targeted analyzer folders, fallbacks or shims. Measured with a local
+>   Release pack and a scratch `net10.0` web consumer (private `globalPackagesFolder`, SDK pinned by a
+>   scratch `global.json`): SDK 10.0.401 (Roslyn 5.9.0) builds clean. SDK 10.0.112 (Roslyn 5.0.0) does
+>   not run the generator:
+>   `CSC : warning CS9057: Analyzer assembly '…\MintPlayer.AspNetCore.Endpoints.Generator.dll' cannot be
+>   used because it references version '5.9.0.0' of the compiler, which is newer than the currently
+>   running version '5.0.0.0'.` followed by `Program.cs(4,5): error CS1061: 'WebApplication' does not
+>   contain a definition for 'MapConsumerEndpoints' and no accessible extension method
+>   'MapConsumerEndpoints' accepting a first argument of type 'WebApplication' could be found`. CI is
+>   unaffected: `global.json` selects 11.0.100-rc.1 (Roslyn 5.11) for every build, and the `10.0.x`
+>   that setup-dotnet also installs, for the net10.0 test runtime, resolves to the newest 10.0 SDK
+>   (10.0.4xx, Roslyn 5.9).
+> - **`ProduceCode` and `IConditionalDiagnosticReporter` adopted.** The generator avoided
+>   `ProduceCode` because in Tools 10.x it combined every producer with `CompilationProvider`. In 11.0.0
+>   it registers one output per provider with no compilation, and `Producer.Produce` reports a throwing
+>   producer as `MPSG001` instead of swallowing it — the two reasons for the hand-rolled
+>   `EndpointsProducer.Emit`, which is deleted. `EndpointDiagnosticReporter` implements
+>   `HasDiagnostics` by running its own checks without a compilation (locations left null), so a
+>   project with nothing to report keeps the reporter out of the per-compilation combine. Every
+>   existing Cached/Unchanged assertion holds, and a new test,
+>   `EditingAHandlerBody_InADiagnosticFreeProject_RunsNoOutputStep`, asserts on the raw output steps,
+>   which were not assertable before: after a handler-body edit there are exactly the four file
+>   outputs, each with a Cached/Unchanged input and output. Negative control: with the reporter
+>   declared as a plain `IDiagnosticReporter` the test fails (5 output steps; the reporter step is
+>   combined with the new compilation). Its own output reason alone cannot show this: a reporter that
+>   re-runs and again reports nothing yields an equal, empty output and is marked Unchanged.
+> - **Packaging:** the Tools 11 props add their copies under `analyzers/dotnet/roslyn5.9/cs` (was
+>   `roslyn4.0`/`roslyn4.9`); `SuppressToolsAnalyzerCopies` matches any `analyzers/` path, so both
+>   packages still ship exactly one folder, `analyzers/dotnet/cs`, with the Generator, CodeFixes and
+>   Tools dlls. No Tools API used here is `[Obsolete]` in 11.0.0 (the only one, the two-argument
+>   `Producer.Produce`, was not called); the Release rebuild has no warnings from Endpoints.
+> - **Verification:** generator tests 375 per TFM (374 + the new one), runtime tests 1085 per TFM;
+>   rebuild warnings unchanged at 36 CS1591, all in MustChangePassword/SitemapXml generated code.
+
 ## Version
 
 Created 2026-09-25 from issue #34. Branch `fix/endpoints-open-generics` (from `master` at `c04ffac`).

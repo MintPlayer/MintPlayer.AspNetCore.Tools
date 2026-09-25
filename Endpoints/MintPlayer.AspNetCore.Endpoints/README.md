@@ -15,6 +15,20 @@ binding. Targets .NET 10 and .NET 11.
 dotnet add package MintPlayer.AspNetCore.Endpoints
 ```
 
+### Requirements
+
+The generator needs a compiler with **Roslyn 5.9 or newer**: the **.NET SDK 10.0.400+ or 11.x**, or
+**Visual Studio 2026** (with Roslyn 5.9+). Older Roslyn versions are not supported. On an older SDK
+(10.0.1xx ships Roslyn 5.0) the compiler refuses to load the generator and the build fails on the
+call it should have generated:
+
+```
+CSC : warning CS9057: Analyzer assembly '…\MintPlayer.AspNetCore.Endpoints.Generator.dll' cannot be used because it references version '5.9.0.0' of the compiler, which is newer than the currently running version '5.0.0.0'.
+Program.cs(4,5): error CS1061: 'WebApplication' does not contain a definition for 'MapConsumerEndpoints' …
+```
+
+If you see that pair, update the SDK (or pin a newer one in `global.json`); nothing in your code is wrong.
+
 ## Quick start
 
 An endpoint is a class with a static `Path` and a handler:

@@ -82,33 +82,29 @@ public partial class EndpointGenerator : IncrementalGenerator
             .Select(static (pair, _) => new EndpointModel(pair.Left.Item1, pair.Left.Item2, pair.Left.Item3, pair.Right))
             .WithTrackingName(TrackingNames.Model);
 
-        // Deliberately NOT GeneratorExtensions.ProduceCode: that helper combines the producer with
-        // CompilationProvider, and a Compilation is a fresh object with no value equality on every
-        // compilation — so the source output could never be cached however well the models compared.
-        // Registering on the value-equal model instead is what makes the equality in Models.cs pay.
-        context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
-            new EndpointMappingProducer(model).Emit(productionContext));
+        // One file per producer, each fed from the value-equal model. Since MintPlayer.SourceGenerators.Tools
+        // 11.0.0, ProduceCode registers each provider as its own output with no Compilation in the
+        // combine (it used to combine every producer with CompilationProvider, which could never be
+        // cached). An edit that leaves the model equal leaves each Select cached, the driver hands back
+        // the same producer instance, and the output step is skipped.
+        //   - EndpointMappingProducer: the Map…Endpoints() extension method.
+        //   - EndpointOpenApiProducer: only for a consumer that references Microsoft.AspNetCore.OpenApi;
+        //     it writes nothing otherwise, and Producer.Produce adds no source for an empty buffer, so
+        //     the absent case is no file at all rather than an empty one.
+        //   - EndpointRoutesProducer: typed links (EndpointRoutes.g.cs), from the same plan, so it names
+        //     exactly the endpoints the mapping names.
+        //   - EndpointContractsProducer: the cross-assembly contract (EndpointContracts.g.cs) a typed
+        //     client reads from this assembly's metadata (M9).
+        context.ProduceCode(
+            modelProvider.Select(static (model, _) => (Producer)new EndpointMappingProducer(model)),
+            modelProvider.Select(static (model, _) => (Producer)new EndpointOpenApiProducer(model)),
+            modelProvider.Select(static (model, _) => (Producer)new EndpointRoutesProducer(model)),
+            modelProvider.Select(static (model, _) => (Producer)new EndpointContractsProducer(model)));
 
-        // The second file exists only for a consumer that references Microsoft.AspNetCore.OpenApi.
-        // The producer writes nothing otherwise, and Emit adds no source for an empty buffer, so the
-        // absent case is no file at all rather than an empty one. (An IncrementalValueProvider has
-        // no Where to filter on; only the plural IncrementalValuesProvider does.)
-        context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
-            new EndpointOpenApiProducer(model).Emit(productionContext));
-
-        // The third file: typed links (EndpointRoutes.g.cs). Same model, so the same caching, and the
-        // same plan, so it names exactly the endpoints the mapping names.
-        context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
-            new EndpointRoutesProducer(model).Emit(productionContext));
-
-        // The fourth: the cross-assembly contract (EndpointContracts.g.cs) a typed client reads from
-        // this assembly's metadata (M9). Same model, same plan, same caching.
-        context.RegisterSourceOutput(modelProvider, static (productionContext, model) =>
-            new EndpointContractsProducer(model).Emit(productionContext));
-
-        // Diagnostics do go through the Tools pipeline, because turning a LocationKey back into a
-        // Location needs the Compilation. They are recomputed per compilation; they are cheap, and
-        // there is no correct way to hold a Location across one.
+        // Turning a LocationKey back into a Location needs the Compilation, so a reporter with something
+        // to say is combined with it and re-runs per compilation. EndpointDiagnosticReporter is an
+        // IConditionalDiagnosticReporter: when the model yields no diagnostics, ReportDiagnostics filters
+        // it out before that combine, and an edit to a diagnostic-free project runs no reporting step.
         context.ReportDiagnostics(modelProvider
             .Select(static (model, _) => (IDiagnosticReporter)new EndpointDiagnosticReporter(model)));
     }

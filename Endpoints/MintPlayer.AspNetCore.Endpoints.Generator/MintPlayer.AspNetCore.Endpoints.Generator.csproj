@@ -33,7 +33,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="10.16.0" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="11.0.0" PrivateAssets="all" GeneratePathProperty="true" />
 	</ItemGroup>
 
 	<!--
@@ -74,7 +74,10 @@
 		<!--
 		The one folder the analyzer ships in, in this package and in MintPlayer.AspNetCore.Endpoints
 		(which reads it from here through GetEndpointsAnalyzerPackPath). A move to a versioned folder
-		such as analyzers/dotnet/roslyn4.14/cs is a change to this property and nothing else.
+		such as analyzers/dotnet/roslyn5.9/cs is a change to this property and nothing else. It stays
+		unversioned on purpose: Roslyn 5.9 is the floor and older compilers are not supported, and an
+		older host that loads this folder reports CS9057 naming the generator (measured on SDK
+		10.0.112), where a versioned folder would have it skip the generator without saying why.
 		-->
 		<EndpointsAnalyzerPackPath Condition="'$(EndpointsAnalyzerPackPath)' == ''">analyzers/dotnet/cs</EndpointsAnalyzerPackPath>
 		<TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackAnalyzerAssemblies</TargetsForTfmSpecificContentInPackage>
@@ -84,7 +87,9 @@
 	<!--
 	MintPlayer.SourceGenerators.Tools' own build/MintPlayer.SourceGenerators.Tools.props adds static
 	<None Pack="true"> items that place a second and third copy of this generator (and of Tools.dll)
-	in analyzers/dotnet/roslyn4.0/cs and analyzers/dotnet/roslyn4.9/cs. That layout suits a package
+	in versioned folders: analyzers/dotnet/roslyn4.0/cs and analyzers/dotnet/roslyn4.9/cs up to Tools
+	10.x, analyzers/dotnet/roslyn5.9/cs since 11.0.0 (the target below matches any analyzers/ path, so
+	it covers both). That layout suits a package
 	that uses those folders exclusively; next to the analyzers/dotnet/cs copy placed below, the SDK
 	resolves every folder as @(Analyzer), the generator runs two or three times, and the consumer
 	gets CS0101/CS0111 duplicate definitions in files they never wrote (PRD R6.5a).

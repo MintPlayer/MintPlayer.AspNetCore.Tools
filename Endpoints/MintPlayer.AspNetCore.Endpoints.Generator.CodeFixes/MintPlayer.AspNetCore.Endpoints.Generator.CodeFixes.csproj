@@ -31,8 +31,8 @@
 
 	<ItemGroup>
 		<!--
-		Pinned to the SAME Roslyn the generator compiles against: 4.14.0, which
-		MintPlayer.SourceGenerators.Tools 10.16.0 injects into the generator project. A code fix built
+		Pinned to the SAME Roslyn the generator compiles against: 5.9.0, which
+		MintPlayer.SourceGenerators.Tools 11.0.0 injects into the generator project. A code fix built
 		against a HIGHER Roslyn than the IDE host loads fails to load there, and the consumer gets no
 		lightbulb and nothing to act on.
 
@@ -41,8 +41,8 @@
 		the analyzer folder would bind against the wrong Roslyn (S5: CommunityToolkit.Mvvm,
 		Meziantou.Analyzer, GraphQL.Analyzers and Avalonia all ship this way).
 		-->
-		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" ExcludeAssets="runtime" />
-		<PackageReference Include="Microsoft.CodeAnalysis.Workspaces.Common" Version="4.14.0" PrivateAssets="all" ExcludeAssets="runtime" />
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" PrivateAssets="all" ExcludeAssets="runtime" />
+		<PackageReference Include="Microsoft.CodeAnalysis.Workspaces.Common" Version="5.9.0" PrivateAssets="all" ExcludeAssets="runtime" />
 	</ItemGroup>
 
 </Project>

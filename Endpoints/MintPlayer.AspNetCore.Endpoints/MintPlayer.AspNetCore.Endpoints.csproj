@@ -54,7 +54,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="10.16.0" PrivateAssets="all" GeneratePathProperty="true" ExcludeAssets="all" />
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="11.0.0" PrivateAssets="all" GeneratePathProperty="true" ExcludeAssets="all" />
 	</ItemGroup>
 
 	<!-- Include XML markups in the nupkg -->

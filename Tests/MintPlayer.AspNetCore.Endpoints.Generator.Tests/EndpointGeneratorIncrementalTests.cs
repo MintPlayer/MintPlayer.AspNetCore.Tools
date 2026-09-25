@@ -28,6 +28,13 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator.Tests;
 /// a <c>Location</c> needs the current <c>Compilation</c>. So the assertions here are on the named
 /// model steps rather than on the raw output steps, which mix the two registrations together.
 /// </para>
+/// <para>
+/// Since MintPlayer.SourceGenerators.Tools 11.0.0 the files are registered through
+/// <c>ProduceCode</c> again (one output per producer, no compilation in the combine) and the
+/// reporter is an <c>IConditionalDiagnosticReporter</c>. For a project with nothing to report that
+/// makes the raw output steps assertable too — see
+/// <see cref="EditingAHandlerBody_InADiagnosticFreeProject_RunsNoOutputStep"/>.
+/// </para>
 /// </remarks>
 public class EndpointGeneratorIncrementalTests
 {
@@ -156,6 +163,63 @@ public class EndpointGeneratorIncrementalTests
             Assert.True(
                 reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
                 $"expected the model step to be cached, was {reason}"));
+    }
+
+    /// <summary>
+    /// In a project with nothing to report, a handler-body edit runs no output step at all: every
+    /// file is served from cache, and no diagnostics step is combined with the new compilation.
+    /// </summary>
+    /// <remarks>
+    /// This is what <c>ProduceCode</c> (Tools 11.0.0: one output per producer, no compilation) and
+    /// <c>IConditionalDiagnosticReporter</c> buy together. With the Tools 10.x <c>ProduceCode</c> the
+    /// four file outputs were <c>Modified</c> on every edit; with a plain <c>IDiagnosticReporter</c>
+    /// the diagnostics output still is.
+    /// </remarks>
+    [Fact]
+    public void EditingAHandlerBody_InADiagnosticFreeProject_RunsNoOutputStep()
+    {
+        const string before = """
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using MintPlayer.AspNetCore.Endpoints;
+
+            namespace Fixtures;
+
+            public class HealthCheck : IGetEndpoint
+            {
+                public static string Path => "/health";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok("up"));
+            }
+            """;
+
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [before]);
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+        Assert.Empty(driver.GetRunResult().Diagnostics);
+
+        var edited = compilation.ReplaceSyntaxTree(
+            compilation.SyntaxTrees.Last(),
+            EndpointGeneratorHarness
+                .CreateCompilation("Fixtures", [before.Replace("\"up\"", "\"healthy\"")])
+                .SyntaxTrees
+                .Last());
+
+        // An output step's own reason is not enough: a reporter that runs and reports nothing again
+        // produces an equal (empty) output and is marked Unchanged. What tells "ran" from "skipped" is
+        // the input it was handed — Modified when the new compilation was combined in.
+        var outputSteps = driver.RunGenerators(edited).GetRunResult().Results
+            .SelectMany(generatorResult => generatorResult.TrackedOutputSteps)
+            .SelectMany(step => step.Value)
+            .ToArray();
+        var reasons = outputSteps
+            .SelectMany(step => step.Outputs.Select(output => output.Reason)
+                .Concat(step.Inputs.Select(input => input.Source.Outputs[input.OutputIndex].Reason)))
+            .ToArray();
+
+        Assert.Equal(4, outputSteps.Length);
+        Assert.All(reasons, reason =>
+            Assert.True(
+                reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                $"expected every output step and its input to be cached, was {reason}"));
     }
 
     /// <summary>

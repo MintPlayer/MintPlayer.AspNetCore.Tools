@@ -1,7 +1,3 @@
-using System.CodeDom.Compiler;
-using System.Text;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
 using MintPlayer.SourceGenerators.Tools;
 
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
@@ -13,14 +9,14 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Registered with <see cref="Emit"/>, not with <c>Producer.Produce</c> or
-/// <c>GeneratorExtensions.ProduceCode</c>.</b> Both of those take a <c>Compilation</c>, and a
-/// compilation is a fresh object with no value equality on every keystroke — combining the output
-/// with it means the file can never be served from cache however well the model compares. There is
-/// a second reason specific to the pinned MintPlayer.SourceGenerators.Tools 10.16.0: its
-/// <c>Produce</c> catches every exception and discards it, so a producer bug would ship no file
-/// and no diagnostic. Here an exception propagates, and Roslyn reports it as CS8785 naming this
-/// generator.
+/// <b>Registered through <c>GeneratorExtensions.ProduceCode</c>.</b> Up to
+/// MintPlayer.SourceGenerators.Tools 10.x that helper combined every producer with
+/// <c>CompilationProvider</c>, so the file could never be served from cache, and
+/// <c>Producer.Produce</c> swallowed exceptions without a diagnostic; this class therefore carried
+/// its own <c>Emit</c>. Tools 11.0.0 fixed both: <c>ProduceCode</c> registers one output per
+/// provider with no compilation in it, and a producer that throws is reported as <c>MPSG001</c>
+/// (an error naming the file and the exception) instead of vanishing. The hand-rolled
+/// <c>Emit</c> is gone.
 /// </para>
 /// <para>
 /// <see cref="Producer.RootNamespace"/> carries the fixed generated namespace rather than the
@@ -50,19 +46,4 @@ internal abstract class EndpointsProducer : Producer
     }
 
     protected EndpointModel Model { get; }
-
-    /// <summary>Writes the file, or nothing at all when <c>ProduceSource</c> wrote nothing.</summary>
-    public void Emit(SourceProductionContext context)
-    {
-        context.CancellationToken.ThrowIfCancellationRequested();
-
-        using var buffer = new StringWriter();
-        using var writer = new IndentedTextWriter(buffer);
-
-        ProduceSource(writer, context.CancellationToken);
-
-        var code = buffer.ToString();
-        if (code.Length > 0)
-            context.AddSource(Filename, SourceText.From(code, Encoding.UTF8));
-    }
 }

@@ -22,3 +22,11 @@ as an analyzer-only package with no `FrameworkReference`.
 assembly metadata-only, and the generator writes an `internal sealed partial class …Client` from the
 endpoint contracts in it. See "Typed client in another project" in the main package's README for the
 full rules and the MPEP021–MPEP023 diagnostics.
+
+## Requirements
+
+A compiler with **Roslyn 5.9 or newer**: the **.NET SDK 10.0.400+ or 11.x**, or **Visual Studio 2026**
+(with Roslyn 5.9+). Older Roslyn versions are not supported. An older compiler rejects the generator
+with `CS9057` ("… references version '5.9.0.0' of the compiler, which is newer than the currently
+running version …"), no client is generated, and the build then fails wherever the generated code is
+used.

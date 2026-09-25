@@ -11,10 +11,27 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator;
 /// All of these conditions were already computed and used only to skip emission silently, which left
 /// the consumer with a bare CS0115 or CS0263 in their own file — or, for an ambiguous group, with
 /// nothing at all. The declared descriptors existed and were referenced from nowhere.
+/// <para>
+/// An <see cref="IConditionalDiagnosticReporter"/>: <see cref="HasDiagnostics"/> runs the same checks
+/// without a compilation (every location is left null), so a project with nothing to report keeps
+/// this reporter out of the per-compilation combine altogether. One code path decides both
+/// answers, so they cannot disagree.
+/// </para>
 /// </remarks>
-internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnosticReporter
+internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IConditionalDiagnosticReporter
 {
-    public IEnumerable<Diagnostic> GetDiagnostics(Compilation compilation)
+    private bool? hasDiagnostics;
+
+    /// <inheritdoc />
+    public bool HasDiagnostics => hasDiagnostics ??= Collect(null).Any();
+
+    public IEnumerable<Diagnostic> GetDiagnostics(Compilation compilation) => Collect(compilation);
+
+    /// <summary>A stored location as an in-tree one, or null when only counting.</summary>
+    private static Location? Locate(LocationKey? key, Compilation? compilation)
+        => compilation is null ? null : key.ToLocation(compilation);
+
+    private IEnumerable<Diagnostic> Collect(Compilation? compilation)
     {
         var plan = EndpointMappingPlan.From(model);
 
@@ -25,7 +42,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
 
         foreach (var endpoint in plan.DeclaredEndpoints)
         {
-            var location = endpoint.Location.ToLocation(compilation);
+            var location = Locate(endpoint.Location, compilation);
 
             if (endpoint.InaccessibleReason is { } whyEndpoint)
                 yield return DiagnosticDescriptors.TypeNotAccessibleToGeneratedCode.Create(location, "Endpoint class", endpoint.ClassName, whyEndpoint);
@@ -44,7 +61,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
             foreach (var property in endpoint.BoundProperties)
             {
                 var source = property.Source == BoundSource.Route ? "route" : "query string";
-                var propertyLocation = property.Location.ToLocation(compilation);
+                var propertyLocation = Locate(property.Location, compilation);
 
                 if (property.Kind == BoundKind.Unsupported)
                     yield return DiagnosticDescriptors.BoundPropertyTypeUnsupported.Create(propertyLocation, property.Name, source, property.DeclaredTypeDisplay);
@@ -99,7 +116,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
         foreach (var group in plan.Groups)
         {
             if (plan.CyclicGroups.Contains(group.FullyQualifiedName))
-                yield return DiagnosticDescriptors.GroupNestingIsCyclic.Create(group.Location.ToLocation(compilation), ShortNameOf(group.FullyQualifiedName));
+                yield return DiagnosticDescriptors.GroupNestingIsCyclic.Create(Locate(group.Location, compilation), ShortNameOf(group.FullyQualifiedName));
         }
 
         // On the declarations, which is where the fix goes — an open group's too, although only its
@@ -107,13 +124,13 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
         foreach (var group in plan.DeclaredGroups)
         {
             if (group.InaccessibleReason is { } whyGroup)
-                yield return DiagnosticDescriptors.TypeNotAccessibleToGeneratedCode.Create(group.Location.ToLocation(compilation), "Endpoint group", ShortNameOf(group.FullyQualifiedName), whyGroup);
+                yield return DiagnosticDescriptors.TypeNotAccessibleToGeneratedCode.Create(Locate(group.Location, compilation), "Endpoint group", ShortNameOf(group.FullyQualifiedName), whyGroup);
         }
 
         foreach (var groupFqn in plan.UnjoinedGroups)
         {
             var group = plan.Groups.First(candidate => candidate.FullyQualifiedName == groupFqn);
-            yield return DiagnosticDescriptors.GroupNeverJoined.Create(group.Location.ToLocation(compilation), ShortNameOf(groupFqn));
+            yield return DiagnosticDescriptors.GroupNeverJoined.Create(Locate(group.Location, compilation), ShortNameOf(groupFqn));
         }
 
         foreach (var diagnostic in RouteDiagnostics(plan, compilation))
@@ -127,7 +144,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
             if (!plan.DuplicateNames.TryGetValue(endpoint.FullyQualifiedName, out var earlier)) continue;
 
             yield return DiagnosticDescriptors.DuplicateEndpointName.Create(
-                endpoint.Location.ToLocation(compilation),
+                Locate(endpoint.Location, compilation),
                 endpoint.FullyQualifiedName.Replace("global::", ""),
                 endpoint.EffectiveDescriptorName,
                 earlier.FullyQualifiedName.Replace("global::", ""));
@@ -137,7 +154,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
         foreach (var problem in model.Closing.Problems)
         {
             if (DescriptorFor(problem.Id) is { } descriptor)
-                yield return descriptor.Create(problem.Location.ToLocation(compilation), problem.Arguments.Cast<object>().ToArray());
+                yield return descriptor.Create(Locate(problem.Location, compilation), problem.Arguments.Cast<object>().ToArray());
         }
 
         if (model.Assembly.CanMapEndpoints && model.Assembly.MethodNameWasSanitised)
@@ -168,11 +185,11 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
     /// <c>CS</c> error instead of the real message (R3.4).
     /// </para>
     /// </remarks>
-    private static IEnumerable<Diagnostic> RouteDiagnostics(EndpointMappingPlan plan, Compilation compilation)
+    private static IEnumerable<Diagnostic> RouteDiagnostics(EndpointMappingPlan plan, Compilation? compilation)
     {
         foreach (var endpoint in plan.DeclaredEndpoints)
         {
-            var location = endpoint.Location.ToLocation(compilation);
+            var location = Locate(endpoint.Location, compilation);
 
             if (endpoint.Route is null)
             {
@@ -221,7 +238,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
 
         foreach (var endpoint in plan.MappableEndpoints)
         {
-            var location = endpoint.Location.ToLocation(compilation);
+            var location = Locate(endpoint.Location, compilation);
             var composed = plan.ComposedRoutes[endpoint.FullyQualifiedName];
             if (composed is null) continue;
 
@@ -239,7 +256,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IDiagnos
                     ? "; it has no route parameters"
                     : "; its parameters are " + string.Join(", ", tokens.Select(token => "'{" + token + "}'"));
                 yield return DiagnosticDescriptors.BoundPropertyNotInRoute.Create(
-                    property.Location.ToLocation(compilation), property.Name, property.Key, composed, endpoint.ClassName, available);
+                    Locate(property.Location, compilation), property.Name, property.Key, composed, endpoint.ClassName, available);
             }
 
             // MPEP010 — the endpoint's own Path starts with the prefix its chain already supplies.
