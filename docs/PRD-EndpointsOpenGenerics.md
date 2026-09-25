@@ -689,6 +689,25 @@ benchmark source is `scratchpad\bench\ZzGeneratorBenchmark.cs` and its logs are 
     on one runner. This repo would first need that infrastructure. B's benchmark is kept as
     documentation of the method, not as a gate.
 
+> **Owner decisions, 2026-09-25:**
+> - **D24 — The typed client writes one fixed `EndpointClients.g.cs`** next to `EndpointClientUrl.g.cs`. Class
+>   names stay derived from the server assemblies. The fixed-file-set guard (D23) covers the client with no
+>   exemption.
+> - **D25 — The analyzer moves to the versioned `analyzers/dotnet/roslyn5.9/cs` folder,** following upstream
+>   rule 14. The owner: "we should probably just support Visual Studio 2026 and .NET 10 + 11".
+>   - `$(EndpointsAnalyzerPackPath)` becomes `analyzers/dotnet/roslyn5.9/cs`. Every pack guard follows
+>     that property, so they move with it. The Generator, CodeFixes, Tools and ValueComparerGenerator
+>     attributes dlls all ship there.
+>   - `SuppressToolsAnalyzerCopies` and the stray-folder guard must still reject any second analyzer
+>     folder. Upstream's own `roslyn5.9/cs` copies now target the *same* path as ours, so the guard must
+>     deduplicate, not merely forbid.
+>   - On a host older than Roslyn 5.9 the generator is now skipped silently. The first symptom is a
+>     missing `Map…Endpoints()` (CS1061), not CS9057. The README "Requirements" section and the Generator
+>     package README state that symptom and the supported hosts: Visual Studio 2026, .NET SDK 10.0.400+
+>     or 11.x. The earlier measurement (CS9057 on SDK 10.0.112) is superseded; re-measure it on 10.0.112
+>     for the README.
+>   - Supersedes the "stays unversioned" reasoning recorded with commit `7e280e6`.
+
 ### Acceptance criteria (addendum 2)
 
 18. **Measured speed-up:** B's benchmark before and after D19–D21 at N=500. The body-edit rerun is at

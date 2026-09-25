@@ -106,3 +106,11 @@ Baseline measured 2026-09-25 by agent B. Benchmark: `scratchpadench\ZzGenerator
 7. **Benchmark after:** at least 3× faster on the N=500 body edit (acceptance 18). Record every scenario in the PRD.
 8. **Docs:** README "What the generator emits" (client file name); PRD as-built notes.
 9. **One sweep** together with Phase 5, then commit and push to PR #35. Delete the benchmark file from any tree before committing.
+
+> **Owner decisions (2026-09-25):**
+> - **D24:** the client writes one `EndpointClients.g.cs`; step 6 applies.
+> - **D25:** move to `analyzers/dotnet/roslyn5.9/cs`. Added as step 6a:
+>   - set `$(EndpointsAnalyzerPackPath)` to `analyzers/dotnet/roslyn5.9/cs`;
+>   - make the stray-folder guard tolerate upstream's identical-path copies by deduplicating;
+>   - list both nupkgs to confirm exactly one analyzer folder;
+>   - re-measure SDK 10.0.112 (expect a silent skip and CS1061) and rewrite the README and Generator README "Requirements" to that symptom, for Visual Studio 2026 and .NET SDK 10.0.400+ or 11.x.
