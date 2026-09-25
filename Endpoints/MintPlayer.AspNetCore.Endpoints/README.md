@@ -332,24 +332,44 @@ A base class of your own blocks the generated one (MPEP002 on a typed endpoint) 
 derives from a library base (`PostEndpoint<T>`, `GetEndpoint<T>`, `ResponseEndpoint`, …), which is
 the supported way to share typed endpoint behaviour; such a class need not be `partial`.
 
-A group can switch itself off: `static bool IEndpointGroup.IsEnabled(IServiceProvider services)`
-(default `true`) is evaluated once, when the routes are mapped, and a group that returns `false` maps
-none of its endpoints and none of its nested groups — in the generated mapping and in
-`MapEndpoint<T>()` alike. The condition is per group; an endpoint that needs its own goes in a group of
-its own. The static `Endpoints` descriptor list still lists what is declared. `PasskeysApi` under
-[Generic endpoints](#generic-endpoints) is an example.
-
-## Generic endpoints
-
-An endpoint class with type parameters — its own, or those of a type it is nested in — cannot be
-mapped by the assembly that declares it: no generated file outside the class knows what to fill in.
-So that assembly's generator leaves it out of `Map…Endpoints()`, the links and the contract (MPEP025,
-Info), still emits its partial with the type parameters repeated (so `[RouteParam]` binding works), and
-records it in the assembly's metadata. The application that knows the type argument closes it with one
-attribute. A library that is generic over the application's user type:
+A group can switch itself off. `IEndpointGroup.IsEnabled(IServiceProvider)` defaults to `true`; it is
+evaluated once, when the routes are mapped, and a group that returns `false` maps none of its endpoints
+and none of its nested groups — in the generated mapping and in `MapEndpoint<T>()` alike. Use it for an
+optional feature that the application turns on through its options:
 
 ```csharp
 using Microsoft.Extensions.Options;
+using MintPlayer.AspNetCore.Endpoints;
+
+public class ReportOptions
+{
+    public bool Enabled { get; set; }
+}
+
+// Mapped only when the application sets ReportOptions.Enabled.
+public class ReportsApi : IEndpointGroup
+{
+    public static string Prefix => "/reports";
+
+    static bool IEndpointGroup.IsEnabled(IServiceProvider services)
+        => services.GetRequiredService<IOptions<ReportOptions>>().Value.Enabled;
+}
+```
+
+The condition is per group; an endpoint that needs its own goes in a group of its own. The static
+`Endpoints` descriptor list still lists every declared endpoint, enabled or not.
+
+## Generic endpoints
+
+**In short.** A library can declare an endpoint that is generic over a type only the application
+knows — typically its user type: `ListPasskeys<TUser>`. The library cannot map it, because it cannot
+choose `TUser`. The application chooses it — this is called *closing* the endpoint — with **one
+assembly-level attribute**, and the application's own generated `Map…Endpoints()` then maps
+`ListPasskeys<AppUser>` like any other endpoint.
+
+The library declares the endpoint as usual, with a type parameter:
+
+```csharp
 using MintPlayer.AspNetCore.Endpoints;
 
 namespace MyAuth;
@@ -359,30 +379,15 @@ public class AuthUser
     public string DisplayName { get; set; } = "";
 }
 
-public class PasskeyOptions
-{
-    public bool Enabled { get; set; }
-}
-
 public class AuthApi : IEndpointGroup
 {
     public static string Prefix => "/auth";
 }
 
-// Mapped only when the application enables passkeys; the check runs once, at map time.
 [MemberOf<AuthApi>]
-public class PasskeysApi : IEndpointGroup
-{
-    public static string Prefix => "/passkeys";
-
-    static bool IEndpointGroup.IsEnabled(IServiceProvider services)
-        => services.GetRequiredService<IOptions<PasskeyOptions>>().Value.Enabled;
-}
-
-[MemberOf<PasskeysApi>]
 public partial class ListPasskeys<TUser> : IGetEndpoint<string[]> where TUser : AuthUser, new()
 {
-    public static string Path => "/{userId}";
+    public static string Path => "/passkeys/{userId}";
 
     [RouteParam] public int UserId { get; set; }
 
@@ -391,49 +396,74 @@ public partial class ListPasskeys<TUser> : IGetEndpoint<string[]> where TUser : 
 }
 ```
 
-The application closes it — every type parameter constrained to `AuthUser` becomes `AppUser` — and
-turns the group on with `builder.Services.Configure<PasskeyOptions>(o => o.Enabled = true)`:
+The application adds one line. It can go in any file of the application project; the top of
+`Program.cs` is the usual place:
 
 ```csharp
 using MintPlayer.AspNetCore.Endpoints;
 
+// Every endpoint whose type parameter is constrained to MyAuth.AuthUser gets AppUser.
 [assembly: EndpointTypeArgument<MyAuth.AuthUser, AppUser>]
 
 public class AppUser : MyAuth.AuthUser;
 ```
 
-`MapMyShopApiEndpoints()` now maps `ListPasskeys<AppUser>` at `/auth/passkeys/{userId}` exactly like an
-endpoint of the application: its route binding, group chain, typed link
-(`Routes.Auth.Passkeys.ListPasskeys_AppUser(userId: 1)`), contract, OpenAPI path parameters and the
-duplicate route and name checks (MPEP007, MPEP012).
+Nothing else changes. The application's existing `app.MapMyShopApiEndpoints()` call now also maps
+`GET /auth/passkeys/{userId}` as `ListPasskeys_AppUser`, with everything a hand-written endpoint gets:
+route binding, the group chain, a typed link (`Routes.Auth.ListPasskeys_AppUser(userId: 1)`), the
+contract, OpenAPI path parameters, and the duplicate route and name checks (MPEP007, MPEP012).
 
-- **Names.** A closed endpoint is named `{Name}_{TypeArguments}` — `ListPasskeys_AppUser` — by the CLR
-  names of every type argument, outermost containing type's first: `Echo_String`, `Echo_List_Int32`,
-  `Echo_Int32Array`. `MapEndpoint<T>()` applies the same rule, so two closings of one endpoint never
-  collide.
-- **Binding.** A type parameter is bound when one of its constraint types *is* `TConstraint` (not a type
-  derived from it), and an endpoint is closed only when every type parameter is bound (MPEP031
-  otherwise). The compiler checks `TArgument : TConstraint`; the generator checks the rest — `new()`,
-  `class`, `struct`, `unmanaged`, `notnull` and further constraint types — and reports MPEP026 on the
-  attribute instead of emitting code that does not compile. Two attributes binding one parameter are
-  MPEP027; an attribute that closes nothing is MPEP030.
-- **No constraint type to key on.** `[assembly: EndpointTypeArgument(typeof(MyAuth.Echo<>), typeof(string))]`
-  closes one endpoint explicitly, type arguments in declaration order (MPEP028 for a wrong count). It
-  wins over constraint keys for that endpoint, and each occurrence is one closing.
-- **Where it works.** Open endpoints of the application's own compilation close the same way. A library's
-  must be `public`, like every group on their chain (MPEP029), and the library must be built with this
-  generator 11.2 or later, which writes the records. References are read only when the application
-  declares an `EndpointTypeArgument`.
-- **The alternatives.** An application that knows its closed type can still derive one:
-  `public class EchoString : Echo<string> { }` is an ordinary endpoint, `[MemberOf<T>]` inherited.
-  `app.MapEndpoint<ListPasskeys<AppUser>>()` maps a closing by hand, named the same way, but without
-  OpenAPI path parameters (see [Manual registration](#manual-registration)).
+### Two ways to write it
 
-**Generic constraint types.** A closed one is an ordinary key: `where TUser : IMember<Guid>` is
-bound by `EndpointTypeArgument<IMember<Guid>, Member>`. A constraint that uses another type
-parameter — `where TUser : IMember<TKey>` — equals no key, and `TKey` is not inferred from one:
-a key on the same generic type is reported instead (MPEP033), and nothing is mapped. Close such an
-endpoint explicitly; every constraint is checked after substitution (MPEP026 when `Member` is not an
+| Form | Use it when | What it closes |
+|---|---|---|
+| `[assembly: EndpointTypeArgument<TConstraint, TArgument>]` | the type parameter has a constraint type, such as `where TUser : AuthUser` | every endpoint with a type parameter constrained to exactly `TConstraint` — one line for a whole library |
+| `[assembly: EndpointTypeArgument(typeof(Echo<>), typeof(string))]` | there is no constraint type to key on (`where T : class`), or the constraint uses another type parameter | that one endpoint; type arguments in declaration order |
+
+The first form declares `where TArgument : TConstraint`, so the compiler rejects an `AppUser` that is
+not an `AuthUser` (CS0311). The explicit form wins over constraint keys for its endpoint, and each
+occurrence is one closing, so one endpoint can be closed more than once with different arguments.
+
+### The rules
+
+- **The key must match exactly.** A type parameter is bound when one of its constraint types *is*
+  `TConstraint` — not a base class or interface of it. If the library says `where TUser : AuthUser`,
+  then `EndpointTypeArgument<object, AppUser>` binds nothing and is reported as closing nothing
+  (MPEP030, a warning on the attribute).
+- **Every type parameter must be bound**, including those of a type the endpoint is nested in;
+  otherwise the endpoint is not mapped (MPEP031).
+- **Every constraint is checked** — `new()`, `class`, `struct`, `unmanaged`, `notnull` and further
+  constraint types. A violation is an error on the attribute (MPEP026), never code that does not compile.
+  Two attributes binding one parameter are MPEP027; a wrong number of explicit type arguments is MPEP028.
+- **Names** are `{Name}_{TypeArguments}`, using the CLR name of each type argument, outermost
+  containing type's first: `ListPasskeys_AppUser`, `Echo_String`, `Echo_List_Int32`, `Echo_Int32Array`.
+  `MapEndpoint<T>()` uses the same rule, so two closings of one endpoint never collide.
+- **Where it works.** Generic endpoints in the application's own project close the same way. A
+  library's must be `public`, as must every group on their chain (MPEP029), and the library must be
+  built with this generator 11.2 or later. References are read only when the application declares an
+  `EndpointTypeArgument`, so an application that doesn't use this pays nothing.
+- **Conditional features stay in the library.** The generated mapping honours each group's
+  `IsEnabled` (see [Groups](#groups)), so a library can put an optional cluster of generic endpoints in a
+  group that turns itself off.
+
+**What the library's own build does.** Its generator leaves the generic endpoint out of the library's
+`Map…Endpoints()`, links and contract, and says so (MPEP025, Info). It still emits the endpoint's
+partial with the type parameters repeated, so `[RouteParam]` binding works once the endpoint is closed,
+and it records the endpoint's route and groups in the library assembly, which is where the application's
+generator reads them.
+
+**Without the attribute.** An application that knows its closed type can derive one:
+`public class EchoString : Echo<string> { }` is an ordinary endpoint, and `[MemberOf<T>]` is inherited.
+`app.MapEndpoint<ListPasskeys<AppUser>>()` maps a closing by hand, named the same way, but without
+OpenAPI path parameters (see [Manual registration](#manual-registration)).
+
+### Generic constraint types
+
+A closed generic constraint is an ordinary key: `where TUser : IMember<Guid>` is bound by
+`EndpointTypeArgument<IMember<Guid>, Member>`. A constraint that uses another type parameter —
+`where TUser : IMember<TKey>` — matches no key, and `TKey` is not inferred from one. A key on the same
+generic type is reported instead (MPEP033), and nothing is mapped. Close such an endpoint with the
+explicit form; every constraint is checked after substitution (MPEP026 when `Member` is not an
 `IMember<Guid>`):
 
 ```csharp
