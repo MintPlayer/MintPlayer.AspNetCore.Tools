@@ -528,8 +528,13 @@ Findings:
     reference gets an explicit `GeneratePathProperty="true"`; its own props' `Update` runs too early.
 - **D15 — The `IncludeRuntimeDependency` workaround** is a named target with a comment that cites the
   MSB4018. The upstream defect is filed as an issue on MintPlayer.Dotnet.Tools.
+  *Resolved upstream in 12.1.0 (MintPlayer.Dotnet.Tools#187/#188): the package's own target now sets
+  `IncludeRuntimeDependency="false"`, so the workaround target is removed.*
 - **D16 — The warning baseline must not grow.** The empty public `IncrementalValueProviderAdditionalEx`
   is an upstream defect: a generator should not add public API to its consumer. It is filed upstream.
+  *Resolved upstream in 12.1.0 (MintPlayer.Dotnet.Tools#187/#188): `JoinMethods.g.cs` is no longer emitted
+  without `[GenerateJoinMethods(n >= 6)]`, is `internal` when it is, and no generated member raises CS1591.
+  The `BuildSuppressions` project and its `DiagnosticSuppressor` are removed.*
   - If the generated class is `partial`, this repo documents it with a one-line partial declaration,
     which is honest and removable.
   - Otherwise the CS1591 is suppressed for that type only, by a targeted `#pragma` in a partial or an

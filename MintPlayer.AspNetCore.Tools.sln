@@ -65,8 +65,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.Endpo
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes", "Endpoints\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes\MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.csproj", "{34803F63-E1E9-4B22-9FFA-5A6DA99AB729}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MintPlayer.AspNetCore.Endpoints.Generator.BuildSuppressions", "Endpoints\MintPlayer.AspNetCore.Endpoints.Generator.BuildSuppressions\MintPlayer.AspNetCore.Endpoints.Generator.BuildSuppressions.csproj", "{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -329,18 +327,6 @@ Global
 		{34803F63-E1E9-4B22-9FFA-5A6DA99AB729}.Release|x64.Build.0 = Release|Any CPU
 		{34803F63-E1E9-4B22-9FFA-5A6DA99AB729}.Release|x86.ActiveCfg = Release|Any CPU
 		{34803F63-E1E9-4B22-9FFA-5A6DA99AB729}.Release|x86.Build.0 = Release|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Debug|x64.Build.0 = Debug|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Debug|x86.Build.0 = Debug|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Release|Any CPU.Build.0 = Release|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Release|x64.ActiveCfg = Release|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Release|x64.Build.0 = Release|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Release|x86.ActiveCfg = Release|Any CPU
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -367,7 +353,6 @@ Global
 		{E59BA956-91CC-4B12-BF49-9E73C41F736C} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{0786A9C6-AE14-4D27-A9A7-8C2753C391A0} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{34803F63-E1E9-4B22-9FFA-5A6DA99AB729} = {DCF9C18E-19C8-9748-4C1C-32AB5F62F46B}
-		{CB75C2EB-7984-4D8E-99C3-7CA4EBECF4BF} = {DCF9C18E-19C8-9748-4C1C-32AB5F62F46B}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {465C5C27-738F-41AB-807F-FA69F9B20B7F}

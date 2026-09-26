@@ -33,9 +33,9 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="12.0.1" PrivateAssets="all" GeneratePathProperty="true" />
-		<PackageReference Include="MintPlayer.ValueComparerGenerator" Version="12.0.1" PrivateAssets="all" />
-		<PackageReference Include="MintPlayer.ValueComparerGenerator.Attributes" Version="12.0.1" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="12.1.0" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="MintPlayer.ValueComparerGenerator" Version="12.1.0" PrivateAssets="all" />
+		<PackageReference Include="MintPlayer.ValueComparerGenerator.Attributes" Version="12.1.0" PrivateAssets="all" GeneratePathProperty="true" />
 	</ItemGroup>
 
 	<!--
@@ -211,25 +211,6 @@
 	</Target>
 
 	<!--
-	Works around an upstream defect (MintPlayer.Dotnet.Tools, reported with PRD D15).
-	MintPlayer.ValueComparerGenerator's build\*.targets adds its Attributes assembly to
-	TargetPathWithTargetPlatformMoniker with IncludeRuntimeDependency="true". Every project that
-	references this one with a plain ProjectReference (Generator.Tests) then receives the Attributes
-	assembly as a runtime dependency twice, and GenerateDepsFile fails with
-	MSB4018: The "GenerateDepsFile" task failed unexpectedly ... An item with the same key has already
-	been added. The assembly is still packed through GetTargetPath (PRD D14); only the runtime flag is
-	cleared, as it is for MintPlayer.SourceGenerators.Tools in GetDependencyTargetPaths above.
-	Remove this target once the package's own target sets IncludeRuntimeDependency="false".
-	-->
-	<Target Name="DemoteValueComparerAttributesRuntimeDependency" AfterTargets="GetDependencyTargetPathsValueComparerGenerator">
-		<ItemGroup>
-			<TargetPathWithTargetPlatformMoniker Condition="'%(Filename)' == 'MintPlayer.ValueComparerGenerator.Attributes'">
-				<IncludeRuntimeDependency>false</IncludeRuntimeDependency>
-			</TargetPathWithTargetPlatformMoniker>
-		</ItemGroup>
-	</Target>
-
-	<!--
 	The Attributes assembly must reach the analyzer folder (PRD D14). It arrives through the package's
 	own GetTargetPath contribution, which needs the package's path property; the package's props sets
 	GeneratePathProperty with an Update that runs too early to reach this project's reference, hence
@@ -239,18 +220,5 @@
 		<Error Condition="'$(PkgMintPlayer_ValueComparerGenerator_Attributes)' == ''"
 		       Text="PkgMintPlayer_ValueComparerGenerator_Attributes is empty. Keep GeneratePathProperty=&quot;true&quot; on the MintPlayer.ValueComparerGenerator.Attributes PackageReference; without it MintPlayer.ValueComparerGenerator.Attributes.dll is not packed beside the generator." />
 	</Target>
-
-	<!--
-	Build-time only: suppresses the CS1591 that MintPlayer.ValueComparerGenerator's public
-	IncrementalValueProviderAdditionalEx adds to this assembly, and nothing else (PRD D16; see the
-	suppressor's remarks for why no lighter mechanism works). ReferenceOutputAssembly="false" and
-	PrivateAssets="all": it is an analyzer of this compilation only, never packed or shipped.
-	-->
-	<ItemGroup>
-		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.Generator.BuildSuppressions\MintPlayer.AspNetCore.Endpoints.Generator.BuildSuppressions.csproj"
-		                  OutputItemType="Analyzer"
-		                  ReferenceOutputAssembly="false"
-		                  PrivateAssets="all" />
-	</ItemGroup>
 
 </Project>
