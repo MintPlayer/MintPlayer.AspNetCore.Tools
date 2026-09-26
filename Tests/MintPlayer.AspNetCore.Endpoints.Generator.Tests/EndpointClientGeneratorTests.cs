@@ -232,7 +232,7 @@ public class EndpointClientGeneratorTests
         Assert.True(run.Errors.Length == 0, string.Join("\n", run.Errors.Select(d => d.ToString())));
         Assert.Empty(run.CompileDiagnostics.Where(d => d.Severity >= DiagnosticSeverity.Warning));
 
-        var client = run.File("ApiClient.g.cs");
+        var client = run.File("EndpointClients.g.cs");
         Assert.Contains("internal sealed partial class ApiClient", client);
         Assert.Contains("public async global::System.Threading.Tasks.Task<global::Shop.Contracts.ProductResponse?> GetProductAsync(int id, global::System.Threading.CancellationToken cancellationToken = default)", client);
         Assert.Contains("SearchProductsAsync(string? term = null, int? page = null, string? @class = null, global::System.Threading.CancellationToken cancellationToken = default)", client);
@@ -318,7 +318,7 @@ public class EndpointClientGeneratorTests
         var warnings = run.Result.Diagnostics.Where(d => d.Id == "MPEP022").ToArray();
         Assert.Contains(warnings, d => d.GetMessage().Contains("'GetProduct'") && d.GetMessage().Contains("Shop.Api.ProductResponse"));
         Assert.All(warnings, d => Assert.Equal(DiagnosticSeverity.Warning, d.Severity));
-        Assert.Contains("GetProductAsync(", run.File("ApiClient.g.cs"));
+        Assert.Contains("GetProductAsync(", run.File("EndpointClients.g.cs"));
         Assert.Empty(run.Errors);
     }
 
@@ -335,7 +335,7 @@ public class EndpointClientGeneratorTests
         var run = RunClient(Client([server]));
 
         Assert.Contains(run.Result.Diagnostics, d => d.Id == "MPEP021" && d.GetMessage().Contains("'GetProduct'") && d.GetMessage().Contains("cannot be resolved"));
-        var client = run.File("ApiClient.g.cs");
+        var client = run.File("EndpointClients.g.cs");
         Assert.DoesNotContain("GetProductAsync(", client);
         Assert.Contains("SearchProductsAsync(", client);
         Assert.Empty(run.Errors);
@@ -409,7 +409,7 @@ public class EndpointClientGeneratorTests
             Assert.All(usings, directive => Assert.True(directive.GlobalKeyword.IsKind(SyntaxKind.GlobalKeyword), $"{tree.FilePath}: {directive}"));
         }
 
-        Assert.DoesNotContain(".ReadFromJsonAsync", run.File("ApiClient.g.cs").Replace("HttpContentJsonExtensions.ReadFromJsonAsync", ""));
+        Assert.DoesNotContain(".ReadFromJsonAsync", run.File("EndpointClients.g.cs").Replace("HttpContentJsonExtensions.ReadFromJsonAsync", ""));
     }
 
     /// <summary>
@@ -444,6 +444,76 @@ public class EndpointClientGeneratorTests
     {
         Assert.Equal(["ApiClient"], EndpointClientWriter.ClassNames(["Shop.Api"]));
         Assert.Equal(["ShopApiClient", "StoreApiClient", "BillingClient"], EndpointClientWriter.ClassNames(["Shop.Api", "Store.Api", "Billing"]));
+    }
+
+    /// <summary>
+    /// The typed client emits a fixed set of files however many servers it references and whatever
+    /// they are called (PRD addendum 2, D23 with D24): every client class goes into one
+    /// <c>EndpointClients.g.cs</c> next to <c>EndpointClientUrl.g.cs</c>.
+    /// </summary>
+    /// <remarks>
+    /// One file per server, named after it, was unbounded in length and renamed with the server
+    /// assembly. The server generator's guard is <see cref="FixedFileSetGuardTests"/>.
+    /// </remarks>
+    [Fact]
+    public void Client_EmitsTheSameFiles_ForOneReferencedServerAndForFive()
+    {
+        var contracts = Contracts();
+        MetadataReference[] Servers(int count) =>
+        [
+            contracts,
+            .. Enumerable.Range(1, count).Select(i => Server($"Demo.N{i}.Api", $$"""
+                using System.Threading;
+                using System.Threading.Tasks;
+                using Microsoft.AspNetCore.Http;
+                using MintPlayer.AspNetCore.Endpoints;
+                using Shop.Contracts;
+
+                namespace Demo.N{{i}}.Api;
+
+                public partial class GetItem{{i}} : IGetEndpoint<ProductResponse>
+                {
+                    public static string Path => "/items{{i}}/{id}";
+                    [RouteParam] public int Id { get; set; }
+                    public override Task<IResult> HandleAsync(CancellationToken cancellationToken) => Task.FromResult(Results.Ok());
+                }
+                """, contracts).Image),
+        ];
+
+        var one = RunClient(Client(Servers(1)));
+        var five = RunClient(Client(Servers(5)));
+
+        Assert.True(five.Errors.Length == 0, string.Join("\n", five.Errors.Select(d => d.ToString())));
+        foreach (var i in Enumerable.Range(1, 5))
+            Assert.Contains($"GetItem{i}Async(", five.Text);
+
+        string[] HintNames(ClientRun run) =>
+        [
+            .. run.Result.Results
+                .SelectMany(generatorResult => generatorResult.GeneratedSources)
+                .Select(source => source.HintName)
+                .OrderBy(name => name, StringComparer.Ordinal),
+        ];
+
+        Assert.Equal(["EndpointClientUrl.g.cs", "EndpointClients.g.cs"], HintNames(one));
+        Assert.Equal(HintNames(one), HintNames(five));
+    }
+
+    /// <summary>
+    /// <see cref="ClientServer.IsCacheable"/> is not part of the model's equality (PRD D11). It only
+    /// decides whether the reference read is memoised; two reads of the same contract are the same
+    /// input to the client output whether or not the second one may be cached, and comparing it would
+    /// re-emit an unchanged client.
+    /// </summary>
+    [Fact]
+    public void ClientServer_Equality_IgnoresIsCacheable()
+    {
+        var cacheable = new ClientServer("Shop.Api", [], [], isCacheable: true);
+        var notCacheable = new ClientServer("Shop.Api", [], [], isCacheable: false);
+
+        Assert.Equal(cacheable, notCacheable);
+        Assert.Equal(cacheable.GetHashCode(), notCacheable.GetHashCode());
+        Assert.NotEqual(cacheable, new ClientServer("Shop.Other", [], [], isCacheable: true));
     }
 
     private static string RepositoryRoot()

@@ -39,14 +39,14 @@ partial class EndpointGenerator
         {
             if (!Model.Assembly.HasOpenApiTransformers) return;
 
-            var plan = EndpointMappingPlan.From(Model);
+            var plan = Model.GetPlan();
             var documented = new List<(int Index, List<ShadowMember> Members)>();
             foreach (var endpoint in plan.MappableEndpoints)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var members = ShadowParameters
-                    .For(endpoint, plan.ComposedRoutes[endpoint.FullyQualifiedName])
+                var members = plan
+                    .ShadowParametersOf(endpoint)
                     .Where(member => member.HasTypedSchema)
                     .ToList();
                 if (members.Count > 0)

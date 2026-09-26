@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+	<!--
+	The library shape of issue #34 (PRD D1-D9), as a real project: endpoints generic over the
+	application's user type, which this library cannot close itself. Its generator maps none of them
+	(MPEP025, Info) and records each one in this assembly's metadata; the TestApp closes them with
+	[assembly: EndpointTypeArgument<LibUser, AppUser>] and maps them from its own generated method.
+	-->
+
+	<PropertyGroup>
+		<TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<OutputType>Library</OutputType>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints\MintPlayer.AspNetCore.Endpoints.csproj" />
+		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
+		                  OutputItemType="Analyzer"
+		                  ReferenceOutputAssembly="false" />
+	</ItemGroup>
+
+</Project>

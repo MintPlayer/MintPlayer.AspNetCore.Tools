@@ -6,7 +6,8 @@ using Microsoft.CodeAnalysis.Text;
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
 
 /// <summary>
-/// Generates a typed <c>HttpClient</c> wrapper per referenced endpoint assembly, from the
+/// Generates a typed <c>HttpClient</c> wrapper per referenced endpoint assembly, all in one
+/// <c>EndpointClients.g.cs</c> (PRD addendum 2, D24), from the
 /// <c>[assembly: EndpointContract(…)]</c> attributes that assembly's own build emitted (PRD R7.4, M9).
 /// </summary>
 /// <remarks>
@@ -100,13 +101,12 @@ public sealed class EndpointClientGenerator : IIncrementalGenerator
 
         context.AddSource(EndpointClientWriter.UrlHelperFileName, SourceText.From(EndpointClientWriter.UrlHelperSource(), Encoding.UTF8));
 
+        // One fixed file for every client class (PRD addendum 2, D24); the class names still come from
+        // the server assemblies.
+        context.CancellationToken.ThrowIfCancellationRequested();
         var classNames = EndpointClientWriter.ClassNames(clients.Select(server => server.AssemblyName).ToList());
-        for (var i = 0; i < clients.Count; i++)
-        {
-            context.CancellationToken.ThrowIfCancellationRequested();
-            context.AddSource(
-                classNames[i] + ".g.cs",
-                SourceText.From(EndpointClientWriter.ClientSource(clients[i], classNames[i], model.EmitGlobalUsing), Encoding.UTF8));
-        }
+        context.AddSource(
+            EndpointClientWriter.ClientsFileName,
+            SourceText.From(EndpointClientWriter.ClientsSource(clients, classNames, model.EmitGlobalUsing), Encoding.UTF8));
     }
 }

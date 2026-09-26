@@ -28,10 +28,14 @@
           IsPackable=false typed-client sample (M9), for the same reason: it is generated code
           referenced only so the tests can drive it.
 
+          MintPlayer.AspNetCore.Endpoints.TestLibrary is the IsPackable=false sample library
+          whose generic endpoints the TestApp closes (issue #34). It reaches the test output
+          through the TestApp's reference, and is excluded for the same reason.
+
           Do NOT grow this list to hide uncovered shipped code. Everything else that is
           instrumented here is published to NuGet and belongs in the number.
           -->
-          <Exclude>[MintPlayer.AspNetCore.Endpoints.TestApp*]*</Exclude>
+          <Exclude>[MintPlayer.AspNetCore.Endpoints.TestApp*]*,[MintPlayer.AspNetCore.Endpoints.TestLibrary]*</Exclude>
 
           <!--
           Pinned to false, not left to the default.

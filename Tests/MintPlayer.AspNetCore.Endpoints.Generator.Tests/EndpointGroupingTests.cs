@@ -419,4 +419,59 @@ public class EndpointGroupingTests
         Assert.Contains("/api/users/", paths);
         Assert.DoesNotContain("/api/users", paths);
     }
+
+    /// <summary>
+    /// A group that implements <c>IEndpointGroup</c> through a base class of its own is discovered, and
+    /// its endpoints are mapped under its prefix (PRD addendum 2, D22).
+    /// </summary>
+    /// <remarks>
+    /// The group predicate used to require <c>IEndpointGroup</c> by name in the class's own base list,
+    /// so <c>class ApiGroup : ApiGroupBase</c> never reached the semantic check: no <c>MapGroup</c>, and
+    /// the endpoint that joins it lost its prefix. The endpoint predicate had the same blind spot and
+    /// lost it long ago; this keeps the two in step.
+    /// </remarks>
+    [Fact]
+    public void GroupInheritingIEndpointGroupFromItsBaseClass_IsDiscovered()
+    {
+        const string assemblyName = "Fixtures.InheritedGroup";
+        var source = Preamble + """
+
+            public class RootGroup : IEndpointGroup
+            {
+                public static string Prefix => "/root";
+            }
+
+            public abstract class ApiGroupBase : IEndpointGroup
+            {
+                public static string Prefix => "/api";
+            }
+
+            [MemberOf<RootGroup>]
+            public class ApiGroup : ApiGroupBase { }
+
+            [MemberOf<ApiGroup>]
+            public class Ping : IGetEndpoint
+            {
+                public static string Path => "/ping";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var result = EndpointGeneratorHarness.Run(assemblyName, source);
+        var generated = string.Join("\n", result.GeneratedTrees.Select(tree => tree.ToString()));
+
+        // Undiscovered, ApiGroup was still mapped (the endpoint names it), but as a root group: its own
+        // [MemberOf<RootGroup>] and its prefix were never read, so the route lost "/root" and the
+        // composed route, which the typed link and the contract need, was unknown.
+        Assert.Empty(result.Diagnostics);
+        Assert.Contains("var grp0 = MapGroup<global::Fixtures.RootGroup>(app);", generated);
+        Assert.Contains("MapGroup<global::Fixtures.ApiGroup>(grp0)", generated);
+        Assert.Contains("\"/root/api/ping\"", generated);
+
+        var paths = GeneratedEndpointHost
+            .MapAndCollectRoutes(EndpointGeneratorHarness.RunAndLoad(assemblyName, source), assemblyName)
+            .Select(route => route.RoutePattern.RawText)
+            .ToArray();
+        Assert.Equal("/root/api/ping", Assert.Single(paths));
+    }
 }

@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using MintPlayer.SourceGenerators.Tools;
 
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
@@ -38,22 +39,54 @@ internal static class GroupMembership
     /// <see langword="null"/> when it belongs to no group.
     /// </summary>
     public static string? Resolve(INamedTypeSymbol symbol, string endpointsNamespace)
+        => ResolveSymbol(symbol, endpointsNamespace)?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+    /// <summary>
+    /// The group type itself, as the attribute names it.
+    /// </summary>
+    /// <remarks>
+    /// Roslyn does not substitute an attribute's type arguments when the attribute is read through a
+    /// constructed type: <c>[MemberOf&lt;Api&gt;]</c> inside <c>Outer&lt;T&gt;</c> comes back as
+    /// <c>Outer&lt;T&gt;.Api</c> for <c>Outer&lt;AppUser&gt;.Inner</c> too. A caller holding a
+    /// construction substitutes with <see cref="GenericTypes.Substitute"/>.
+    /// </remarks>
+    public static INamedTypeSymbol? ResolveSymbol(INamedTypeSymbol symbol, string endpointsNamespace)
     {
         // GetAllBaseTypes is self-inclusive and ends at System.Object, so the first hit is the
         // nearest declaration.
         foreach (var type in symbol.GetAllBaseTypes())
         {
+            if (HasNoAttributeSyntax(type)) continue;
+
             foreach (var attribute in type.GetAttributes())
             {
                 if (attribute.AttributeClass is not { IsGenericType: true } attributeClass) continue;
                 if (attributeClass.OriginalDefinition.MetadataName != AttributeMetadataName) continue;
-                if (attributeClass.ContainingNamespace?.ToDisplayString() != endpointsNamespace) continue;
+                if (!SymbolNames.IsNamespace(attributeClass.ContainingNamespace, endpointsNamespace)) continue;
                 if (attributeClass.TypeArguments.Length != 1) continue;
 
-                return attributeClass.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                return attributeClass.TypeArguments[0] as INamedTypeSymbol;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// True when <paramref name="type"/> is declared in source and none of its declarations has an
+    /// attribute list, so it has no attributes and <c>GetAttributes()</c> need not bind anything (PRD
+    /// addendum 2, D19). False for a metadata type, which has no declarations to look at.
+    /// </summary>
+    internal static bool HasNoAttributeSyntax(INamedTypeSymbol type)
+    {
+        var references = type.OriginalDefinition.DeclaringSyntaxReferences;
+        if (references.IsEmpty) return false;
+
+        foreach (var reference in references)
+        {
+            if (reference.GetSyntax() is not TypeDeclarationSyntax { AttributeLists.Count: 0 }) return false;
+        }
+
+        return true;
     }
 }

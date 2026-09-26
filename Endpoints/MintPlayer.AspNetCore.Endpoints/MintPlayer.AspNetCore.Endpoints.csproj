@@ -14,7 +14,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints</PackageId>
-		<Version>11.1.0-rc.0</Version>
+		<Version>11.2.0-rc.0</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>Class-per-endpoint mapping library for ASP.NET Core with constructor injection, content negotiation, and source-generated endpoint discovery.</Description>
@@ -54,7 +54,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="10.16.0" PrivateAssets="all" GeneratePathProperty="true" ExcludeAssets="all" />
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="12.1.0" PrivateAssets="all" GeneratePathProperty="true" ExcludeAssets="all" />
 	</ItemGroup>
 
 	<!-- Include XML markups in the nupkg -->
@@ -157,6 +157,20 @@
 		       Text="MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll is not among the files being packed. The package would ship without its code fixes." />
 		<Error Condition="'@(_MisplacedEndpointsCodeFixPackFile)' != ''"
 		       Text="MintPlayer.AspNetCore.Endpoints.Generator.CodeFixes.dll would be packed into '%(_MisplacedEndpointsCodeFixPackFile.PackagePath)' instead of $(EndpointsAnalyzerPackPath), beside the generator." />
+
+		<!--
+		  PRD D14: MintPlayer.ValueComparerGenerator.Attributes.dll ships beside the generator. It comes
+		  with the generator's GetTargetPath (the package's own target adds it there), so nothing here
+		  adds it; the guards notice when that stops.
+		-->
+		<ItemGroup>
+			<_ValueComparerAttributesPackFile Include="@(TfmSpecificPackageFile)" Condition="'%(Filename)%(Extension)' == 'MintPlayer.ValueComparerGenerator.Attributes.dll'" />
+			<_MisplacedValueComparerAttributesPackFile Include="@(_ValueComparerAttributesPackFile)" Condition="'%(PackagePath)' != '$(EndpointsAnalyzerPackPath)'" />
+		</ItemGroup>
+		<Error Condition="'@(_ValueComparerAttributesPackFile)' == ''"
+		       Text="MintPlayer.ValueComparerGenerator.Attributes.dll is not among the files being packed. The generator's models carry its attributes, so the package would ship an analyzer that references an assembly it does not contain." />
+		<Error Condition="'@(_MisplacedValueComparerAttributesPackFile)' != ''"
+		       Text="MintPlayer.ValueComparerGenerator.Attributes.dll would be packed into '%(_MisplacedValueComparerAttributesPackFile.PackagePath)' instead of $(EndpointsAnalyzerPackPath), beside the generator." />
 	</Target>
 
 </Project>

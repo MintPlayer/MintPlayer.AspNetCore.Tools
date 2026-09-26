@@ -15,6 +15,8 @@
 
 	<ItemGroup>
 		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints\MintPlayer.AspNetCore.Endpoints.csproj" />
+		<!-- Generic library endpoints this app closes with [assembly: EndpointTypeArgument<LibUser, AppUser>] (issue #34). -->
+		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.TestLibrary\MintPlayer.AspNetCore.Endpoints.TestLibrary.csproj" />
 		<ProjectReference Include="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
 		                  OutputItemType="Analyzer"
 		                  ReferenceOutputAssembly="false" />

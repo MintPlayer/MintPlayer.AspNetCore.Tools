@@ -34,7 +34,7 @@ partial class EndpointGenerator
         {
             if (!Model.Assembly.CanMapEndpoints) return;
 
-            var contracts = EndpointContracts.From(EndpointMappingPlan.From(Model));
+            var contracts = EndpointContracts.From(Model.GetPlan());
             if (contracts.Count == 0) return;
 
             writer.WriteLine(Header);

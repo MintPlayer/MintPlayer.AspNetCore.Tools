@@ -4,7 +4,8 @@ using Microsoft.CodeAnalysis.CSharp;
 namespace MintPlayer.AspNetCore.Endpoints.Generator;
 
 /// <summary>
-/// Writes the typed client files: one class per server assembly, and the shared URL helper.
+/// Writes the typed client files: <c>EndpointClients.g.cs</c> with one class per server assembly, and
+/// the shared URL helper.
 /// </summary>
 /// <remarks>
 /// Same rules as every other generated file here: no <c>using</c> directives (the one
@@ -82,16 +83,40 @@ internal static class EndpointClientWriter
         return result;
     }
 
-    public static string ClientSource(ClientServer server, string className, bool emitGlobalUsing)
+    /// <summary>
+    /// <c>EndpointClients.g.cs</c>: every client class, one per referenced server, in one file whose
+    /// name never depends on the servers (PRD addendum 2, D24).
+    /// </summary>
+    /// <remarks>
+    /// One file per server, named after it, was unbounded in length and renamed with the server
+    /// assembly. The content is the per-server texts one after another; the header and the
+    /// <c>global using</c> are written once, at the top, where a <c>global using</c> must be. With one
+    /// server the text is exactly what <c>&lt;Name&gt;Client.g.cs</c> used to hold.
+    /// </remarks>
+    public static string ClientsSource(IReadOnlyList<ClientServer> servers, IReadOnlyList<string> classNames, bool emitGlobalUsing)
+    {
+        var builder = new System.Text.StringBuilder();
+        for (var i = 0; i < servers.Count; i++)
+            builder.Append(ClientSource(servers[i], classNames[i], emitGlobalUsing, writeFileHeader: i == 0));
+
+        return builder.ToString();
+    }
+
+    public const string ClientsFileName = "EndpointClients.g.cs";
+
+    public static string ClientSource(ClientServer server, string className, bool emitGlobalUsing, bool writeFileHeader = true)
     {
         using var buffer = new StringWriter();
         using var writer = new IndentedTextWriter(buffer);
 
-        writer.WriteLine(Header);
-        if (emitGlobalUsing)
+        if (writeFileHeader)
         {
-            // The call site needs no import, as for the mapping file's own global using.
-            writer.WriteLine($"global using global::{Namespace};");
+            writer.WriteLine(Header);
+            if (emitGlobalUsing)
+            {
+                // The call site needs no import, as for the mapping file's own global using.
+                writer.WriteLine($"global using global::{Namespace};");
+            }
         }
 
         writer.WriteLine();

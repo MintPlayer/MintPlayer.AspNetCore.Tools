@@ -677,9 +677,9 @@ appended blockquotes; this section records only where the work stands.)*
 | M7 validation | `3fdbf22` | generator 268, runtime 151 |
 | M8 typed links + `.WithName()` + MPEP012 | see `git log` ("M8: …") | generator 290, runtime 215 |
 | M9 contract + typed client, scoped store in the TestApp | see `git log` ("M9: …") | generator 305, runtime 269 (Tools.Tests whole project 1071) |
-| M10 contract snapshot + CI gate | uncommitted at time of writing | no new tests; swept together with M11 |
+| M10 contract snapshot + CI gate | `dda6c70` (with M11) | no new tests; swept together with M11 |
 | M11 `partial` code fix (MPEP001/014/019) | `dda6c70` (with M10) | generator 312, Tools.Tests 1071 (runtime 269) |
-| M12 README + MPEP024 + global-namespace fix + `IsAotCompatible` on | uncommitted at time of writing | generator 324, Tools.Tests 1071; `-t:Rebuild` 36 CS1591 (baseline), OpenAPI snapshot unchanged |
+| M12 README + MPEP024 + global-namespace fix + `IsAotCompatible` on | `fafbe7d` | generator 324, Tools.Tests 1071; `-t:Rebuild` 36 CS1591 (baseline), OpenAPI snapshot unchanged |
 
 "Runtime" means `Tests\MintPlayer.AspNetCore.Tools.Tests --filter "FullyQualifiedName~Endpoints"`.
 

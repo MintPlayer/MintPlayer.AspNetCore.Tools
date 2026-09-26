@@ -17,7 +17,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
 		<PackageReference Include="xunit" Version="2.9.3" />
 		<PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
 			<PrivateAssets>all</PrivateAssets>
@@ -32,20 +32,20 @@
 		     SourceGenerators.Tools package's own build props inject it, and declaring it again
 		     produced NU1504 (duplicate PackageReference). Relying on the injected one also
 		     guarantees the driver loads the same Roslyn version the generator was compiled
-		     against — verified 4.14.0 — which a hand-pinned version could silently drift from. -->
+		     against — verified 5.9.0 — which a hand-pinned version could silently drift from. -->
 
 		<!-- The generator references this with PrivateAssets="all", so it does NOT flow
 		     transitively. Without an explicit reference the driver throws FileNotFoundException
 		     the moment it touches the IncrementalGenerator base class. -->
-		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="10.16.0" GeneratePathProperty="true" />
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="12.1.0" GeneratePathProperty="true" />
 
 		<!-- The code-fix harness (M11). NOT the .XUnit flavour: its newest version, 1.1.2, was built
 		     against xunit 2.4.x and every assertion dies with MissingMethodException on this repo's
 		     xunit 2.9.3 (spike S5). The plain package's DefaultVerifier has no xunit dependency. -->
-		<PackageReference Include="Microsoft.CodeAnalysis.CSharp.CodeFix.Testing" Version="1.1.2" />
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp.CodeFix.Testing" Version="1.1.4" />
 		<!-- The code-fix project references Workspaces with ExcludeAssets="runtime" so that nothing of it
-		     ships; the test host has to supply the real assembly, at the generator's Roslyn (4.14.0). -->
-		<PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.14.0" />
+		     ships; the test host has to supply the real assembly, at the generator's Roslyn (5.9.0). -->
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
 
 		<!-- Only so the OpenAPI emission tests can compile EndpointOpenApi.g.cs: the harness keeps
 		     these assemblies OUT of the fixture compilation unless a test asks for them, because

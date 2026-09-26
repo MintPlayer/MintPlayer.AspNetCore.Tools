@@ -1049,6 +1049,33 @@ change for consumers on older SDKs and must be re-verified per R6.2.
 > and since it would silently drop every SDK on the Roslyn 5.0–5.2 line, it is withdrawn.
 > Revisit when a Tools release binds 5.0.0.
 
+> **Revisited 2026-09-25 on `fix/endpoints-open-generics` (PR #35): upgraded to Tools 11.0.0, and the
+> reason for the withdrawal no longer applies — by owner decision, not because the boundary moved.**
+> No Tools release binds 5.0.0; 11.0.0 binds `Microsoft.CodeAnalysis 5.9.0`, so the floor rises further
+> than S4 feared. The owner decided that **Roslyn 5.9 is the deliberate minimum and older Roslyn versions
+> are not supported**: no multi-targeted analyzer folders, fallbacks or shims. The consequence S4
+> objected to, a consumer on an older SDK seeing the library as broken, is handled by documenting the
+> requirement, not by avoiding it: the Endpoints and Generator READMEs now state ".NET SDK 10.0.400+ or
+> 11.x, or Visual Studio 2026 (with Roslyn 5.9+)" and quote the exact symptom. Re-measured with a local
+> Release pack and a scratch `net10.0` web consumer: SDK 10.0.401 (Roslyn 5.9.0) builds clean; SDK
+> 10.0.112 (Roslyn 5.0.0) gives the same pair S4 recorded, now naming 5.9.0.0 —
+> `CSC : warning CS9057: Analyzer assembly '…\MintPlayer.AspNetCore.Endpoints.Generator.dll' cannot be used
+> because it references version '5.9.0.0' of the compiler, which is newer than the currently running
+> version '5.0.0.0'.` and `Program.cs(4,5): error CS1061: 'WebApplication' does not contain a definition
+> for 'MapConsumerEndpoints' …`. The analyzer stays in the single unversioned `analyzers/dotnet/cs`
+> folder; R6.5a's suppression still removes the Tools props' copies (now `analyzers/dotnet/roslyn5.9/cs`),
+> and the packed listing is one folder with the Generator, CodeFixes and Tools dlls. The details are in
+> `PRD-EndpointsOpenGenerics.md`, "Dependency update".
+
+> **Superseded 2026-09-25/26 (PRD-EndpointsOpenGenerics D25, commits `d1ccf1e` and `1fa1b75`):** the
+> analyzer now ships in the versioned **`analyzers/dotnet/roslyn5.9/cs`** folder, following
+> MintPlayer.Dotnet.Tools' convention. The owner supports only Visual Studio 2026 and .NET 10/11.
+> - On a compiler older than Roslyn 5.9, the generator is now **skipped silently**. Measured on SDK
+>   10.0.112, there is no CS9057; the first error is CS1061 for the missing `Map…Endpoints()`, or
+>   CS0535/CS0115 for typed endpoints. The READMEs state this.
+> - The folder now holds the Generator, CodeFixes, Tools and ValueComparerGenerator.Attributes dlls,
+>   all at MintPlayer.Dotnet.Tools 12.1.0.
+
 **R6.5a — The standalone Generator package runs its generator twice, and this predates the
 upgrade.** Found by S4 while testing folder layouts. `Tools`' own `build/*.props` packs
 copies of the analyzer into `analyzers/dotnet/roslyn4.0/cs` and `roslyn4.9/cs` *in addition
@@ -1069,6 +1096,12 @@ mistake fails silently, for no benefit.
 without extending `Equals` silently kills incremental caching, because `ImmutableArray`
 equality is by reference. `EndpointGeneratorIncrementalTests` will catch it if the tests
 are kept honest.
+
+> **Superseded 2026-09-25 (PR #35, PRD-EndpointsOpenGenerics addendum D10):** the models are no longer
+> hand-written. Every one is a `[GenerateEquality]` partial class (MintPlayer.ValueComparerGenerator 12.0.1, now 12.1.0),
+> which generates `IEquatable<T>` from the properties and compares `ImmutableArray` members element-wise,
+> so adding a collection no longer needs a matching `Equals` edit. The rule's intent stands: the incremental
+> tests still assert the cache hits.
 
 **R6.8 — Member discovery reads symbols, not the triggering syntax node.** A partial split
 across files, or an attribute on two partial parts, makes `ForAttributeWithMetadataName`

@@ -233,4 +233,89 @@ internal static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "The generated client is built on HttpClient, System.Net.Http.Json and System.Text.Encodings.Web, all in the .NET shared framework from .NET 5 on. A netstandard2.0 or .NET Framework project needs the corresponding packages.");
+
+    // MPEP025-MPEP033: open-generic endpoints (issue #34). MPEP025 and MPEP032 are reported on the
+    // declaration; MPEP026-MPEP031 and MPEP033 on the application's [assembly: EndpointTypeArgument] attribute,
+    // since that is what closes the endpoint and what the application can change.
+
+    public static readonly DiagnosticDescriptor OpenEndpointNotMapped = new(
+        id: "MPEP025",
+        title: "Open-generic endpoint is not mapped by this assembly",
+        messageFormat: "Endpoint class '{0}' has type parameters, so this assembly's generated mapping does not map it; an application closes it with [assembly: EndpointTypeArgument<TConstraint, TArgument>] (or [assembly: EndpointTypeArgument(typeof(...), ...)]) and maps it from its own generated method",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Info,
+        isEnabledByDefault: true,
+        description: "Generated code outside the class cannot name its type parameters, so it gets no mapping, typed link or contract here. Its generated partial is still emitted, with the type parameters repeated, and it is recorded in this assembly's metadata. The application that knows the type arguments closes it: every type parameter constrained to TConstraint becomes TArgument, and the closed endpoint is mapped like any other, named '{Name}_{TypeArguments}'.");
+
+    public static readonly DiagnosticDescriptor TypeArgumentViolatesConstraint = new(
+        id: "MPEP026",
+        title: "Type argument does not satisfy a constraint of the endpoint",
+        messageFormat: "Type argument '{0}' does not satisfy the '{1}' constraint of type parameter '{2}' of endpoint '{3}'; the endpoint is not closed",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The attribute's own constraint guarantees TArgument : TConstraint, but an endpoint's type parameter can carry more constraints (new(), class, struct, unmanaged, notnull, further constraint types). Closing it with an argument that violates one would emit code that does not compile, so nothing is emitted for that endpoint.");
+
+    public static readonly DiagnosticDescriptor TypeParameterBoundTwice = new(
+        id: "MPEP027",
+        title: "Type parameter is bound by more than one EndpointTypeArgument",
+        messageFormat: "Type parameter '{0}' of endpoint '{1}' is bound by both {2} and {3}; the endpoint is not closed",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "A constraint-keyed attribute binds every type parameter that has TConstraint among its constraint types. When two attributes match one parameter there is no rule to choose between them. Remove one, or close the endpoint explicitly with [assembly: EndpointTypeArgument(typeof(...), ...)], which wins over constraint keys for that endpoint.");
+
+    public static readonly DiagnosticDescriptor ExplicitTypeArgumentCountMismatch = new(
+        id: "MPEP028",
+        title: "Explicit EndpointTypeArgument has the wrong number of type arguments",
+        messageFormat: "EndpointTypeArgument(typeof({0}), ...) gives {1} type argument(s), but '{0}' has {2} type parameter(s), counting those of the types it is nested in; the endpoint is not closed",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "The explicit form lists one type argument per type parameter, outermost containing type first.");
+
+    public static readonly DiagnosticDescriptor ClosedEndpointNotAccessible = new(
+        id: "MPEP029",
+        title: "Open endpoint cannot be closed by this application",
+        messageFormat: "Endpoint '{0}' is not closed because {1}; this application's generated code must be able to name it",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "An endpoint declared in a referenced assembly, and every group on its chain, must be public for the application's generated mapping to name it; a type argument must be accessible from the application's generated code.");
+
+    public static readonly DiagnosticDescriptor TypeArgumentClosesNothing = new(
+        id: "MPEP030",
+        title: "EndpointTypeArgument closes no endpoint",
+        messageFormat: "{0} closes no endpoint: {1}",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Open endpoints are found in this compilation and in referenced assemblies built with a generator that records them (11.2 or later). An attribute that matches none of them is most likely keyed on the wrong type, or names a library that is not referenced.");
+
+    public static readonly DiagnosticDescriptor EndpointPartiallyBound = new(
+        id: "MPEP031",
+        title: "Open endpoint is only partly closed",
+        messageFormat: "Endpoint '{0}' is not closed: type parameter(s) {1} are not bound by any EndpointTypeArgument; add one keyed on a constraint type of theirs, or close the endpoint with [assembly: EndpointTypeArgument(typeof(...), ...)]",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "An endpoint is closed only when every type parameter, including those of the types it is nested in, is bound.");
+
+    public static readonly DiagnosticDescriptor NewStaticPathIgnored = new(
+        id: "MPEP032",
+        title: "A 'new static' Path or Methods is not what the endpoint answers on",
+        messageFormat: "Endpoint class '{0}' hides the inherited {1} with 'new static', but the runtime uses {2}, from the implementation of the endpoint interface; list the endpoint interface on '{0}' again to use the new {1}, or remove it",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "TEndpoint.Path and TEndpoint.Methods dispatch through the interface map, and a static member hidden with 'new' does not re-implement the interface: the base class's member, or the verb interface's default verb, stays in force. The generated links, the contract and the duplicate-route check (MPEP007) use what the endpoint really answers on. Reported once per hidden member.");
+
+    public static readonly DiagnosticDescriptor ConstraintDependsOnTypeParameter = new(
+        id: "MPEP033",
+        title: "A constraint key cannot bind a type parameter whose constraint uses another type parameter",
+        messageFormat: "{0} does not close endpoint '{1}': type parameter '{2}' is constrained to '{3}', which depends on type parameter(s) {4}, so no constraint key can equal it; close the endpoint with [assembly: EndpointTypeArgument(typeof({5}), ...)], one type argument per type parameter",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Constraint-keyed binding matches a type parameter by constraint type equality. A constraint such as IUser<TKey> mentions another type parameter, so it equals no closed key such as IUser<Guid>, and inferring TKey from the key is not done: a key would then silently bind parameters it does not name. The explicit form lists every type argument, and every constraint is checked after substitution (MPEP026).");
 }
