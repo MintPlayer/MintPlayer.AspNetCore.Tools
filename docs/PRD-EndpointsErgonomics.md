@@ -1067,6 +1067,15 @@ change for consumers on older SDKs and must be re-verified per R6.2.
 > and the packed listing is one folder with the Generator, CodeFixes and Tools dlls. The details are in
 > `PRD-EndpointsOpenGenerics.md`, "Dependency update".
 
+> **Superseded 2026-09-25/26 (PRD-EndpointsOpenGenerics D25, commits `d1ccf1e` and `1fa1b75`):** the
+> analyzer now ships in the versioned **`analyzers/dotnet/roslyn5.9/cs`** folder, following
+> MintPlayer.Dotnet.Tools' convention. The owner supports only Visual Studio 2026 and .NET 10/11.
+> - On a compiler older than Roslyn 5.9, the generator is now **skipped silently**. Measured on SDK
+>   10.0.112, there is no CS9057; the first error is CS1061 for the missing `Map…Endpoints()`, or
+>   CS0535/CS0115 for typed endpoints. The READMEs state this.
+> - The folder now holds the Generator, CodeFixes, Tools and ValueComparerGenerator.Attributes dlls,
+>   all at MintPlayer.Dotnet.Tools 12.1.0.
+
 **R6.5a — The standalone Generator package runs its generator twice, and this predates the
 upgrade.** Found by S4 while testing folder layouts. `Tools`' own `build/*.props` packs
 copies of the analyzer into `analyzers/dotnet/roslyn4.0/cs` and `roslyn4.9/cs` *in addition
@@ -1089,7 +1098,7 @@ equality is by reference. `EndpointGeneratorIncrementalTests` will catch it if t
 are kept honest.
 
 > **Superseded 2026-09-25 (PR #35, PRD-EndpointsOpenGenerics addendum D10):** the models are no longer
-> hand-written. Every one is a `[GenerateEquality]` partial class (MintPlayer.ValueComparerGenerator 12.0.1),
+> hand-written. Every one is a `[GenerateEquality]` partial class (MintPlayer.ValueComparerGenerator 12.0.1, now 12.1.0),
 > which generates `IEquatable<T>` from the properties and compares `ImmutableArray` members element-wise,
 > so adding a collection no longer needs a matching `Equals` edit. The rule's intent stands: the incremental
 > tests still assert the cache hits.

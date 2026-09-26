@@ -567,7 +567,7 @@ Findings:
     and the public `JoinMethods.g.cs` type. A third item goes in the same issue or its own: the
     load-time claim contradicted by S's measurement.
 
-> **As built (Phase 5, 2026-09-25, uncommitted for review):**
+> **As built (Phase 5, 2026-09-25, committed as `d1ccf1e`):**
 > - **12.0.1 throughout** (D26): Tools in all three references, ValueComparerGenerator(.Attributes) in the
 >   generator, MintPlayer.SourceGenerators(.Attributes) in MustChangePassword and SitemapXml. The spike patch
 >   applied cleanly; its `SpikeDropVcAttributes` switch is gone.
@@ -770,7 +770,16 @@ benchmark source is `scratchpad\bench\ZzGeneratorBenchmark.cs` and its logs are 
 23. **Package versions:** Tools, ValueComparerGenerator and MintPlayer.SourceGenerators are at 12.0.1,
     and `dotnet list package --outdated` is empty.
 
-> **As built (Phase 6, 2026-09-25, uncommitted for review):**
+> **Status 2026-09-26:**
+> - **D26 and acceptance 23** are met at **12.1.0**, which superseded 12.0.1. See the "Superseded by 12.1.0"
+>   note after the Phase 5 as-built notes.
+> - **Acceptance 17** is met: the upstream defects were filed as MintPlayer/MintPlayer.Dotnet.Tools#187,
+>   and fixed there.
+> - **Acceptance 18** is the only one not met: the body-edit rerun measured 1.7× faster, against a 3×
+>   target, with the ~26 ms binding floor recorded in the Phase 6 as-built notes. Whether 1.7× is
+>   accepted is the owner's decision.
+
+> **As built (Phase 6, 2026-09-25, committed as `d1ccf1e`):**
 > - **Red first**, then green: the D22 group test (`GroupInheritingIEndpointGroupFromItsBaseClass_IsDiscovered`)
 >   failed with `info MPEP016: Endpoint group 'RootGroup' is not joined…` (the group was mapped as a root
 >   group: its `[MemberOf<RootGroup>]` and prefix were never read). D22 is reproduced and fixed. The line-shift
@@ -827,3 +836,7 @@ benchmark source is `scratchpad\bench\ZzGeneratorBenchmark.cs` and its logs are 
 Created 2026-09-25 from issue #34. Branch `fix/endpoints-open-generics` (from `master` at `c04ffac`).
 
 Implemented on `fix/endpoints-open-generics`; PR [#35](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/35), CI green, awaiting the release decision (proposed `11.2.0-rc.0`).
+
+Updated 2026-09-26: the addenda (Tools 12 / generated equality, generator performance) are committed as
+`d1ccf1e`. Everything moved to MintPlayer.Dotnet.Tools 12.1.0 without the upstream workarounds in `1fa1b75`,
+and the docs were brought in line in `b2b323b`. CI is green. Open: the release version, and acceptance 18.

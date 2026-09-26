@@ -54,7 +54,7 @@ PR closing #34, not merged.
 
 PR [#35](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/35) opened 2026-09-25, CI green, and the oasdiff gate ran for the first time: "No breaking changes to report, but the specs are different" (the three added closed paths). Not merged; version 11.2.0-rc.0 is proposed and the release is the owner's decision.
 
-## Phase 5 — Tools 12 and generated model equality (PRD addendum D10–D18): done (uncommitted, awaiting review)
+## Phase 5 — Tools 12 and generated model equality (PRD addendum D10–D18): done (`d1ccf1e`; workarounds dropped in `1fa1b75`, 12.1.0)
 
 Investigated 2026-09-25 by three agents (upstream #185, downstream map, end-to-end spike). The spike patch is `scratchpad\spike185\spike.patch`
 (373/375 net10.0; the 2 failures are the hash-pinning tests).
@@ -88,7 +88,7 @@ Investigated 2026-09-25 by three agents (upstream #185, downstream map, end-to-e
 
 > **Phase 5 targets 12.0.1** (PRD D26), not 12.0.0. The only consumer-visible change is the equality output file name `GeneratedEquality.g.cs`. MintPlayer.SourceGenerators(.Attributes) also moves to 12.0.1 for MustChangePassword and SitemapXml.
 
-## Phase 6 — Generator performance and robustness (PRD addendum 2, D19–D26): done except acceptance 18 (uncommitted, awaiting review)
+## Phase 6 — Generator performance and robustness (PRD addendum 2, D19–D26): done (`d1ccf1e`), acceptance 18 open: 1.7× measured against a 3× target, owner to decide
 
 Baseline measured 2026-09-25 by agent B. Benchmark: `scratchpadench\ZzGeneratorBenchmark.cs` plus `benchun.sh`; numbers in PRD addendum 2. Run it before and after, with the same N and scenarios.
 
