@@ -591,6 +591,26 @@ Findings:
 >   `analyzers/dotnet/cs` in each package, `GeneratePathProperty` dropped): each fails the pack with its message.
 > - **Not done here:** the upstream issues of acceptance 17 (the caller files them).
 
+> **Superseded by 12.1.0 (commit `1fa1b75`, 2026-09-26).** The upstream defects were filed as
+> MintPlayer/MintPlayer.Dotnet.Tools#187 and fixed there in #188, released as **12.1.0**. The package's own
+> target now uses `IncludeRuntimeDependency="false"`, and no MintPlayer generator emits undocumented public
+> code any more. So:
+> - The `DemoteValueComparerAttributesRuntimeDependency` target (D15) is removed.
+> - The `…Generator.BuildSuppressions` project with its `DiagnosticSuppressor` (the D16 deviation above) is
+>   removed, and dropped from the solution.
+> - All MintPlayer packages are at 12.1.0: Tools in all three references, ValueComparerGenerator(.Attributes)
+>   in the generator, MintPlayer.SourceGenerators(.Attributes) in MustChangePassword and SitemapXml.
+>   `dotnet list package --outdated` reports no updates for all 21 projects.
+> - **The warning baseline is now 0, not 36.** The 36 CS1591 (16 MustChangePassword, 20 SitemapXml) came from
+>   the same upstream-generated code. Measured 2026-09-26: `dotnet build MintPlayer.AspNetCore.Tools.sln -c
+>   Release -t:Rebuild` gives `0 Warning(s)`, `0 Error(s)`. Acceptance 16 and every "36 CS1591 baseline" in this
+>   PRD and the PLAN read as 0 from here on.
+> - **Unchanged and still required:**
+>   - `CheckValueComparerAttributesPathProperty` and the pack guards on the attributes dll's presence and
+>     placement stay, because the dll still ships beside the generator (D14).
+>   - The analyzer folder stays `analyzers/dotnet/roslyn5.9/cs` (D25).
+> - PR #35's check passed on `1fa1b75`.
+
 ## Addendum 2 — Generator performance, following MintPlayer.Dotnet.Tools #183 / #185 / #186
 
 *(Added 2026-09-25. Same PR #35.)* #186, published as 12.0.1, made the equality generator write one fixed

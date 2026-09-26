@@ -114,3 +114,5 @@ Baseline measured 2026-09-25 by agent B. Benchmark: `scratchpadench\ZzGenerator
 >   - make the stray-folder guard tolerate upstream's identical-path copies by deduplicating;
 >   - list both nupkgs to confirm exactly one analyzer folder;
 >   - re-measure SDK 10.0.112 (expect a silent skip and CS1061) and rewrite the README and Generator README "Requirements" to that symptom, for Visual Studio 2026 and .NET SDK 10.0.400+ or 11.x.
+
+> **Superseded by 12.1.0 (commit `1fa1b75`, 2026-09-26).** MintPlayer.Dotnet.Tools#187 was fixed upstream (#188, 12.1.0). So the `IncludeRuntimeDependency` workaround target (Phase 5 step 5) and the CS1591 suppressor project (step 6) are removed, and every MintPlayer package is at 12.1.0. The warning baseline is now **0** (measured: solution `-t:Rebuild -c Release`, 0 warnings), not 36. The attributes-dll pack guards and the `roslyn5.9/cs` folder stay. See the PRD blockquote after the Phase 5 as-built notes.
