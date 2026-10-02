@@ -2,7 +2,9 @@
 
 Issue: [#38 — record the endpoint type as metadata so "is endpoint X mapped?" needs no route strings](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/issues/38).
 
-*(Draft 3, 2026-10-02, ready to implement. The issue body is the source of truth; this file mirrors it.)*
+*(Draft 3, 2026-10-02. Implemented in PR [#39](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/39),
+which is waiting for the owner to merge; see the "As built" blockquote after the acceptance criteria. The
+issue body is the source of truth for the design; this file mirrors it.)*
 
 *Earlier drafts:*
 - *Draft 1 (`938eef4`) came from a reading of the mapping paths.*
@@ -201,6 +203,26 @@ Either way, the endpoint is simply absent from the data source.
 > - its open `OldOpen<>`, closed by the app.
 >
 > Details are in PLAN Phase 2. AC7 stays a documented spike, not a test.
+
+> **As built (2026-10-02, PR [#39](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/39),
+> `6e034b7`, `19f5de1`, `86659e0`).** R1–R6 are implemented as written. AC1–AC6 have tests; PLAN Phase 3
+> maps each AC to its tests.
+>
+> **Differences from, or additions to, the text above:**
+> - `EndpointTypeMetadata` has no `ToString()` override. R1 does not ask for one.
+> - **AC1** also covers a property-bound endpoint, which the generator maps through
+>   `Map<TEndpoint, TShadow>`. It records `TEndpoint`, never the generated `[AsParameters]` shadow. This
+>   was added after review.
+> - **AC2:**
+>   - The interface case is asked of an endpoint that really implements `IGetEndpoint` and a generic
+>     marker interface, so it cannot pass vacuously.
+>   - The disabled-group case maps a control endpoint in the same call.
+>   - Two cases were added: "last instance wins" (an endpoint's `Configure` adds a second instance) and
+>     the constructor's null check.
+> - **R6:** the README example uses the README's own `ListPasskeys<>`. The "Groups" `IsEnabled` passage
+>   and "Manual registration" link to the new section.
+> - **Sweep:** 0 warnings on the Release rebuild. Tools.Tests 1097/1097 and Generator.Tests 389/389 passed
+>   on both TFMs. The OpenAPI snapshot is unchanged (AC5).
 
 ## Decisions
 
