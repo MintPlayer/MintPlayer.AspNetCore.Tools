@@ -27,19 +27,26 @@ findings are in the PRD blockquote and in "Prototype review". These spikes are s
 
 The docs were brought in line with the issue and committed on this branch.
 
-## Phase 2 — Spike S1, mixed versions (AC7): open
+## Phase 2 — Spike S1, mixed versions (AC7): done (2026-10-02), positive
 
-Run this before Green, because a negative result reopens D1.
+> **Result.** `scratchpad\spike-s1`, net10.0:
+> - `OldLib` was built against the **published 11.2.0-rc.0 package**, with 0 warnings. Its generated
+>   `MapOldLibEndpoints()` calls `global::MintPlayer.AspNetCore.Endpoints.EndpointAttributes.ForMetadata(typeof(TEndpoint))`.
+> - `NewApp` ProjectReferences this repo's runtime and generator, and references `OldLib.dll` as built,
+>   with no rebuild against 11.3. It closes `OldOpen<TUser>` through `[assembly: EndpointTypeArgument]`.
+> - Output after start:
+>   - `GET /old/hello -> OldLib.OldHello`
+>   - `GET /old/open -> OldLib.OldOpen`1[NewApp.AppUser]`
+>   - `IsEndpointMapped<OldHello>()` = **True**, `IsEndpointMapped(typeof(OldOpen<>))` = **True**
+>
+> D1 holds. S1 stays a documented spike rather than a test: a hermetic test would need the 11.2 package,
+> or a prebuilt DLL, committed to the repo.
+>
+> **Order changed:** S1 needs the runtime change it tests, so Phase 4 steps 1–3 were written before
+> Phase 3's tests. As a result the new tests were never seen red. The suite run in Phase 5 is their only
+> run.
 
-- Build a throwaway endpoint library in the scratchpad against the **published 11.2.0-rc.0 package**, so
-  its `Map…Endpoints()` body is old generator output.
-- Run it from an app that ProjectReferences this repo's runtime, with assembly unification to the higher
-  version.
-- Assert that `IsEndpointMapped` is true for one of the library's generated endpoints, and for an
-  open-generic endpoint closed by the app.
-- Record the result in the PRD. Keep it as a test only if it can be made hermetic.
-
-## Phase 3 — Red: open
+## Phase 3 — Red: done (tests written after Green; see Phase 2)
 
 Add a stub `EndpointTypeMetadata` and an `IsEndpointMapped` that throws `NotImplementedException`, so the
 suite compiles and fails for the right reason. Then:
@@ -56,7 +63,7 @@ suite compiles and fails for the right reason. Then:
 4. **AC3:** in `TestLibraryEndToEndTests` (helper at `:25`).
 5. **AC6:** a real host, false before `StartAsync` and true after.
 
-## Phase 4 — Green: open
+## Phase 4 — Green: done
 
 1. **`EndpointTypeMetadata`** in `Endpoints/MintPlayer.AspNetCore.Endpoints/` (R1), with XML docs in the
    repo's style.

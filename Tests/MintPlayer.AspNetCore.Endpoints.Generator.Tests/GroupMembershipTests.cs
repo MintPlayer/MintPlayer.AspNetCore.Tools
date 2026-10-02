@@ -186,6 +186,36 @@ public class GroupMembershipTests
     }
 
     /// <summary>
+    /// Issue #38 (AC1): each path records the closed endpoint class exactly once, through
+    /// <c>EndpointAttributes.ForMetadata</c>, grouped or not.
+    /// </summary>
+    /// <remarks>
+    /// Counted with <c>GetOrderedMetadata</c>: <c>GetMetadata</c> returns the last instance and would
+    /// pass with a duplicate.
+    /// </remarks>
+    [Theory]
+    [InlineData("NoAttribute", "/none")]
+    [InlineData("OnSelf", "/api/self")]
+    [InlineData("OnBaseOnly", "/api/base")]
+    [InlineData("OnSelfAndBase", "/admin/both")]
+    [InlineData("TwoLevelsUp", "/api/two-up")]
+    public void EndpointType_IsRecordedOnce_OnEitherPath(string typeName, string route)
+    {
+        var endpointType = parityAssembly.Value.GetType($"Fixtures.{typeName}", throwOnError: true)!;
+
+        var generated = Assert.Single(
+            GeneratedEndpointHost.MapAndCollectRoutes(parityAssembly.Value, ParityAssemblyName),
+            endpoint => endpoint.RoutePattern.RawText == route);
+        var manual = MapManually(endpointType);
+
+        foreach (var endpoint in new[] { generated, manual })
+        {
+            var metadata = Assert.Single(endpoint.Metadata.GetOrderedMetadata<EndpointTypeMetadata>());
+            Assert.Same(endpointType, metadata.EndpointType);
+        }
+    }
+
+    /// <summary>
     /// The metadata name the generator matches is the real attribute's, and a fixture using the
     /// attribute produces grouped endpoints.
     /// </summary>

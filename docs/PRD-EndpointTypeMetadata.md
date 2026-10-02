@@ -195,6 +195,13 @@ Either way, the endpoint is simply absent from the data source.
   - This is the proof of G4 and D1.
   - It becomes a test only if it can be made hermetic, with no nuget.org fetch in CI.
 
+> **S1 result (2026-10-02): positive.** A library built against the published 11.2.0-rc.0 package,
+> without a rebuild, reported both of these as mapped on the 11.3 runtime:
+> - its generated `OldHello`;
+> - its open `OldOpen<>`, closed by the app.
+>
+> Details are in PLAN Phase 2. AC7 stays a documented spike, not a test.
+
 ## Decisions
 
 - **D1. Record the type inside `ForMetadata`, not as an extra line at both mapping sites. Settled

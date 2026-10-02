@@ -16,15 +16,23 @@ namespace MintPlayer.AspNetCore.Endpoints;
 /// anything that enumerates or filters it. Those are an artifact of how the class was compiled,
 /// never a routing convention.
 /// </para>
+/// <para>
+/// The result also ends with one <see cref="EndpointTypeMetadata"/> for <c>endpointType</c>. It lives
+/// here rather than at each mapping site so a library whose generated mapping was compiled against an
+/// older version of this package records the type too: that code calls this method at run time.
+/// </para>
 /// </remarks>
 public static class EndpointAttributes
 {
-    /// <summary>The attributes of <paramref name="endpointType"/> to add as endpoint metadata.</summary>
+    /// <summary>
+    /// The attributes of <paramref name="endpointType"/> to add as endpoint metadata, plus one
+    /// <see cref="EndpointTypeMetadata"/> recording <paramref name="endpointType"/> itself.
+    /// </summary>
     public static object[] ForMetadata(Type endpointType)
     {
         ArgumentNullException.ThrowIfNull(endpointType);
 
-        return [.. endpointType.GetCustomAttributes(inherit: true).Where(IsMeaningful)];
+        return [.. endpointType.GetCustomAttributes(inherit: true).Where(IsMeaningful), new EndpointTypeMetadata(endpointType)];
     }
 
     private static bool IsMeaningful(object attribute)

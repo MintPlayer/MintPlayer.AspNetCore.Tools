@@ -555,6 +555,55 @@ public partial class DownloadReport : IGetEndpoint
 
 A group's `Configure` receives its `RouteGroupBuilder`, as `UsersApi` above shows.
 
+Besides the class's attributes, every endpoint the library maps carries one `EndpointTypeMetadata`. Its
+`EndpointType` is the closed endpoint class, and it is what the next section reads.
+
+## Is an endpoint mapped?
+
+To ask whether an endpoint is served, ask about its **class**, not its route string. A renamed route or
+group prefix then cannot silently change the answer, and a renamed or deleted class fails to compile.
+
+```csharp
+using MintPlayer.AspNetCore.Endpoints;
+
+public class GetCapabilities : IGetEndpoint
+{
+    public static string Path => "/capabilities";
+
+    public Task<IResult> HandleAsync(HttpContext httpContext)
+    {
+        var endpoints = httpContext.RequestServices.GetRequiredService<EndpointDataSource>();
+
+        return Task.FromResult(Results.Ok(new
+        {
+            passkeys = endpoints.IsEndpointMapped(typeof(PasskeySignIn<>)),
+            reports = endpoints.IsEndpointMapped<DownloadReport>(),
+        }));
+    }
+}
+```
+
+- **A closed class** matches by equality.
+- **A generic type definition** matches any mapped closing of it, such as `PasskeySignIn<AppUser>`. That
+  includes a closing the application made with `[assembly: EndpointTypeArgument]`, and a non-generic class
+  that derives from a closing. Base classes count; interfaces never do. So a query for one of the
+  library's own generic bases, such as `PostEndpoint<,>`, matches every endpoint derived from it.
+- **An endpoint that was not mapped** answers `false`, whether its group's `IsEnabled` returned `false`
+  or the mapping call sat inside an `if`. This is what the generated `Endpoints` descriptor list cannot
+  tell you, because it lists every endpoint that is *declared*.
+- **Endpoints mapped by anything else**, such as a plain `MapGet` lambda or `MapIdentityApi`, carry no
+  endpoint class and never match.
+
+**Ask at request time.** The `EndpointDataSource` in the container holds **no endpoints until the host
+has started**. A call in `Program.cs` before `app.Run()`, or in an `IHostedService.StartAsync`, answers
+`false`, with no error. The earliest safe point is `IHostApplicationLifetime.ApplicationStarted`. There is
+no overload on `IEndpointRouteBuilder`, on purpose: reading its data sources during startup builds the
+endpoints, and adding a convention to an already-mapped route afterwards throws.
+
+The class is recorded by `EndpointAttributes.ForMetadata`, which the generated mapping calls at run
+time. So a library compiled against an older version of this package gets it too, without a rebuild,
+once the application references this version.
+
 ## Validation
 
 Validation runs on the **body** only, after binding and before the handler, with
@@ -774,7 +823,8 @@ calls the `Delegate` overload of `MapMethods`, which `RequestDelegateFactory` bi
 startup; the Request Delegate Generator cannot intercept it, because one source generator never sees
 another's output (measured: it intercepted a hand-written `MapGet` and none of the generated calls). The
 body is read by MVC input formatters or `ReadFromJsonAsync<T>()`, neither of which this library makes
-trim-safe. `MapEndpoint<T>()` says so with its annotations.
+trim-safe. `MapEndpoint<T>()` says so with its annotations. `IsEndpointMapped` is trim-safe: it compares
+types and walks base classes, and never reflects over members.
 
 ## Diagnostics
 
