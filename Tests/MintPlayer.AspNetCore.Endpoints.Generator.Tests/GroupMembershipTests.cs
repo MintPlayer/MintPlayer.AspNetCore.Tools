@@ -215,6 +215,48 @@ public class GroupMembershipTests
         }
     }
 
+    private const string BoundAssemblyName = "Fixtures.TypeMetadataBound";
+
+    /// <summary>A property-bound endpoint: the generator maps it through <c>Map&lt;TEndpoint, TShadow&gt;</c>.</summary>
+    private static readonly string BoundSource = $$"""
+        {{Preamble}}
+
+        public partial class Bound : IGetEndpoint
+        {
+            public static string Path => "/bound/{id}";
+
+            [RouteParam] public int Id { get; set; }
+
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok(Id));
+        }
+        """;
+
+    private static readonly Lazy<Assembly> boundAssembly =
+        new(() => EndpointGeneratorHarness.RunAndLoad(BoundAssemblyName, BoundSource));
+
+    /// <summary>
+    /// Issue #38 (AC1), the shadow overload: the recorded type is <c>TEndpoint</c>, never the generated
+    /// <c>[AsParameters]</c> shadow that rides along as the second type argument.
+    /// </summary>
+    [Fact]
+    public void EndpointType_IsRecordedOnce_ForAPropertyBoundEndpoint_OnEitherPath()
+    {
+        // Non-vacuous: the generated mapping really goes through the two-argument helper.
+        var generatedSource = string.Join("\n", EndpointGeneratorHarness.Run(BoundAssemblyName, BoundSource)
+            .GeneratedTrees.Select(tree => tree.ToString()));
+        Assert.Contains("Map<global::Fixtures.Bound, ", generatedSource, StringComparison.Ordinal);
+
+        var endpointType = boundAssembly.Value.GetType("Fixtures.Bound", throwOnError: true)!;
+        var generated = Assert.Single(GeneratedEndpointHost.MapAndCollectRoutes(boundAssembly.Value, BoundAssemblyName));
+        var manual = MapManually(endpointType);
+
+        foreach (var endpoint in new[] { generated, manual })
+        {
+            var metadata = Assert.Single(endpoint.Metadata.GetOrderedMetadata<EndpointTypeMetadata>());
+            Assert.Same(endpointType, metadata.EndpointType);
+        }
+    }
+
     /// <summary>
     /// The metadata name the generator matches is the real attribute's, and a fixture using the
     /// attribute produces grouped endpoints.

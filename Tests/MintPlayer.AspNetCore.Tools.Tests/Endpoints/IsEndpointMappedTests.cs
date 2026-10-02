@@ -19,7 +19,7 @@ public class IsEndpointMappedTests
     /// <summary>Unsealed, so a non-generic class can close it by derivation (unlike <see cref="Echo{T}"/>).</summary>
     public class EchoBase<T> : IGetEndpoint
     {
-        public static string Path => "/echo-base/" + (typeof(T).FullName!.GetHashCode() & 0x7FFFFFFF);
+        public static string Path => "/echo-base";
 
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok(typeof(T).Name));
     }
@@ -97,9 +97,15 @@ public class IsEndpointMappedTests
     [Fact]
     public void EndpointInADisabledGroup_IsNotMapped()
     {
-        var endpoints = Map(app => app.MapEndpoint<InDisabledGroup>());
+        var endpoints = Map(app =>
+        {
+            app.MapEndpoint<InDisabledGroup>();
+            app.MapEndpoint<Mapped>();
+        });
 
         Assert.False(endpoints.IsEndpointMapped<InDisabledGroup>());
+        Assert.True(endpoints.IsEndpointMapped<Mapped>()); // control: the same Map call did map
+        Assert.Single(endpoints.Endpoints);
     }
 
     /// <summary>
