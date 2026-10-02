@@ -364,7 +364,8 @@ public class ReportsApi : IEndpointGroup
 ```
 
 The condition is per group; an endpoint that needs its own goes in a group of its own. The static
-`Endpoints` descriptor list still lists every declared endpoint, enabled or not.
+`Endpoints` descriptor list still lists every declared endpoint, enabled or not. To ask what is actually
+mapped, see [Is an endpoint mapped?](#is-an-endpoint-mapped).
 
 ## Generic endpoints
 
@@ -576,7 +577,7 @@ public class GetCapabilities : IGetEndpoint
 
         return Task.FromResult(Results.Ok(new
         {
-            passkeys = endpoints.IsEndpointMapped(typeof(PasskeySignIn<>)),
+            passkeys = endpoints.IsEndpointMapped(typeof(MyAuth.ListPasskeys<>)),
             reports = endpoints.IsEndpointMapped<DownloadReport>(),
         }));
     }
@@ -584,7 +585,8 @@ public class GetCapabilities : IGetEndpoint
 ```
 
 - **A closed class** matches by equality.
-- **A generic type definition** matches any mapped closing of it, such as `PasskeySignIn<AppUser>`. That
+- **A generic type definition** matches any mapped closing of it, such as `ListPasskeys<AppUser>` from
+  [Generic endpoints](#generic-endpoints). That
   includes a closing the application made with `[assembly: EndpointTypeArgument]`, and a non-generic class
   that derives from a closing. Base classes count; interfaces never do. So a query for one of the
   library's own generic bases, such as `PostEndpoint<,>`, matches every endpoint derived from it.
@@ -809,7 +811,9 @@ sees no references — is no client and no diagnostic; code using the client the
 
 `app.MapEndpoint<HealthCheck>();` maps one endpoint by reflection, under its group chain and with the
 same name the generated mapping uses — for a closed generic endpoint, with its type arguments
-(`Echo_String`). It maps nothing when a group on the chain is not enabled (`IEndpointGroup.IsEnabled`).
+(`Echo_String`), and with the same `EndpointTypeMetadata`, so
+[`IsEndpointMapped`](#is-an-endpoint-mapped) finds it either way. It maps nothing when a group on the
+chain is not enabled (`IEndpointGroup.IsEnabled`).
 It sees one endpoint at a time, so a duplicate name surfaces on the
 first request, not as MPEP012; it cannot document route or query parameters (see
 [OpenAPI](#openapi)); and it is annotated `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]`. A

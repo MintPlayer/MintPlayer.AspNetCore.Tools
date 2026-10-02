@@ -120,15 +120,56 @@ public class IsEndpointMappedTests
         Assert.False(endpoints.IsEndpointMapped<SignIn>());
     }
 
-    /// <summary>Interfaces are never walked, or a query for <c>IGetEndpoint</c> would match every GET.</summary>
+    public interface IMarker<T>;
+
+    public sealed class Marked : IGetEndpoint, IMarker<string>
+    {
+        public static string Path => "/marked";
+
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    /// <summary>
+    /// Interfaces are never walked, or a query for <c>IGetEndpoint</c> would match every GET. Asked of an
+    /// endpoint that really implements both interfaces, so a walk would answer <see langword="true"/>.
+    /// </summary>
     [Fact]
     public void Interfaces_NeverMatch()
     {
-        var endpoints = Map(app => app.MapEndpoint<Mapped>());
+        var endpoints = Map(app => app.MapEndpoint<Marked>());
 
+        Assert.True(typeof(IGetEndpoint).IsAssignableFrom(typeof(Marked)));
         Assert.False(endpoints.IsEndpointMapped(typeof(IGetEndpoint)));
-        Assert.False(endpoints.IsEndpointMapped(typeof(IGetEndpoint<>)));
+        Assert.False(endpoints.IsEndpointMapped(typeof(IMarker<>)));
+        Assert.False(endpoints.IsEndpointMapped<IMarker<string>>());
+        Assert.True(endpoints.IsEndpointMapped<Marked>());
     }
+
+    /// <summary>The endpoint's own <c>Configure</c> adds a second instance after <c>ForMetadata</c>'s.</summary>
+    public sealed class Relabelled : IGetEndpoint
+    {
+        public static string Path => "/relabelled";
+
+        static void IEndpointBase.Configure(RouteHandlerBuilder builder)
+            => builder.WithMetadata(new EndpointTypeMetadata(typeof(Mapped)));
+
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    /// <summary>Documented on <c>IsEndpointMapped</c>: each endpoint is read with <c>GetMetadata</c>, so the last instance wins.</summary>
+    [Fact]
+    public void SecondInstance_AddedByConfigure_Wins()
+    {
+        var endpoints = Map(app => app.MapEndpoint<Relabelled>());
+
+        Assert.Equal(2, Assert.Single(endpoints.Endpoints).Metadata.GetOrderedMetadata<EndpointTypeMetadata>().Count);
+        Assert.True(endpoints.IsEndpointMapped<Mapped>());
+        Assert.False(endpoints.IsEndpointMapped<Relabelled>());
+    }
+
+    [Fact]
+    public void Metadata_RejectsANullType()
+        => Assert.Throws<ArgumentNullException>(() => new EndpointTypeMetadata(null!));
 
     [Fact]
     public void Arguments_AreValidated()

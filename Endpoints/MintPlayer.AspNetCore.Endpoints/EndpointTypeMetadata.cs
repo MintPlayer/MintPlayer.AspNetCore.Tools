@@ -33,7 +33,4 @@ public sealed class EndpointTypeMetadata
 
     /// <summary>The closed endpoint class this endpoint was mapped from.</summary>
     public Type EndpointType { get; }
-
-    /// <inheritdoc/>
-    public override string ToString() => $"EndpointType: {EndpointType}";
 }
