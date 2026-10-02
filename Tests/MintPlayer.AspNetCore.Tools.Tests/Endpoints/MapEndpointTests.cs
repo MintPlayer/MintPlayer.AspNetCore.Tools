@@ -237,6 +237,19 @@ public class MapEndpointTests
         Assert.Contains(transferred, attribute => attribute is System.ComponentModel.DescriptionAttribute);
     }
 
+    /// <summary>
+    /// Issue #38 (AC4): the selection also records the endpoint class, exactly once — recorded here
+    /// rather than at each mapping site so already-compiled generated mappings get it too (PRD D1).
+    /// </summary>
+    [Fact]
+    public void ForMetadata_RecordsTheEndpointType_Once()
+    {
+        var transferred = EndpointAttributes.ForMetadata(typeof(HealthEndpoint));
+
+        var metadata = Assert.Single(transferred.OfType<EndpointTypeMetadata>());
+        Assert.Equal(typeof(HealthEndpoint), metadata.EndpointType);
+    }
+
     [Fact]
     public void MapEndpoint_InvokesTheStaticConfigureHook()
     {

@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using MintPlayer.AspNetCore.Endpoints;
 using MintPlayer.AspNetCore.Endpoints.TestLibrary;
 using Xunit;
 
@@ -127,5 +128,32 @@ public class TestLibraryEndToEndTests : IClassFixture<WebApplicationFactory<Prog
         using var enabled = factory.WithWebHostBuilder(builder => builder.UseSetting(LibPasskeysGroup.EnabledKey, "true"));
 
         Assert.Equal(HttpStatusCode.OK, (await enabled.CreateClient().GetAsync("/lib/auth/passkeys/5")).StatusCode);
+    }
+
+    /// <summary>
+    /// Issue #38 (AC3): an open library endpoint the application closed is found by its generic
+    /// definition, through the container's data source — the way a capabilities endpoint asks.
+    /// </summary>
+    [Fact]
+    public void ClosedLibraryEndpoint_IsReportedAsMapped_ByItsOpenDefinition()
+    {
+        using var enabled = factory.WithWebHostBuilder(builder => builder.UseSetting(LibPasskeysGroup.EnabledKey, "true"));
+        enabled.CreateClient();
+        var endpoints = enabled.Services.GetRequiredService<EndpointDataSource>();
+
+        Assert.True(endpoints.IsEndpointMapped(typeof(Passkeys<>)));
+        Assert.True(endpoints.IsEndpointMapped(typeof(WhoAmI<>)));
+    }
+
+    /// <summary>Issue #38 (AC3, R4): a disabled group's endpoint is not mapped; its sibling still is.</summary>
+    [Fact]
+    public void DisabledGroup_IsReportedAsNotMapped()
+    {
+        using var disabled = factory.WithWebHostBuilder(builder => builder.UseSetting(LibPasskeysGroup.EnabledKey, "false"));
+        disabled.CreateClient();
+        var endpoints = disabled.Services.GetRequiredService<EndpointDataSource>();
+
+        Assert.False(endpoints.IsEndpointMapped(typeof(Passkeys<>)));
+        Assert.True(endpoints.IsEndpointMapped(typeof(WhoAmI<>)));
     }
 }
