@@ -19,7 +19,7 @@ Companion to `PRD-EndpointServiceAwareHooks.md` (Draft 2; all decisions settled)
 
 Each spike is a throwaway in the scratchpad or a scratch test. Record the result here as a blockquote.
 
-- [ ] **S1: `GetPath` dispatch and detection.**
+- [x] **S1: `GetPath` dispatch and detection.**
   - Confirm that `static virtual string? GetPath(IServiceProvider) => null` combined with
     `T.GetPath(sp) ?? T.Path` compiles and dispatches on net10.0 and net11.0, in each of these cases:
     - an implicit override;
@@ -31,7 +31,7 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
   - Prototype the D5 detection, and confirm the semantic fallback catches the last two cases.
   - Check that `EndpointGeneratorIncrementalTests` and the timing tests show no regression for classes
     that override nothing.
-- [ ] **S2: MPEP035 detection and break behaviour.**
+- [x] **S2: MPEP035 detection and break behaviour.**
   - After the signature change, check what each old form does:
     - an implicit `public static void Configure(RouteGroupBuilder)`: expected to compile silently, which
       is what MPEP035 must catch;
@@ -41,11 +41,111 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
   - Decide whether MPEP035 also walks base classes, using the same trigger as D5.
   - Confirm the code-fix project can offer "add `IServiceProvider services` parameter". This is an
     optional improvement, worth doing if it is cheap.
-- [ ] **S3: Open-generic `GetPath`.**
+- [x] **S3: Open-generic `GetPath`.**
   - Add `HasPathOverride` to the open-endpoint record (`Producer.cs:568`, `OpenEndpointRecords.cs:129`,
     `EndpointClosing.cs:109,121`).
   - Confirm the closing assembly omits the typed link and contract, reports MPEP034 and maps on the
     resolved path.
+
+### Spike results (2026-10-07; all three done; scratch projects are in the session scratchpad)
+
+> **S1: done.** `static virtual string? GetPath(IServiceProvider) => null` combined with
+> `T.GetPath(sp) ?? T.Path` builds with no warnings on net10.0 and net11.0, and dispatches correctly for
+> every case tested:
+> - implicit, explicit, and non-nullable `string` overrides;
+> - an override on a base class: an implicit one, an explicit one, and a base class that doesn't itself
+>   implement the interface but has a `public static GetPath`;
+> - an intermediate interface with an explicit default;
+> - an override that returns null (falls back to `Path`).
+>
+> An `internal static GetPath` does **not** implement the member, and the compiler gives no warning.
+>
+> Detection, refined from D5:
+> 1. **Syntactic:** a `GetPath` in any partial declaration of the class counts if it is either
+>    `public static` or an explicit `IEndpointBase.GetPath`. Requiring one of these excludes the
+>    `internal static` false positive. Do not filter on the return type.
+> 2. **Trigger for the semantic check:** the base type is not `object`, **or** the class implements a
+>    non-library interface that itself derives from `IEndpointBase`. Use an exact-namespace match via
+>    `SymbolNames.IsNamespace(..., "MintPlayer.AspNetCore.Endpoints")`, as the generator does today.
+> 3. **Semantic check:** `impl = FindImplementationForInterfaceMember(IEndpointBase.GetPath)`.
+>    - The endpoint overrides when `impl.ContainingType` is not `IEndpointBase` (the default member
+>      itself, `IsVirtual=true`).
+>    - `null` means a diamond (CS8705). The user already has an error, so treat it as overriding.
+>
+> Roslyn version: 5.9.0, the same as the generator.
+
+> **S2: done.**
+> - An implicit one-argument `public static Configure`, on the type or on a base class, compiles silently
+>   and is never called. An explicit one fails with CS0539.
+> - Adding `IServiceProvider services` is the whole fix.
+>
+> MPEP035 implementation:
+> - **Detection** goes in `Discover` (`EndpointGenerator.cs:158-172`), after an endpoint or group has been
+>   identified. It walks `symbol`, then each `BaseType` that has `DeclaringSyntaxReferences`. Abstract
+>   bases are never discovered on their own, so the walk is required; bases from metadata are skipped.
+>   It matches a static method named `Configure` with exactly one parameter whose rightmost simple type
+>   name is `RouteGroupBuilder` (for a group) or `RouteHandlerBuilder` (for an endpoint).
+> - **Model:**
+>   - A new `[GenerateEquality] LegacyConfigureHook(TypeName, ParameterType, LocationKey)`.
+>   - `DiscoveredType.LegacyHooks` (`Models.cs:344-355`).
+>   - A separate `SelectMany(...).Collect()` branch with a new `TrackingNames.LegacyConfigureHooks`.
+>   - A new `EndpointModel` constructor parameter, emptied in `WithoutLocations()`.
+> - **Reporting:** in `EndpointDiagnosticReporter.Collect`, add a
+>   `foreach (var hook in model.LegacyHooks.Distinct())` after the group loop (`:124-128`).
+>   `Distinct` avoids reporting a shared base twice.
+> - **Descriptor:** `LegacyConfigureHookIgnored`, Error.
+> - **Code fix:** cheap. Model `AddServiceProviderParameterCodeFixProvider` on
+>   `MakePartialCodeFixProvider.cs`. It appends `global::System.IServiceProvider services` with the
+>   `Simplifier` annotation and supports `BatchFixer`. Copy the tests from `MakePartialCodeFixTests.cs`.
+>   **Do it.**
+>
+> Migration list:
+> - Declarations:
+>   - `Abstractions/IEndpointGroup.cs:28`, `IEndpointBase.cs:36`
+>   - `TestLibrary/LibraryEndpoints.cs:15`
+>   - `TestApp/Endpoints/ProductsApi.cs:11`, `UsersApi.cs:11`
+>   - README `:110`, `:550`
+>   - `Generator.Tests/Infrastructure/FixtureSources.cs:50`
+>   - `Tools.Tests/Endpoints/MapEndpointTests.cs:55,76,299`, `IsEndpointMappedTests.cs:159`
+> - Call sites:
+>   - `EndpointRouteBuilderExtensions.cs:123,292`
+>   - `EndpointGenerator.Producer.cs:414,484`
+>   - `Tools.Tests/Endpoints/HttpMethodInterfaceTests.cs:311`
+
+> **S3: done.**
+> - **The open-endpoint record** is `OpenEndpointAttribute` (`Abstractions/OpenEndpointAttribute.cs:18-34`,
+>   currently Version 1). Add `bool PathConfigurable { get; set; }`:
+>   - emit `PathConfigurable = true` only when the flag is set (next to `Producer.cs:570`);
+>   - read it with a new `case "PathConfigurable"` in `OpenEndpointRecords.cs:117-138`;
+>   - add it to `OpenEndpointRecord`.
+>
+>   Do **not** bump `Version`: an older reader ignoring an unknown key is the right way to degrade.
+> - **Carrying the flag to closed endpoints:**
+>   - Add it to `OpenCandidate` (`EndpointClosing.cs:57-65`).
+>   - Fill it from `declared.HasPathOverride` at `:109` and from `record.PathConfigurable` at `:121`.
+>   - Pass it into the `EndpointInfo` constructor at `:409-428`.
+>   - Add it to `Models.cs` (constructor `31-60`, equality list `~228`).
+> - **Descriptor:** `EndpointDescriptor` (`Abstractions/EndpointDescriptor.cs:31`) gains a fifth
+>   positional parameter, `bool IsPathConfigurable`, which must also go into its hand-written
+>   `Equals`/`GetHashCode` (`38-58`). `Describe<>` (`Producer.cs:447-450`) takes the flag, emitted per
+>   endpoint as `true`/`false` (`:131-132`), and keeps the literal `Path`.
+> - **Exclusions:**
+>   - `TypedLinks.cs:128-129` and `EndpointContracts.cs:93-94` skip endpoints with the flag
+>     (`|| endpoint.HasPathOverride`).
+>   - `EndpointMappingPlan.cs:291` (`ShadowParametersOf`) passes a null route for them.
+>   - `ComposedRoutes` stays as it is, because MPEP007, 009 and 010 still use it.
+> - **Diagnostics:**
+>   - `EndpointDiagnosticReporter.cs:194-197`: report MPEP034 in place of MPEP011 when the flag is set.
+>   - Closed endpoints never reach that loop (it iterates only `DeclaredEndpoints`). Add a loop over
+>     `MappableEndpoints.Where(e => e.Closed is not null && e.HasPathOverride)` that reports MPEP034 at
+>     the closing attribute's location.
+>   - MPEP007 may report a false positive when two overriding endpoints share a default `Path`. That is
+>     accepted under D4 (the default paths really do collide), and gets a README note.
+> - **Tests:**
+>   - Defining side: use `OpenGenericEndpointTests.cs:61,94` as the template.
+>   - Closing side: use `EndpointTypeArgumentTests.cs:149` (`Library()`/`App()` harness),
+>     the `[Theory] crossAssembly` tests at `616-693`, and `:484`.
+>   - Runtime resolved path: `TestLibraryEndToEndTests`.
 
 ## M2: #36, `Configure(…, IServiceProvider)` replaces the old hook (R1)
 
