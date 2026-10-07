@@ -703,6 +703,75 @@ public class EndpointTypeArgumentTests
         Assert.True(outcome.Compile.All(d => d.Severity != DiagnosticSeverity.Error), outcome.Describe(outcome.Compile.Where(d => d.Severity == DiagnosticSeverity.Error)));
     }
 
+    // ---------- #37: GetPath on an open endpoint ----------
+
+    private const string ConfiguredPathLibrary = Usings + """
+        namespace Lib;
+
+        public class LibUser { }
+
+        public class AuthGroup : IEndpointGroup { public static string Prefix => "/lib/auth"; }
+
+        [MemberOf<AuthGroup>]
+        public partial class Hooks<TUser> : IGetEndpoint<string> where TUser : LibUser, new()
+        {
+            public static string Path => "/hooks/{id}";
+            public static string? GetPath(IServiceProvider services) => null;
+            [RouteParam] public int Id { get; set; }
+            public override Task<IResult> HandleAsync(CancellationToken ct) => Task.FromResult(Results.Ok(typeof(TUser).Name + Id));
+        }
+
+        [MemberOf<AuthGroup>]
+        public class WhoAmI<TUser> : IGetEndpoint where TUser : LibUser, new()
+        {
+            public static string Path => "/whoami";
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        }
+        """;
+
+    /// <summary>
+    /// AC6 (#37), closing side: an open endpoint that overrides <c>GetPath</c>, closed by the
+    /// application — from the same compilation, or through the library's record — is mapped through the
+    /// same <c>GetPath ?? Path</c> helper, reports MPEP034 at the closing attribute, and gets no typed
+    /// link, no contract and no shadowed default token. Its sibling closing is unaffected.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ClosedEndpointWithGetPath_IsMappedWithoutLinkOrContract_AndReportsMPEP034AtTheClosing(bool crossAssembly)
+    {
+        var app = Usings + """
+            [assembly: EndpointTypeArgument<Lib.LibUser, App.AppUser>]
+            namespace App;
+            public class AppUser : Lib.LibUser { }
+            """;
+        Outcome outcome;
+        if (crossAssembly)
+        {
+            var (_, lib) = Library(ConfiguredPathLibrary);
+            outcome = App(app, lib);
+        }
+        else
+        {
+            outcome = Run(EndpointGeneratorHarness.CreateCompilation("App", [ConfiguredPathLibrary, app]));
+        }
+
+        AssertNoErrors(outcome);
+        var mapping = outcome.File("EndpointMapping.g.cs");
+        Assert.Contains("Map<global::Lib.Hooks<global::App.AppUser>", mapping);
+        Assert.Contains("var configuredPath = TEndpoint.GetPath(routes.ServiceProvider);", mapping);
+        Assert.Contains("Describe<global::Lib.Hooks<global::App.AppUser>>(\"Hooks_AppUser\", Prefix<global::Lib.AuthGroup>(), true)", mapping);
+        Assert.Contains("Describe<global::Lib.WhoAmI<global::App.AppUser>>(\"WhoAmI_AppUser\", Prefix<global::Lib.AuthGroup>())", mapping);
+
+        Assert.DoesNotContain("Hooks_AppUser", outcome.File("EndpointRoutes.g.cs"));
+        Assert.Contains("WhoAmI_AppUser", outcome.File("EndpointRoutes.g.cs"));
+        Assert.DoesNotContain("Hooks_AppUser", outcome.File("EndpointContracts.g.cs"));
+
+        var closing = Assert.Single(outcome.Ids("MPEP034"), d => d.GetMessage().StartsWith("'Hooks_AppUser'", StringComparison.Ordinal));
+        Assert.Equal(DiagnosticSeverity.Info, closing.Severity);
+        Assert.StartsWith("EndpointTypeArgument", SpanText(closing));
+    }
+
     // ---------- D5: IsEnabled ----------
 
     [Fact]

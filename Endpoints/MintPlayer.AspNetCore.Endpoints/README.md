@@ -393,6 +393,68 @@ public class ConnectApi : IEndpointGroup
 }
 ```
 
+## A route from configuration: `GetPath`
+
+`Path` is static and sees nothing. When the route has to come from options or configuration — a
+WebSocket a library exposes at a path its host chooses, say — override
+`IEndpointBase.GetPath(IServiceProvider)`. It is evaluated once, when the routes are mapped, and the
+endpoint is mapped at `GetPath(services) ?? Path`, in the generated mapping and in `MapEndpoint<T>()`
+alike. `Path` stays required: it is the default, and the route that ships when nothing is configured.
+
+```csharp
+using System.Net.WebSockets;
+using Microsoft.Extensions.Options;
+using MintPlayer.AspNetCore.Endpoints;
+
+public class TunnelOptions
+{
+    // Defaults to the endpoint's own Path, so the route is written once.
+    public string Path { get; set; } = DevTunnel.DefaultPath;
+}
+
+public class DevTunnel : IGetEndpoint
+{
+    public const string DefaultPath = "/dev/tunnel";
+
+    public static string Path => DefaultPath;
+
+    public static string? GetPath(IServiceProvider services)
+        => services.GetRequiredService<IOptions<TunnelOptions>>().Value.Path;
+
+    public async Task<IResult> HandleAsync(HttpContext httpContext)
+    {
+        if (!httpContext.WebSockets.IsWebSocketRequest)
+            return Results.BadRequest();
+
+        using var socket = await httpContext.WebSockets.AcceptWebSocketAsync();
+        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "bye", httpContext.RequestAborted);
+        return Results.Empty;
+    }
+}
+```
+
+- **Null means `Path`**, whether `GetPath` is not overridden or an override returns null. It never means
+  "not mapped" — to switch an endpoint off, use `IsEnabled`.
+- **Only the root provider is available**, as for every hook: no request exists yet, so read options and
+  configuration, never a scoped service.
+- **Endpoints are fixed at startup.** `GetPath` (like `IsEnabled`) is evaluated once, when the routes are
+  mapped; a configuration change at run time does not move the route, it takes a restart.
+- **A configured path must keep the route parameters of `Path`**, by name: bound properties and the
+  build-time route checks (MPEP007–MPEP010) use `Path`. Literal segments, constraints and the
+  parameter's case may differ (`/hooks/{id}` → `/custom/{ID:int}` is fine). Mapping enforces this at
+  startup: a configured `/x/{key}` against a default `/hooks/{id}` throws an `InvalidOperationException`
+  naming the endpoint and both patterns.
+- **What is left out.** The generator cannot know the configured route, so the endpoint gets no typed
+  link and no client contract, its OpenAPI route parameters come only from its bound properties, and
+  its entry in the static `Endpoints` list reports the default `Path` with `IsPathConfigurable` set.
+  MPEP034 (Info) says so at build time, in place of MPEP011. Two such endpoints sharing a default `Path`
+  still get MPEP007, because the default routes really do collide.
+
+The override is detected however it is written: implicitly, explicitly
+(`static string? IEndpointBase.GetPath(…)`), on a base class, or as a default on an interface of your own
+that extends an endpoint interface. A `GetPath` on a derived class that does not list the endpoint
+interface again is not called — the inherited implementation stays in force — and is reported as MPEP032.
+
 ## Generic endpoints
 
 **In short.** A library can declare an endpoint that is generic over a type only the application
@@ -739,11 +801,12 @@ reproduces routing's own substitution and `UrlEncoder.Default`, matching `LinkGe
 with default options. It cannot see route constraints, `LowercaseUrls`, `LowercaseQueryStrings`,
 `AppendTrailingSlash`, parameter transformers or a replaced `UrlEncoder`; if you use any of those, call
 `Path(httpContext)` or `Path(linkGenerator)`, which ask the framework and throw where it would return
-`null`. An endpoint whose route is not a compile-time constant, or whose name is a duplicate, gets no
-link.
+`null`. An endpoint whose route is not a compile-time constant, whose route is chosen at map time
+(`GetPath`), or whose name is a duplicate, gets no link.
 
 The descriptors are available too: `MyShopApiEndpointsExtensions.Endpoints` lists an
-`EndpointDescriptor(Name, Path, Methods, HandlerType)` per endpoint, with the fully composed `Path`.
+`EndpointDescriptor(Name, Path, Methods, HandlerType, IsPathConfigurable)` per endpoint, with the fully composed `Path`
+(the default one, flagged by `IsPathConfigurable`, for an endpoint that overrides `GetPath`).
 
 ## OpenAPI
 
@@ -880,7 +943,7 @@ types and walks base classes, and never reflects over members.
 | MPEP008 | Warning | A `{token}` in a typed endpoint's `Path` is bound to no property |
 | MPEP009 | Error | A `[RouteParam]` names a parameter the composed route does not have (every request would be a 400) |
 | MPEP010 | Warning | `Path` repeats its group's prefix |
-| MPEP011 | Info | `Path` is not a compile-time constant, so the route checks are skipped |
+| MPEP011 | Info | `Path` is not a compile-time constant, so the route checks are skipped (MPEP034 instead when the endpoint overrides `GetPath`) |
 | MPEP012 | Error | Two endpoints have the same endpoint name; the later one gets no name and no link |
 | MPEP013 | Error | A bound property's type is not `string`, an enum or `IParsable<T>` |
 | MPEP014 | Error | An endpoint with bound properties must be `partial` (code fix) |
@@ -901,8 +964,9 @@ types and walks base classes, and never reflects over members.
 | MPEP029 | Warning | *(on the attribute)* An endpoint cannot be closed because it, a group on its chain or a type argument cannot be named by the application (a library's must be `public`) |
 | MPEP030 | Warning | *(on the attribute)* An `EndpointTypeArgument` closes no endpoint |
 | MPEP031 | Warning | *(on the attribute)* An endpoint has only some of its type parameters bound, so it is not closed |
-| MPEP032 | Warning | A `new static Path` or `new static Methods` is ignored: the endpoint interface is implemented by a base class (or, for `Methods`, defaulted by the verb interface), whose value the runtime uses (and the links, contract and MPEP007 say); once per hidden member |
+| MPEP032 | Warning | A `new static Path`, `Methods` or `GetPath` is ignored: the endpoint interface is implemented by a base class (or, for `Methods`, defaulted by the verb interface; for `GetPath`, by the default that maps at `Path`), whose value the runtime uses (and the links, contract and MPEP007 say); once per hidden member |
 | MPEP033 | Warning | *(on the attribute)* A constraint key cannot bind a type parameter whose constraint uses another type parameter (`where TUser : IUser<TKey>`); close the endpoint with the explicit form |
+| MPEP034 | Info | An endpoint chooses its route at map time ([`GetPath`](#a-route-from-configuration-getpath)): its `Path` is only the default, so it gets no typed link and no client contract, and the route checks apply to the default only. On a closed open-generic endpoint, reported on the attribute |
 | MPEP035 | Error | A group or endpoint (or a base class of it) declares the pre-11.4 one-argument `Configure(RouteGroupBuilder)` / `Configure(RouteHandlerBuilder)`, which is no longer called; add `IServiceProvider services` as the second parameter (code fix) |
 
 The route checks (MPEP007–MPEP010) run only where the route is a compile-time constant; anything else

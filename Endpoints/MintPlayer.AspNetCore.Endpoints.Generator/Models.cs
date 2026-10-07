@@ -44,13 +44,17 @@ internal sealed partial class EndpointInfo
         ClosedGenericInfo? closed = null,
         ImmutableArray<GroupInfo> referencedGroups = default,
         bool hasIgnoredNewPath = false,
-        bool hasIgnoredNewMethods = false)
+        bool hasIgnoredNewMethods = false,
+        bool hasPathOverride = false,
+        bool hasIgnoredNewGetPath = false)
     {
         Open = open;
         Closed = closed;
         ReferencedGroups = referencedGroups.IsDefault ? ImmutableArray<GroupInfo>.Empty : referencedGroups;
         HasIgnoredNewPath = hasIgnoredNewPath;
         HasIgnoredNewMethods = hasIgnoredNewMethods;
+        HasPathOverride = hasPathOverride;
+        HasIgnoredNewGetPath = hasIgnoredNewGetPath;
         InaccessibleReason = inaccessibleReason;
         IsInFileLocalType = isInFileLocalType;
         ValidationGap = validationGap;
@@ -202,6 +206,20 @@ internal sealed partial class EndpointInfo
     /// </summary>
     public bool HasIgnoredNewMethods { get; }
 
+    /// <summary>
+    /// True when the endpoint overrides <c>IEndpointBase.GetPath</c> — itself, explicitly, through a
+    /// base class or through an intermediate interface (PRD R2.4, <see cref="PathOverride"/>). Its
+    /// <see cref="Route"/> is then only the default: route checks still run on it, but typed links,
+    /// client contracts and OpenAPI token shadowing leave it out, and its descriptor is flagged.
+    /// </summary>
+    public bool HasPathOverride { get; }
+
+    /// <summary>
+    /// The same as <see cref="HasIgnoredNewPath"/>, for a static <c>GetPath</c> on the class (or a
+    /// base below the interface implementation) that the runtime does not call (MPEP032).
+    /// </summary>
+    public bool HasIgnoredNewGetPath { get; }
+
     /// <summary>The name this endpoint is recorded under in the descriptor list.</summary>
     [EqualityIgnore]
     public string EffectiveDescriptorName => DescriptorName ?? ClassName;
@@ -235,7 +253,9 @@ internal sealed partial class EndpointInfo
             Closed,
             ReferencedGroups.Select(group => group.WithoutLocation()).ToImmutableArray(),
             HasIgnoredNewPath,
-            HasIgnoredNewMethods);
+            HasIgnoredNewMethods,
+            HasPathOverride,
+            HasIgnoredNewGetPath);
     }
 
     public string? GetBaseClassName()

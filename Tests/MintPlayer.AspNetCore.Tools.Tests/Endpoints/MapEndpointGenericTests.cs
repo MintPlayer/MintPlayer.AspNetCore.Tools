@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using MintPlayer.AspNetCore.Endpoints;
 using Xunit;
@@ -114,6 +115,100 @@ public class MapEndpointGenericTests
             .Order(StringComparer.Ordinal)
             .ToArray();
         Assert.Equal(["Echo_Int32", "Echo_String"], names);
+    }
+
+    /// <summary>An endpoint whose route comes from configuration (#37); without the key it maps at <c>Path</c>.</summary>
+    public sealed class ConfiguredPath : IGetEndpoint
+    {
+        public const string Key = "Tests:ConfiguredPath";
+
+        public static string Path => "/hooks/{id}";
+
+        public static string? GetPath(IServiceProvider services) => services.GetRequiredService<IConfiguration>()[Key];
+
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok(httpContext.Request.RouteValues["id"]));
+    }
+
+    /// <summary>An override that returns null: null always means <c>Path</c>, never "unmapped".</summary>
+    public sealed class NullPath : IGetEndpoint
+    {
+        public static string Path => "/null-path";
+
+        static string? IEndpointBase.GetPath(IServiceProvider services) => null;
+
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    private static WebApplication AppWith(string? configuredPath)
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        if (configuredPath is not null)
+            builder.Configuration[ConfiguredPath.Key] = configuredPath;
+        return builder.Build();
+    }
+
+    private static string? RouteOf(IEndpointRouteBuilder app)
+        => Assert.Single(app.DataSources.SelectMany(source => source.Endpoints).OfType<RouteEndpoint>()).RoutePattern.RawText;
+
+    /// <summary>
+    /// AC4 (#37) on the manual path: the configured route answers and the literal <c>Path</c> does not.
+    /// </summary>
+    [Fact]
+    public async Task GetPathFromConfiguration_AnswersOnTheConfiguredRoute_NotOnPath()
+    {
+        await using var app = AppWith("/custom/{id}");
+        app.MapEndpoint<ConfiguredPath>();
+        await app.StartAsync();
+        var client = app.GetTestClient();
+
+        Assert.Equal("\"5\"", await client.GetStringAsync("/custom/5"));
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/hooks/5")).StatusCode);
+    }
+
+    /// <summary>AC4: unconfigured, an override returning null, and no override at all all map at <c>Path</c>.</summary>
+    [Fact]
+    public void NullFromGetPath_AndNoOverride_MapAtPath()
+    {
+        var unconfigured = AppWith(null);
+        unconfigured.MapEndpoint<ConfiguredPath>();
+        Assert.Equal("/hooks/{id}", RouteOf(unconfigured));
+
+        var nullPath = AppWith(null);
+        nullPath.MapEndpoint<NullPath>();
+        Assert.Equal("/null-path", RouteOf(nullPath));
+
+        var plain = AppWith(null);
+        plain.MapEndpoint<Echo<string>>();
+        Assert.Equal(Echo<string>.Path, RouteOf(plain));
+    }
+
+    /// <summary>
+    /// AC10 (R2.10) on the manual path: a configured route whose parameter names differ from
+    /// <c>Path</c>'s fails at map time, naming the endpoint and both patterns, and maps nothing.
+    /// </summary>
+    [Fact]
+    public void GetPathWithOtherParameters_Throws_AndMapsNothing()
+    {
+        var app = AppWith("/x/{key}");
+
+        var failure = Assert.Throws<InvalidOperationException>(() => app.MapEndpoint<ConfiguredPath>());
+
+        Assert.Contains(typeof(ConfiguredPath).FullName!, failure.Message);
+        Assert.Contains("/x/{key}", failure.Message);
+        Assert.Contains("/hooks/{id}", failure.Message);
+        Assert.Empty(((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints));
+    }
+
+    /// <summary>AC10: literal segments, a constraint and the parameter's case may differ.</summary>
+    [Fact]
+    public void GetPathWithOtherLiteralsConstraintsOrCase_Maps()
+    {
+        var app = AppWith("/custom/{ID:int}");
+
+        app.MapEndpoint<ConfiguredPath>();
+
+        Assert.Equal("/custom/{ID:int}", RouteOf(app));
     }
 
     /// <summary>PRD D5: <c>IsEnabled</c> is honoured on the manual path too.</summary>

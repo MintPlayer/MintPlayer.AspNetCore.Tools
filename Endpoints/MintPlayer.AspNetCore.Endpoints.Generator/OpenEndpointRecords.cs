@@ -7,18 +7,22 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator;
 /// <summary>One <c>[assembly: OpenEndpoint(…)]</c> record, as strings (PRD D3a).</summary>
 internal sealed class OpenEndpointRecord
 {
-    public OpenEndpointRecord(string metadataName, string? path, string? methods, bool hasBinder)
+    public OpenEndpointRecord(string metadataName, string? path, string? methods, bool hasBinder, bool pathConfigurable = false)
     {
         MetadataName = metadataName;
         Path = path;
         Methods = methods;
         HasBinder = hasBinder;
+        PathConfigurable = pathConfigurable;
     }
 
     public string MetadataName { get; }
     public string? Path { get; }
     public string? Methods { get; }
     public bool HasBinder { get; }
+
+    /// <summary>The endpoint overrides <c>GetPath</c>, so <see cref="Path"/> is only its default (11.4, PRD R2.7).</summary>
+    public bool PathConfigurable { get; }
 }
 
 /// <summary>What one referenced assembly records about its open endpoints and their groups.</summary>
@@ -121,6 +125,7 @@ internal static class OpenEndpointRecords
 
             string? path = null, methods = null, prefix = null;
             var hasBinder = false;
+            var pathConfigurable = false;
             var version = 0;
             foreach (var named in attribute.NamedArguments)
             {
@@ -129,6 +134,7 @@ internal static class OpenEndpointRecords
                     case "Path": path = named.Value.Value as string; break;
                     case "Methods": methods = named.Value.Value as string; break;
                     case "HasBinder": hasBinder = named.Value.Value is true; break;
+                    case "PathConfigurable": pathConfigurable = named.Value.Value is true; break;
                     case "Prefix": prefix = named.Value.Value as string; break;
                     case "Version": version = named.Value.Value is int value ? value : 0; break;
                 }
@@ -138,7 +144,7 @@ internal static class OpenEndpointRecords
             if (version > Version) continue;
 
             if (isEndpoint)
-                (endpoints ??= new List<OpenEndpointRecord>()).Add(new OpenEndpointRecord(GenericTypes.MetadataNameOf(type), path, methods, hasBinder));
+                (endpoints ??= new List<OpenEndpointRecord>()).Add(new OpenEndpointRecord(GenericTypes.MetadataNameOf(type), path, methods, hasBinder, pathConfigurable));
             else
                 (groups ??= ImmutableDictionary.CreateBuilder<string, string?>(StringComparer.Ordinal))[type.OriginalDefinition.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)] = prefix;
         }

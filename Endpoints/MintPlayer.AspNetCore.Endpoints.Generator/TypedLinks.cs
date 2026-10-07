@@ -126,7 +126,9 @@ internal static class TypedLinks
         foreach (var endpoint in plan.MappableEndpoints)
         {
             var template = plan.ComposedRoutes[endpoint.FullyQualifiedName];
-            if (template is null || !plan.IsNamed(endpoint)) continue;
+            // An endpoint that chooses its route at map time (GetPath) has no route a link could be built
+            // from: its composed Path is only the default (PRD R2.5).
+            if (template is null || !plan.IsNamed(endpoint) || endpoint.HasPathOverride) continue;
 
             var methodName = EscapeIdentifier(endpoint.EffectiveDescriptorName);
             if (methodName is null) continue;

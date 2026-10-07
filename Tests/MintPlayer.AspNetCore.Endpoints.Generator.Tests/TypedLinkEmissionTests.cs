@@ -388,6 +388,40 @@ public class TypedLinkEmissionTests
     // ---- What is left out ------------------------------------------------------------------------
 
     /// <summary>
+    /// AC5 (#37): an endpoint that overrides <c>GetPath</c> gets no link — its composed <c>Path</c> is
+    /// only the default — but is still mapped and named, with its descriptor flagged. A sibling in the
+    /// same group keeps its link.
+    /// </summary>
+    [Fact]
+    public void GetPathOverride_IsSkipped_ButStillMappedAndNamed()
+    {
+        var source = Fixture("""
+            public class Api : IEndpointGroup { public static string Prefix => "/api"; }
+
+            [MemberOf<Api>]
+            public class Configured : IGetEndpoint
+            {
+                public static string Path => "/configured";
+                public static string? GetPath(IServiceProvider services) => null;
+                public Task<IResult> HandleAsync(HttpContext c) => Task.FromResult(Results.Ok());
+            }
+
+            [MemberOf<Api>]
+            public class Constant : IGetEndpoint { public static string Path => "/constant"; public Task<IResult> HandleAsync(HttpContext c) => Task.FromResult(Results.Ok()); }
+            """);
+
+        AssertCompilesClean(source);
+        var routes = RoutesClass(EndpointGeneratorHarness.RunAndLoad("Fixtures.Links.GetPath", source), "Api");
+
+        Assert.Equal(["Constant"], routes.GetMethods(BindingFlags.Public | BindingFlags.Static).Select(m => m.Name).ToArray());
+
+        var mapping = MappingText(source);
+        Assert.Contains("WithName(b, \"Configured\")", mapping);
+        Assert.Contains("Describe<global::Fixtures.Configured>(\"Configured\", Prefix<global::Fixtures.Api>(), true)", mapping);
+        Assert.Contains("Describe<global::Fixtures.Constant>(\"Constant\", Prefix<global::Fixtures.Api>())", mapping);
+    }
+
+    /// <summary>
     /// An endpoint whose composed route cannot be recovered — a computed <c>Path</c>, or a group
     /// with a computed <c>Prefix</c> — gets no link, and MPEP011 still explains why.
     /// </summary>

@@ -191,7 +191,7 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
    - MPEP035 in the diagnostics table.
 7. Verify with a targeted build of the Endpoints solution folder and the test projects. Do not run tests.
 
-## M3: #37, `GetPath(IServiceProvider)` (R2)
+## M3: #37, `GetPath(IServiceProvider)` (R2) — [x] done
 
 1. Abstractions: add `GetPath`. Its doc comment covers:
    - null means `Path`, and never "unmapped";
@@ -316,3 +316,18 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
     with Fix All. In-repo hooks, the README and the test fixtures migrated. Tests: AC1 (text, generated
     host, `MapEndpoint`), AC2 (`LibAuthGroup` audit tag), AC3 (`ConfigureSignatureDiagnosticTests`,
     `AddServiceProviderParameterCodeFixTests`). Builds only, no test run.
+  - **M3 done.** `GetPath` (null sentinel), `EndpointPathValidator` (R2.10) called from both `Map` helpers
+    and `MapEndpoint<T>` before anything is mapped, `PathOverride` detection as refined in S1 (syntax
+    only when there is no base class and no user endpoint interface, else the interface map), the
+    exclusions, MPEP034 (declared loop + closed-endpoint loop at the attribute), `PathConfigurable` on
+    the open record (no `Version` bump), `IsPathConfigurable` on the descriptor. TestLibrary gained
+    `ConfiguredHook<TUser>` (`TestLibrary:HookPath`); the TestApp OpenAPI snapshot gained
+    `GET /lib/auth/hooks/{id}` (`ConfiguredHook_AppUser`), and the two endpoint-name lists in
+    `TestAppEndToEndTests`/`TestAppOpenApiDocumentTests` were extended. Small choices, recorded here:
+    - `EndpointDescriptor.IsPathConfigurable` defaults to `false`, so existing four-argument
+      constructions still compile; the generated `Describe<>` takes it as an optional parameter and is
+      emitted with `, true` only for a flagged endpoint, so every other descriptor line is unchanged.
+    - MPEP032 for `GetPath` fires whenever the nearest static `GetPath` on the class chain is not the
+      interface implementation, with or without the `new` keyword (a derived `GetPath` over a base that
+      implements the interface without one needs no `new` and is just as ignored). This matches how
+      MPEP032 already treats `Methods` over a verb interface's default.

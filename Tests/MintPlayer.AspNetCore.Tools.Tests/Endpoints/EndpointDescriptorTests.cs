@@ -44,7 +44,23 @@ public class EndpointDescriptorTests
         Assert.NotEqual(descriptor, new EndpointDescriptor("Other", "/api/users", ["GET"], typeof(Handler)));
         Assert.NotEqual(descriptor, new EndpointDescriptor("Name", "/api/others", ["GET"], typeof(Handler)));
         Assert.NotEqual(descriptor, new EndpointDescriptor("Name", "/api/users", ["GET"], typeof(string)));
+        Assert.NotEqual(descriptor, new EndpointDescriptor("Name", "/api/users", ["GET"], typeof(Handler), IsPathConfigurable: true));
         Assert.False(descriptor.Equals(null));
+    }
+
+    /// <summary>
+    /// AC5 (#37): <see cref="EndpointDescriptor.IsPathConfigurable"/> defaults to false, takes part in
+    /// equality and in the hash, so a flagged and an unflagged description of one route never collapse.
+    /// </summary>
+    [Fact]
+    public void IsPathConfigurable_DefaultsToFalse_AndIsCompared()
+    {
+        var configurable = new EndpointDescriptor("Name", "/api/users", ["GET"], typeof(Handler), IsPathConfigurable: true);
+
+        Assert.False(Describe("GET").IsPathConfigurable);
+        Assert.True(configurable.IsPathConfigurable);
+        Assert.Equal(configurable, new EndpointDescriptor("Name", "/api/users", ["GET"], typeof(Handler), true));
+        Assert.Equal(2, new HashSet<EndpointDescriptor> { Describe("GET"), configurable }.Count);
     }
 
     /// <summary>

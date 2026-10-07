@@ -207,6 +207,31 @@ public class EndpointClientGeneratorTests
         Assert.DoesNotContain("typeof(global::Shop.Api.Computed)", generated);
     }
 
+    /// <summary>
+    /// AC5 (#37): an endpoint that chooses its route at map time (<c>GetPath</c>) gets no contract
+    /// even though its default <c>Path</c> is a constant: a client calling the default would call the
+    /// wrong URL wherever the application configures another. Its sibling keeps its contract.
+    /// </summary>
+    [Fact]
+    public void Server_EndpointWithAGetPathOverride_GetsNoContract()
+    {
+        var source = ServerSource + """
+
+            [MemberOf<ProductsApi>]
+            public class ConfiguredProducts : IGetEndpoint
+            {
+                public static string Path => "/configured";
+                public static string? GetPath(System.IServiceProvider services) => null;
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        var (generated, _) = Server("Shop.Api", source, Contracts());
+
+        Assert.DoesNotContain("typeof(global::Shop.Api.ConfiguredProducts)", generated);
+        Assert.Contains("typeof(global::Shop.Api.GetProduct)", generated);
+    }
+
     [Fact]
     public void Server_WithNoEndpoints_WritesNoContractFile()
     {

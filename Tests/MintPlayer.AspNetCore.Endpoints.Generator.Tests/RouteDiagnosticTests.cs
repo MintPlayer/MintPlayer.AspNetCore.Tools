@@ -502,6 +502,209 @@ public class RouteDiagnosticTests
         Assert.Empty(Reported(source, "MPEP011"));
     }
 
+    // ---- MPEP034 (#37) --------------------------------------------------------------------------
+
+    private const string GetPathMember = "public static string? GetPath(System.IServiceProvider services) => null;";
+
+    /// <summary>
+    /// AC5: an endpoint that overrides <c>GetPath</c> gets MPEP034 (Info, on the class) and not
+    /// MPEP011, even with a computed <c>Path</c>.
+    /// </summary>
+    [Fact]
+    public void MPEP034_ReplacesMPEP011_ForAGetPathOverride()
+    {
+        var source = Fixture("""
+            public static class Segments { public static readonly string Name = "things"; }
+            """ + "\n" +
+            Raw("GetThing", "$\"/{Segments.Name}\"", members: GetPathMember));
+
+        var diagnostic = Assert.Single(Reported(source, "MPEP034"));
+
+        Assert.Equal(DiagnosticSeverity.Info, diagnostic.Severity);
+        Assert.Equal("GetThing", TextAt(diagnostic.Location));
+        Assert.Equal(
+            "'GetThing' chooses its route at map time (GetPath). Its Path is only the default: typed links and client contracts are not generated for it, and route checks apply to the default only.",
+            diagnostic.GetMessage());
+        Assert.Empty(Reported(source, "MPEP011"));
+        AssertNoCascade(source);
+    }
+
+    /// <summary>
+    /// AC5: the route checks keep running on the default <c>Path</c> at their normal severity — a bound
+    /// property with no token in it is still MPEP009 — and a sibling without an override gets no MPEP034.
+    /// </summary>
+    [Fact]
+    public void MPEP034_LeavesTheRouteChecksOnTheDefault_AndASiblingAlone()
+    {
+        var source = Fixture(
+            Typed("GetThing", Q("/things"), GetPathMember + "\n[RouteParam] public int Id { get; set; }") + "\n" +
+            Raw("Sibling", Q("/sibling")));
+
+        var diagnostic = Assert.Single(Reported(source, "MPEP034"));
+        Assert.Equal("GetThing", TextAt(diagnostic.Location));
+        Assert.Equal(DiagnosticSeverity.Error, Assert.Single(Reported(source, "MPEP009")).Severity);
+    }
+
+    /// <summary>
+    /// AC5: every way of overriding counts — implicit, explicit, a non-nullable return, inherited from
+    /// a base class (whether or not the base implements the interface itself), and a default supplied by
+    /// an intermediate interface of the consumer's.
+    /// </summary>
+    [Theory]
+    [InlineData("""
+        public class Target : IGetEndpoint
+        {
+            public static string Path => "/target";
+            public static string GetPath(System.IServiceProvider services) => "/elsewhere";
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        }
+        """)]
+    [InlineData("""
+        public class Target : IGetEndpoint
+        {
+            public static string Path => "/target";
+            static string? IEndpointBase.GetPath(System.IServiceProvider services) => null;
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        }
+        """)]
+    [InlineData("""
+        public abstract class Configurable : IGetEndpoint
+        {
+            public static string Path => "/target";
+            public static string? GetPath(System.IServiceProvider services) => null;
+            public abstract Task<IResult> HandleAsync(HttpContext httpContext);
+        }
+
+        public class Target : Configurable
+        {
+            public override Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        }
+        """)]
+    [InlineData("""
+        public abstract class PathSource
+        {
+            public static string? GetPath(System.IServiceProvider services) => null;
+        }
+
+        public class Target : PathSource, IGetEndpoint
+        {
+            public static string Path => "/target";
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        }
+        """)]
+    [InlineData("""
+        public interface IConfiguredEndpoint : IGetEndpoint
+        {
+            static string? IEndpointBase.GetPath(System.IServiceProvider services) => null;
+        }
+
+        public class Target : IConfiguredEndpoint
+        {
+            public static string Path => "/target";
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        }
+        """)]
+    public void MPEP034_DetectsEveryShapeOfOverride(string body)
+    {
+        var source = Fixture(body);
+
+        var diagnostic = Assert.Single(Reported(source, "MPEP034"));
+        Assert.StartsWith("'Target'", diagnostic.GetMessage());
+        AssertNoCascade(source);
+    }
+
+    /// <summary>
+    /// An <c>internal static GetPath</c> does not implement the member — measured in spike S1, with no
+    /// compiler warning — and neither does an instance method; neither is an override.
+    /// </summary>
+    [Fact]
+    public void MPEP034_DoesNotFire_ForAMemberThatDoesNotImplementGetPath()
+    {
+        var source = Fixture(
+            Raw("Internal", Q("/internal"), members: "internal static string? GetPath(System.IServiceProvider services) => \"/x\";") + "\n" +
+            Raw("Instance", Q("/instance"), members: "public string? GetPath(System.IServiceProvider services) => \"/x\";"));
+
+        Assert.Empty(Reported(source, "MPEP034"));
+    }
+
+    /// <summary>
+    /// AC7: a static <c>GetPath</c> on a derived class that does not list the endpoint interface again
+    /// is not what the runtime calls — MPEP032, as for <c>new static Path</c>. With nothing else
+    /// overriding, the endpoint still maps at <c>Path</c>, so there is no MPEP034.
+    /// </summary>
+    [Fact]
+    public void MPEP032_NewStaticGetPath_IsIgnored_AndSaysSo()
+    {
+        var source = Fixture("""
+            public abstract class Base : IGetEndpoint
+            {
+                public static string Path => "/base";
+                public abstract Task<IResult> HandleAsync(HttpContext httpContext);
+            }
+
+            public class Derived : Base
+            {
+                public static string? GetPath(System.IServiceProvider services) => "/derived";
+                public override Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """);
+
+        var diagnostic = Assert.Single(Reported(source, "MPEP032"));
+
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("hides the inherited GetPath", diagnostic.GetMessage());
+        Assert.Contains("the default GetPath, which maps at Path", diagnostic.GetMessage());
+        Assert.Empty(Reported(source, "MPEP034"));
+    }
+
+    /// <summary>
+    /// AC7: <c>new static GetPath</c> over a base class's override — the base's stays in force, so the
+    /// endpoint still overrides (MPEP034) and the hidden member is MPEP032.
+    /// </summary>
+    [Fact]
+    public void MPEP032_NewStaticGetPathOverABaseOverride_KeepsTheBasesAndSaysSo()
+    {
+        var source = Fixture("""
+            public abstract class Base : IGetEndpoint
+            {
+                public static string Path => "/base";
+                public static string? GetPath(System.IServiceProvider services) => "/from-base";
+                public abstract Task<IResult> HandleAsync(HttpContext httpContext);
+            }
+
+            public class Derived : Base
+            {
+                public new static string? GetPath(System.IServiceProvider services) => "/derived";
+                public override Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """);
+
+        Assert.Contains("the GetPath a base class or interface implements", Assert.Single(Reported(source, "MPEP032")).GetMessage());
+        Assert.Single(Reported(source, "MPEP034"));
+    }
+
+    /// <summary>Listing the endpoint interface again re-implements it: the new <c>GetPath</c> is used, and nothing is ignored.</summary>
+    [Fact]
+    public void MPEP032_DoesNotFire_WhenTheInterfaceIsListedAgain()
+    {
+        var source = Fixture("""
+            public abstract class Base : IGetEndpoint
+            {
+                public static string Path => "/base";
+                public abstract Task<IResult> HandleAsync(HttpContext httpContext);
+            }
+
+            public class Derived : Base, IGetEndpoint
+            {
+                public static string? GetPath(System.IServiceProvider services) => "/derived";
+                public override Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """);
+
+        Assert.Empty(Reported(source, "MPEP032"));
+        Assert.Single(Reported(source, "MPEP034"));
+    }
+
     // ---- MPEP016 --------------------------------------------------------------------------------
 
     /// <summary>A group nobody joins gets no <c>MapGroup</c>, so its prefix silently never applies.</summary>

@@ -377,6 +377,10 @@ public partial class EndpointGenerator : IncrementalGenerator
         // interface is ignored by the runtime, so MPEP007 and the contract ignore it too (MPEP032).
         var knownMethods = MethodsLiteral.Read(symbol, httpMethod, compilation, out var ignoredNewMethods, ct, model);
 
+        // PRD R2.4: a GetPath override makes Path only the default (MPEP034); a static GetPath the
+        // runtime does not call is MPEP032, like a 'new static Path'.
+        var hasPathOverride = PathOverride.Detect(symbol, out var ignoredNewGetPath, ct);
+
         OpenGenericInfo? open = null;
         if (GenericTypes.IsOpen(symbol))
         {
@@ -414,7 +418,9 @@ public partial class EndpointGenerator : IncrementalGenerator
             closed: null,
             referencedGroups: open is null ? ConstructedGroupChain(groupSymbol, compilation, ct) : default,
             hasIgnoredNewPath: ignoredNewPath,
-            hasIgnoredNewMethods: ignoredNewMethods);
+            hasIgnoredNewMethods: ignoredNewMethods,
+            hasPathOverride: hasPathOverride,
+            hasIgnoredNewGetPath: ignoredNewGetPath);
     }
 
     /// <summary>

@@ -18,6 +18,43 @@ public interface IEndpointBase
     static abstract string Path { get; }
 
     /// <summary>
+    /// Optional hook that chooses the route at map time, from the application's services — a path
+    /// read from options or configuration. <see langword="null"/>, the default, means
+    /// <see cref="Path"/>.
+    /// </summary>
+    /// <remarks>
+    /// Evaluated once, when the routes are mapped, by the generated <c>Map…Endpoints()</c> and by
+    /// <c>MapEndpoint&lt;T&gt;()</c>, both of which map <c>GetPath(services) ?? Path</c>. Like
+    /// <see cref="Path"/>, the result is relative to the endpoint's group prefix. A configuration
+    /// change at run time does not move the route; it takes a restart.
+    /// <list type="bullet">
+    /// <item>
+    /// <b>Null always means "use <see cref="Path"/>"</b> — whether this is not overridden or an override
+    /// returns null. It never means "not mapped": that is <c>IsEnabled</c>'s job.
+    /// </item>
+    /// <item>
+    /// <b>Only the root provider is available.</b> No request exists yet, so a scoped service cannot
+    /// be resolved from it.
+    /// </item>
+    /// <item>
+    /// <b>The path must keep the route parameters of <see cref="Path"/></b>, by name (case-insensitive):
+    /// bound properties and every build-time route check use <see cref="Path"/>, which stays the default.
+    /// Literal segments, constraints and defaults may differ. Mapping checks this at startup and throws
+    /// an <see cref="InvalidOperationException"/> naming both patterns when the names differ.
+    /// </item>
+    /// <item>
+    /// <b>What is left out.</b> The generator cannot know the configured route, so an endpoint that
+    /// overrides this gets no typed link and no client contract, its OpenAPI route parameters come
+    /// from its bound properties only, and its descriptor reports <see cref="Path"/> with
+    /// <c>EndpointDescriptor.IsPathConfigurable</c> set (MPEP034 says so at build time).
+    /// </item>
+    /// </list>
+    /// </remarks>
+    /// <param name="services">The application's root service provider.</param>
+    /// <returns>The route to map, or <see langword="null"/> for <see cref="Path"/>.</returns>
+    static virtual string? GetPath(IServiceProvider services) => null;
+
+    /// <summary>
     /// The HTTP methods this endpoint handles (e.g., ["GET"], ["POST"], ["GET", "HEAD"]).
     /// Convenience interfaces (IGetEndpoint, IPostEndpoint, etc.) provide this automatically.
     /// </summary>

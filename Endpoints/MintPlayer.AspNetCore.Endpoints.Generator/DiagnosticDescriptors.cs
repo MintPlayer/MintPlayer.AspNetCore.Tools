@@ -303,12 +303,12 @@ internal static class DiagnosticDescriptors
 
     public static readonly DiagnosticDescriptor NewStaticPathIgnored = new(
         id: "MPEP032",
-        title: "A 'new static' Path or Methods is not what the endpoint answers on",
+        title: "A 'new static' Path, Methods or GetPath is not what the endpoint answers on",
         messageFormat: "Endpoint class '{0}' hides the inherited {1} with 'new static', but the runtime uses {2}, from the implementation of the endpoint interface; list the endpoint interface on '{0}' again to use the new {1}, or remove it",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "TEndpoint.Path and TEndpoint.Methods dispatch through the interface map, and a static member hidden with 'new' does not re-implement the interface: the base class's member, or the verb interface's default verb, stays in force. The generated links, the contract and the duplicate-route check (MPEP007) use what the endpoint really answers on. Reported once per hidden member.");
+        description: "TEndpoint.Path, TEndpoint.Methods and TEndpoint.GetPath dispatch through the interface map, and a static member hidden with 'new' does not re-implement the interface: the base class's member, the verb interface's default verb, or the default GetPath (which maps at Path), stays in force. The generated links, the contract and the duplicate-route check (MPEP007) use what the endpoint really answers on. Reported once per hidden member.");
 
     public static readonly DiagnosticDescriptor ConstraintDependsOnTypeParameter = new(
         id: "MPEP033",
@@ -318,6 +318,15 @@ internal static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "Constraint-keyed binding matches a type parameter by constraint type equality. A constraint such as IUser<TKey> mentions another type parameter, so it equals no closed key such as IUser<Guid>, and inferring TKey from the key is not done: a key would then silently bind parameters it does not name. The explicit form lists every type argument, and every constraint is checked after substitution (MPEP026).");
+
+    public static readonly DiagnosticDescriptor PathChosenAtMapTime = new(
+        id: "MPEP034",
+        title: "The endpoint chooses its route at map time",
+        messageFormat: "'{0}' chooses its route at map time (GetPath). Its Path is only the default: typed links and client contracts are not generated for it, and route checks apply to the default only.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Info,
+        isEnabledByDefault: true,
+        description: "An endpoint that overrides IEndpointBase.GetPath answers on whatever route the application configures, which the generator cannot know. MPEP007-MPEP010 still run against the literal Path, the route that ships when nothing is configured; the descriptor list reports that Path with IsPathConfigurable set. A configured path must keep Path's route parameters, which mapping checks at startup. Reported instead of MPEP011.");
 
     public static readonly DiagnosticDescriptor LegacyConfigureHookIgnored = new(
         id: "MPEP035",

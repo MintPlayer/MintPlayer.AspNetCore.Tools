@@ -127,9 +127,10 @@ partial class EndpointGenerator
                         " + ",
                         plan.GroupChains[endpoint.FullyQualifiedName].Select(group => $"Prefix<{group}>()"));
 
+                    var configurable = endpoint.HasPathOverride ? ", true" : "";
                     writer.WriteLine(prefix.Length == 0
-                        ? $"Describe<{endpoint.FullyQualifiedName}>({Literal(endpoint.EffectiveDescriptorName)}, \"\"),"
-                        : $"Describe<{endpoint.FullyQualifiedName}>({Literal(endpoint.EffectiveDescriptorName)}, {prefix}),");
+                        ? $"Describe<{endpoint.FullyQualifiedName}>({Literal(endpoint.EffectiveDescriptorName)}, \"\"{configurable}),"
+                        : $"Describe<{endpoint.FullyQualifiedName}>({Literal(endpoint.EffectiveDescriptorName)}, {prefix}{configurable}),");
                 }
                 writer.Indent--;
                 writer.WriteLine("];");
@@ -444,9 +445,11 @@ partial class EndpointGenerator
             // group chain. TEndpoint.Path on its own is group-relative, so a descriptor built from it
             // describes an endpoint in /api/users as "/{id}" — useless for the diagnostics or
             // discovery page the descriptor list exists for.
-            using (writer.OpenBlock("private static global::MintPlayer.AspNetCore.Endpoints.EndpointDescriptor Describe<TEndpoint>(string name, string groupPrefix) where TEndpoint : global::MintPlayer.AspNetCore.Endpoints.IEndpointBase"))
+            // isPathConfigurable is the generator's GetPath detection (PRD R2.5): the path stays the
+            // literal default, flagged. Passed only when true, so every other descriptor line is as before.
+            using (writer.OpenBlock("private static global::MintPlayer.AspNetCore.Endpoints.EndpointDescriptor Describe<TEndpoint>(string name, string groupPrefix, bool isPathConfigurable = false) where TEndpoint : global::MintPlayer.AspNetCore.Endpoints.IEndpointBase"))
             {
-                writer.WriteLine("return new(name, groupPrefix + TEndpoint.Path, [.. TEndpoint.Methods], typeof(TEndpoint));");
+                writer.WriteLine("return new(name, groupPrefix + TEndpoint.Path, [.. TEndpoint.Methods], typeof(TEndpoint), isPathConfigurable);");
             }
             writer.WriteLine();
         }
@@ -461,7 +464,12 @@ partial class EndpointGenerator
         /// </remarks>
         private static void EmitMapBody(IndentedTextWriter writer, string delegateParameters)
         {
-            using (writer.OpenBlock($"var builder = global::Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapMethods(routes, TEndpoint.Path, TEndpoint.Methods, async ({delegateParameters}) =>"))
+            // PRD R2.2: the route chosen at map time, null meaning Path, the same expression for every
+            // endpoint. A configured route must keep Path's parameters; the check runs only when there
+            // is one, so an endpoint that does not override GetPath pays a null test (R2.10).
+            writer.WriteLine("var configuredPath = TEndpoint.GetPath(routes.ServiceProvider);");
+            writer.WriteLine("if (configuredPath is not null) global::MintPlayer.AspNetCore.Endpoints.EndpointPathValidator.EnsureSameParameters(typeof(TEndpoint), configuredPath, TEndpoint.Path);");
+            using (writer.OpenBlock($"var builder = global::Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapMethods(routes, configuredPath ?? TEndpoint.Path, TEndpoint.Methods, async ({delegateParameters}) =>"))
             {
                 // Constructed INSIDE the delegate, per request. Bound properties make an endpoint
                 // stateful; hoisting this out of the lambda would turn it into a process-wide
@@ -568,6 +576,9 @@ partial class EndpointGenerator
                 if (endpoint.Route is not null) arguments.Add($"Path = {Literal(endpoint.Route)}");
                 if (endpoint.KnownMethods is not null) arguments.Add($"Methods = {Literal(endpoint.KnownMethods)}");
                 if (ShadowParameters.EmitsBinder(endpoint)) arguments.Add("HasBinder = true");
+                // PRD R2.7: only when set, and without a Version bump — an older reader ignoring the
+                // unknown key degrades to treating Path as the route, which is what it did before.
+                if (endpoint.HasPathOverride) arguments.Add("PathConfigurable = true");
                 arguments.Add($"Version = {OpenEndpointRecords.Version}");
 
                 writer.WriteLine($"[assembly: global::{OpenEndpointRecords.AttributeNamespace}.{OpenEndpointRecords.EndpointAttributeName}({string.Join(", ", arguments)})]");

@@ -59,6 +59,29 @@ public partial class Passkeys<TUser> : IGetEndpoint<string> where TUser : LibUse
         => Task.FromResult(Results.Ok($"{new TUser().DisplayName}:{Id}"));
 }
 
+/// <summary>
+/// GET /lib/auth/hooks/{id} by default; a group-relative route configured at <see cref="PathKey"/>
+/// moves it (#37). Generic, so the application closes it and maps it on the configured route — the
+/// open-endpoint record carries <c>PathConfigurable</c>.
+/// </summary>
+[MemberOf<LibAuthGroup>]
+public partial class ConfiguredHook<TUser> : IGetEndpoint<string> where TUser : LibUser, new()
+{
+    /// <summary>The configuration key whose value, when set, replaces <see cref="Path"/>.</summary>
+    public const string PathKey = "TestLibrary:HookPath";
+
+    public static string Path => "/hooks/{id}";
+
+    /// <summary>The configured route, or null for <see cref="Path"/>.</summary>
+    public static string? GetPath(IServiceProvider services)
+        => services.GetRequiredService<IConfiguration>()[PathKey];
+
+    [RouteParam] public int Id { get; set; }
+
+    public override Task<IResult> HandleAsync(CancellationToken ct)
+        => Task.FromResult(Results.Ok($"hook:{new TUser().DisplayName}:{Id}"));
+}
+
 /// <summary>GET /lib/auth/whoami — a raw generic endpoint.</summary>
 [MemberOf<LibAuthGroup>]
 public class WhoAmI<TUser> : IGetEndpoint where TUser : LibUser, new()
