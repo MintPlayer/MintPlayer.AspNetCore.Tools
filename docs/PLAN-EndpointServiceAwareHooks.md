@@ -1,6 +1,6 @@
 # Implementation plan: service-aware hooks (issues #36, #37; README recipe for #40)
 
-Companion to `PRD-EndpointServiceAwareHooks.md` (Draft 2; all decisions settled).
+Companion to `PRD-EndpointServiceAwareHooks.md` (Draft 3; all decisions settled).
 
 - **Branch:** `feat/endpoint-service-aware-hooks`.
 - **PR:** one PR against `master` with `fixes #36, fixes #37, refs #40`. It is titled as a **breaking**
@@ -46,8 +46,14 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
     `EndpointClosing.cs:109,121`).
   - Confirm the closing assembly omits the typed link and contract, reports MPEP034 and maps on the
     resolved path.
+- [ ] **S4: Typed binding parity on `MapEndpoint<T>()` (R6, from the Spark review).**
+  - Map a generic `IPostEndpoint<TReq>` and a form-urlencoded `BindRequestAsync` endpoint through
+    `MapEndpoint<T>()`, with no generator involved.
+  - POST each one a valid body, a malformed body, the wrong content type and an empty body.
+  - Compare the results with the generated mapping.
+  - Outcome: either "verified, regression tests only", or a gap list with a fix that goes into M3c.
 
-### Spike results (2026-10-07; all three done; scratch projects are in the session scratchpad)
+### Spike results (2026-10-07; S1 to S3 done, S4 pending; scratch projects are in the session scratchpad)
 
 > **S1: done.** `static virtual string? GetPath(IServiceProvider) => null` combined with
 > `T.GetPath(sp) ?? T.Path` builds with no warnings on net10.0 and net11.0, and dispatches correctly for
@@ -188,6 +194,44 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
    6. MPEP032 also covers `new static GetPath`.
    7. Carry the open-generic record flag (S3).
 4. README: add the `GetPath` section and MPEP034.
+5. **R2.10:** add the runtime helper `EndpointPathValidator.EnsureSameParameters(Type endpoint, string configured, string @default)`.
+   - It uses `RoutePatternFactory.Parse` and compares parameter names case-insensitively.
+   - It throws `InvalidOperationException` naming the endpoint, both patterns and each side's missing
+     names.
+   - Call it from the generated `Map` helpers (fully qualified, static form) and from `MapEndpoint<T>()`,
+     only when `GetPath` returned a non-null value.
+   - README: say the startup check enforces the same-parameters rule.
+
+## M3b: Endpoint-level `IsEnabled` and one role per class (R5; D9, D12)
+
+1. Abstractions: add `static virtual bool IsEnabled(IServiceProvider services) => true;` to
+   `IEndpointBase`, with a doc comment covering root provider only, map-time evaluation, and that
+   `GetPath` and `Configure` are skipped when it returns false.
+2. Generator: emit a generic helper, `IsEndpointEnabled<TEndpoint>(IServiceProvider)`, and wrap every
+   endpoint's `Map…` call in `if (IsEndpointEnabled<T>(app.ServiceProvider)) { … }`, inside its group
+   block. That covers both declared and closed open-generic endpoints.
+3. Runtime: `MapEndpoint<T>()` checks `T.IsEnabled(app.ServiceProvider)` after the group-chain check
+   (`EndpointRouteBuilderExtensions.cs:78-83`).
+   - For a disabled endpoint it returns the same value as for a disabled group (S4 confirms what that
+     is), and the doc comment says so.
+   - Order: group chain → endpoint `IsEnabled` → `GetPath` → R2.10 → `MapMethods` → `Configure`.
+4. Add MPEP036 (Error), raised when a class is both a group and an endpoint.
+   - Detect it in `Discover` on `AllInterfaces`.
+   - Report it at the class identifier.
+   - Treat the type as a group only.
+   - First grep the repo, fixtures and README for existing classes that are both, and migrate them.
+5. README:
+   - Add an "Enabling a single endpoint" subsection with the `/manage` example.
+   - Add the "a class is a group or an endpoint, not both" rule.
+   - Add MPEP036 to the diagnostics table.
+   - Note that the descriptor list ignores endpoint `IsEnabled`.
+   - Fix the Spark follow-up wording.
+
+## M3c: Typed binding parity on `MapEndpoint<T>()` (R6; D11)
+
+- Depends on S4.
+  - If parity already holds: add only the AC12 regression tests.
+  - If it doesn't: apply the fix S4 proposes. It goes here, before the tests.
 
 ## M4: #40, README recipe (R3)
 
@@ -214,6 +258,11 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
 | AC6 | Open-generic `GetPath` closed by app | `Generator.Tests/OpenGenericEndpointTests.cs` |
 | AC7 | `new static GetPath` → MPEP032 | `Generator.Tests/` (alongside existing MPEP032 tests) |
 | AC8 | README samples compile | README sample-compile script |
+| AC10 | Param-name mismatch throws at startup (generated + `MapEndpoint<T>()`); literal/constraint/case differences pass | `Tools.Tests/Endpoints/` new `EndpointPathValidatorTests.cs` + `MapEndpointGenericTests.cs` + `TestLibraryEndToEndTests.cs` |
+| AC11 | Disabled endpoint: 404, `Configure`/`GetPath` counters stay 0, siblings mapped, `IsEndpointMapped<T>` false (both paths) | `Tools.Tests/Endpoints/MapEndpointGenericTests.cs`, `IsEndpointMappedTests.cs`, `TestLibraryEndToEndTests.cs` |
+| AC11 | Generated code wraps each endpoint in `IsEndpointEnabled<T>` inside its group block | `Generator.Tests/EndpointTypeArgumentTests.cs` (next to `EveryGroup_IsWrappedInItsIsEnabledCheck`) |
+| AC12 | `MapEndpoint<T>()` on a generic `IPostEndpoint<TReq>` and a form `BindRequestAsync` endpoint: valid → bound, malformed → 400, wrong content type → 415; same as generated | `Tools.Tests/Endpoints/MapEndpointGenericTests.cs` (per S4) |
+| AC13 | MPEP036: direct, via base class, via intermediate interface; not for plain group/endpoint | `Generator.Tests/` new `GroupEndpointRoleDiagnosticTests.cs` |
 
 ## M6: Sweep, docs, PR
 
@@ -233,3 +282,10 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
   - M0 done. Branch created, and versions bumped from 11.3.0-rc.0 to 11.4.0-rc.0.
   - PRD and PLAN Draft 1 written.
   - Grilling settled D1 to D8 and #40 was closed, which led to Draft 2.
+  - Spikes S1 to S3 done. Draft PR #41 opened with the plan only.
+  - The Spark consumer review on #41 led to PRD Draft 3:
+    - D9: endpoint-level `IsEnabled`;
+    - D10: startup check on route parameters;
+    - D11: typed-binding parity on `MapEndpoint<T>()`, spike S4 pending.
+  - Owner decision D12: a class is never both a group and an endpoint (MPEP036).
+  - Implementation is on hold at the owner's request.

@@ -5,9 +5,20 @@ Issues:
 - [#37: `Path` is static with no `IServiceProvider`, so a configuration-driven route cannot be an endpoint class](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/issues/37). Fixed here.
 - [#40: prefix-scoped middleware declared on a group](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/issues/40). Closed as not planned ([comment](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/issues/40#issuecomment-6046439281)). This PR only adds the README recipe that the closing comment proposes, and it references #40 without closing it.
 
-*(Draft 2, 2026-10-07. Draft 1 came from a four-agent investigation: I1 = #36, I2 = #37, I3 = #40, and
-I4 = conventions. Draft 2 records the outcome of a grilling session (Q1 to Q7) with the owner. Every
-decision below is settled. Spikes S1 to S3 in the PLAN check the remaining mechanics.)*
+*(Draft 3, 2026-10-07.*
+- *Draft 1 came from a four-agent investigation: I1 = #36, I2 = #37, I3 = #40, and I4 = conventions.*
+- *Draft 2 recorded the outcome of a grilling session (Q1 to Q7) with the owner.*
+- *Draft 3 adds the Spark consumer review of PR #41
+  ([comment](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/41#issuecomment-6046759977)),
+  which the owner accepted. It brings three changes:*
+  - *an endpoint-level `IsEnabled` (R5);*
+  - *a startup check that a configured path has the same route parameters as its default (R2.9 and
+    R2.10);*
+  - *a check that typed binding works through `MapEndpoint<T>()` (R6, spike S4).*
+- *Draft 3 also adds an owner decision: a class must not be both a group and an endpoint (MPEP036,
+  R5.5).*
+
+*Every decision below is settled. The spikes in the PLAN check the remaining mechanics.)*
 
 **Affected version:** MintPlayer.AspNetCore.Endpoints 11.3.0-rc.0 (runtime, Abstractions, Generator)
 **Proposed version:** 11.4.0-rc.0. This release is **breaking** (see R1), but the major version tracks
@@ -26,6 +37,13 @@ Today the only hook that can see the application's configuration is
 2. **#37:** `IEndpointBase.GetPath(IServiceProvider)` chooses the route at map time. `Path` stays required
    and is the default. Build-time route checks still run against that default. Route-shaped outputs
    (typed links, client contracts, OpenAPI token shadowing) are left out, and the descriptor is flagged.
+   If a configured path's route parameters differ from those of the default, the app fails at startup.
+3. **Spark review:** `IEndpointBase.IsEnabled(IServiceProvider)` gives each endpoint its own gate.
+   - A group is enabled or disabled as a whole, so a condition that applies to one endpoint belongs on
+     that endpoint, and no `if` is needed around mapping.
+   - A disabled endpoint is not mapped, and its `Configure` and `GetPath` are never called.
+   - Typed request binding is verified, or fixed, on `MapEndpoint<T>()`, so that generic endpoints mapped
+     by reflection behave like generated ones.
 
 Every hook is `static`, is evaluated once when the routes are mapped, and receives the **root**
 provider, in the same way as `IsEnabled`.
@@ -54,6 +72,10 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
 - **G5.** A README recipe shows the alternative that the #40 closing comment proposes: middleware keyed
   on `Group.Prefix`.
 - **G6.** Tests for all of the above. The package version is 11.4.0-rc.0.
+- **G7.** One endpoint can be enabled or disabled from configuration without disabling its whole group
+  (Spark review).
+- **G8.** An endpoint that requires typed request binding behaves the same whether it is mapped by the
+  generated method or by `MapEndpoint<T>()` (Spark review).
 
 ## Non-goals
 
@@ -151,11 +173,24 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
 - **R2.9** Add a `GetPath` section to the README, built around the WebSocket example. It covers:
   - only the root provider is available;
   - null falls back to `Path`;
-  - **a configurable path must keep the same route tokens as its default**, because route checks bind to
-    the default and a mismatch is a runtime 400;
+  - **a configurable path must keep the same route parameters as its default**, because route checks bind
+    to the default. R2.10 enforces this at startup;
   - what is left out (R2.5);
   - the consumer pattern of defaulting the option to the endpoint's `Path`, so the default is written
     once.
+
+- **R2.10 (Spark review)** Check the route parameters at map time. When `GetPath` returns a non-null
+  value:
+  - Both mapping paths parse it and the literal `Path` with `RoutePatternFactory.Parse`.
+  - If the two sets of parameter names differ, mapping throws an `InvalidOperationException` at startup.
+    The message names the endpoint type, both patterns, and the parameters missing from each side.
+  - The comparison is on parameter **names**, case-insensitively, as routing does.
+  - Constraints, defaults, optional markers and catch-all markers are not compared. They don't affect
+    which properties bind.
+  - Literal segments may differ freely; that is the point of making the path configurable.
+  - The check lives in one runtime helper, `EndpointPathValidator`, called from the generated `Map`
+    helpers and from `MapEndpoint<T>()`. It costs nothing for endpoints that don't override `GetPath`,
+    because it runs only when the result is not null.
 
 ### R3: README recipe for #40
 
@@ -165,6 +200,65 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
 - **R3.2** Add a caveat: a nested group's `Prefix` is relative, so the recipe composes
   `Parent.Prefix + Child.Prefix`. If the group is moved with `[MemberOf<>]`, the routes follow but the
   middleware does not. A root group is the safe case.
+
+### R5: Endpoint-level `IsEnabled` (Spark review)
+
+- **R5.1** Add `static virtual bool IsEnabled(IServiceProvider services) => true;` to `IEndpointBase`.
+  - Its doc comment says it is evaluated once at map time against the root provider, as the group
+    version is.
+  - It also says that a group is enabled or disabled as a whole, so a per-endpoint condition belongs here.
+- **R5.2** Evaluation order for each endpoint:
+  1. The endpoint's group chain must be enabled; this is checked as today.
+  2. The endpoint's own `IsEnabled` is checked. If it returns false, nothing else happens: no
+     `MapMethods`, no `GetPath`, no `Configure`, no R2.10 check.
+  3. Otherwise mapping proceeds: `GetPath`, the R2.10 check, `MapMethods`, then `Configure`.
+- **R5.3** In the generated mapping, each endpoint's `Map…` call is wrapped in
+  `if (IsEnabled<TEndpoint>(app.ServiceProvider)) { … }`.
+  - This uses a generic helper, `IsEndpointEnabled<TEndpoint>` (because of CS0117, the same reason
+    `IsEnabled<TGroup>` is a generic helper, `Producer.cs:163-166`).
+  - The wrap is emitted for every endpoint. Override detection isn't needed, because the default returns
+    true and the JIT inlines it.
+- **R5.4** `MapEndpoint<T>()` checks `T.IsEnabled(app.ServiceProvider)` after the group-chain check
+  (`EndpointRouteBuilderExtensions.cs:78-83`). For a disabled endpoint it returns the same thing it
+  returns for a disabled group today. S4 confirms exactly what that is, and the doc comment states it.
+- **R5.5 (owner decision, D12)** A class must not be both a group and an endpoint. Today nothing
+  enforces this: discovery checks `IsGroup` and the endpoint interfaces independently
+  (`EndpointGenerator.cs:438-440`).
+  - With R5 in place, one implicit `public static bool IsEnabled(IServiceProvider)` would silently
+    implement **both** interface members. One `Configure` name would then cover two different builders.
+    Groups describe organisation, and endpoints describe handlers.
+  - New diagnostic **MPEP036 (Error)**: "`{0}` implements both `IEndpointGroup` and an endpoint
+    interface. A class is either a group or an endpoint. Move the endpoint into its own class and join
+    it with `[MemberOf<{0}>]`."
+    - Detection is in `Discover`, on the type's `AllInterfaces`, so it covers interfaces inherited
+      through base classes.
+    - It is reported at the class identifier.
+    - The type is then treated only as a group, so mapping output stays deterministic despite the error.
+  - Before implementing, grep the repo, TestApp, TestLibrary, test fixtures and README for classes that
+    are both, and migrate them.
+- **R5.6** `IsEndpointMapped<T>` (11.3) already answers from type metadata, so a disabled endpoint
+  correctly reports "not mapped". Add a test for this. The static `Endpoints` descriptor list ignores
+  `IsEnabled`, as it already does for groups; document this next to the group caveat.
+- **R5.7** README: add an "Enabling a single endpoint" subsection under `IsEnabled`, with the
+  `/manage` example: one group carries `RequireAuthorization`, and each endpoint has its own mode
+  condition.
+- **R5.8** Correct the Spark consumer follow-up: the dev-tunnel endpoint's `IsEnabled` is the
+  **endpoint-level** one added here.
+
+### R6: Typed binding through `MapEndpoint<T>()` (Spark review)
+
+- **R6.1** Typed request binding must behave the same on `MapEndpoint<T>()` as on the generated mapping,
+  including for generic endpoints closed by the caller (`MapEndpoint<X<TUser>>()`). That means:
+  - request-typed endpoints (`IPostEndpoint<TReq>` and the other verbs);
+  - `BindRequestAsync` overrides, including form-urlencoded ones such as the OIDC token, revocation and
+    introspection endpoints;
+  - 400 on a malformed body, and 415 on the wrong content type.
+- **R6.2** Spike S4 establishes the current behaviour.
+  - If it already matches, this requirement is satisfied by regression tests only, and the PRD records it
+    as verified.
+  - If it doesn't, the fix is part of this release.
+
+  The S4 result is recorded in the PLAN.
 
 ### R4: Release
 
@@ -203,6 +297,28 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
 - **AC8** The README covers the `IsEnabled`-is-existence paragraph, the `GetPath` section and the #40
   prefix recipe, and all of its samples compile.
 - **AC9** Packages are versioned 11.4.0-rc.0, and the full sweep passes on both TFMs.
+- **AC10 (R2.10)** Startup fails with an `InvalidOperationException` naming the endpoint and both
+  patterns when a `GetPath` value's parameter names differ from the default's, for example
+  `/hooks/{id}` against `/x/{key}`.
+  - It fails this way in both mapping paths.
+  - Startup succeeds when only literal segments, constraints or case differ, for example `/hooks/{id}`
+    against `/custom/{ID:int}`.
+- **AC11 (R5)** An endpoint whose `IsEnabled` returns false is not mapped (404 on its route), in both
+  mapping paths.
+  - Its `Configure` and `GetPath` are never invoked. Assert this with counters.
+  - Its group siblings are still mapped.
+  - `IsEndpointMapped<T>` returns false for it.
+- **AC13 (R5.5)** MPEP036 is reported in each of these cases:
+  - a class that implements both `IEndpointGroup` and an endpoint interface directly;
+  - a class that implements both through base classes or intermediate interfaces.
+
+  It is not reported for an ordinary group or an ordinary endpoint.
+- **AC12 (R6)** Through `MapEndpoint<T>()`, a generic request-typed endpoint and a form-urlencoded
+  `BindRequestAsync` endpoint:
+  - bind a valid body;
+  - answer 400 to a malformed body;
+  - answer 415 to the wrong content type;
+  - behave the same as the generated mapping.
 
 ## Decisions (all settled, 2026-10-07 grilling)
 
@@ -227,13 +343,26 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
   constraint 2).
 - **D7 (Q5): #40 gets only a README recipe**, with the nested-prefix caveat. No helper API.
 - **D8 (Q7): Version 11.4.0-rc.0.** The major tracks .NET. MPEP035 is the upgrade warning.
+- **D9 (Spark review): Endpoint-level `IsEnabled` ships in this release.** A group is enabled or disabled
+  as a whole, and a per-endpoint condition lives on the endpoint. A disabled endpoint skips `GetPath` and
+  `Configure`.
+- **D10 (Spark review): A route-parameter mismatch from `GetPath` fails at startup.** The startup check
+  replaces the documentation-only rule from D4. A first-request 400 becomes a startup failure.
+- **D11 (Spark review): `MapEndpoint<T>()` must have typed-binding parity**, verified by S4, and fixed in
+  this release if it falls short.
+- **D12 (owner): A class is either a group or an endpoint, never both.** MPEP036 (Error) enforces it.
 
 ## Consumer follow-up (MintPlayer.Spark, after 11.4.0-rc.0 is published)
 
 - The OIDC CORS groups move to `Configure(group, services)` and drop the cast. Every other
   `Configure` hook also migrates; MPEP035 lists them.
 - The dev-tunnel WebSocket in `MintPlayer.Spark.Webhooks.GitHub` becomes an endpoint class. Its
-  `GetPath` returns `options.DevWebSocketPath`, and `IsEnabled` checks `DevelopmentAppId`.
+  `GetPath` returns `options.DevWebSocketPath`, and the endpoint-level `IsEnabled` (R5) checks
+  `DevelopmentAppId`.
+- The roughly 15 `/manage` account routes stay in one group, which carries `RequireAuthorization` once.
+  Each route gates itself on the local-credentials mode with an endpoint-level `IsEnabled`.
+- About 25 endpoints that are generic over `TUser` are mapped with `MapEndpoint<X<TUser>>()`. They rely
+  on the R6 parity.
   `GitHubWebhooksOptions.DevWebSocketPath` defaults to the endpoint's `Path` constant, so the string is
   written once (Q1, condition 2).
 - The `/connect` framing middleware stays as it is, keyed on `OidcConnectGroup.Prefix` (#40 closing
