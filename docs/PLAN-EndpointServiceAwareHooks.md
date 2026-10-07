@@ -243,7 +243,7 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
    - Note that the descriptor list ignores endpoint `IsEnabled`.
    - Fix the Spark follow-up wording.
 
-## M3c: Typed binding parity on `MapEndpoint<T>()` (R6; D11)
+## M3c: Typed binding parity on `MapEndpoint<T>()` (R6; D11) — [x] done
 
 - S4 verified that parity already holds, so no code change is needed. This milestone is just the three
   AC12 regression tests listed in the S4 result.
@@ -342,3 +342,9 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
     `TestLibrary:ManageEnabled`), with per-application hook counters keyed on the root provider so
     parallel hosts do not race; disabled by default, so the OpenAPI snapshot is unchanged. R5.8: the
     PRD's consumer follow-up already names the endpoint-level `IsEnabled`, so no wording changed.
+  - **M3c done.** The three S4 regression tests, no production change:
+    `ParameterBindingPipelineTests.ManualMapEndpoint_BindsTypedEndpointsIdenticallyToTheGeneratedMapping`
+    (fresh hosts on both sides so a created user's id matches; the invalid-email case was left out,
+    because a validation problem has no `detail` and its `traceId` differs per host),
+    `MapEndpointGenericTests.GenericTypedEndpoint_BindsItsBody_ThroughMapEndpoint`,
+    `EndpointInvocationTests.GenericFormBindingOverride_BindsThroughMapEndpoint`.

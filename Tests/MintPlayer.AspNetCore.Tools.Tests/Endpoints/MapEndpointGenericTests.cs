@@ -248,6 +248,48 @@ public class MapEndpointGenericTests
         Assert.Equal(0, SwitchedOff.ConfigureCalls);
     }
 
+    public sealed record ThingUser(string Name, int Age);
+
+    /// <summary>
+    /// A request-typed endpoint generic over its body, closed by the caller — the Spark shape of
+    /// <c>MapEndpoint&lt;X&lt;TUser&gt;&gt;()</c>. This assembly runs no generator, so it derives from
+    /// the library's base class itself, as a non-<c>partial</c> consumer must.
+    /// </summary>
+    public sealed class PostThing<T> : PostEndpoint<T>, IPostEndpoint<T> where T : class
+    {
+        public static string Path => "/things/" + typeof(T).Name;
+
+        public override Task<IResult> HandleAsync(T request, CancellationToken cancellationToken) => Task.FromResult(Results.Ok(request));
+    }
+
+    /// <summary>
+    /// AC12 (PRD R6, spike S4): a generic request-typed endpoint mapped through
+    /// <c>MapEndpoint&lt;PostThing&lt;ThingUser&gt;&gt;()</c> binds a valid JSON body, answers 400 to a
+    /// malformed one and 415 to the wrong content type — as the generated mapping does, since the
+    /// binding lives in the endpoint's base class.
+    /// </summary>
+    [Fact]
+    public async Task GenericTypedEndpoint_BindsItsBody_ThroughMapEndpoint()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+        await using var app = builder.Build();
+        app.MapEndpoint<PostThing<ThingUser>>();
+        await app.StartAsync();
+        var client = app.GetTestClient();
+        var path = PostThing<ThingUser>.Path;
+
+        var bound = await client.PostAsync(path, new StringContent("""{"name":"Ann","age":3}""", System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.OK, bound.StatusCode);
+        Assert.Equal("""{"name":"Ann","age":3}""", await bound.Content.ReadAsStringAsync());
+
+        var malformed = await client.PostAsync(path, new StringContent("""{"name":""", System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+
+        var wrongType = await client.PostAsync(path, new StringContent("Ann", System.Text.Encoding.UTF8, "text/plain"));
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, wrongType.StatusCode);
+    }
+
     /// <summary>PRD D5: <c>IsEnabled</c> is honoured on the manual path too.</summary>
     [Fact]
     public void EndpointInADisabledGroup_IsNotMapped()

@@ -397,6 +397,59 @@ public class ParameterBindingPipelineTests : IClassFixture<WebApplicationFactory
     }
 
     /// <summary>
+    /// AC12 (PRD R6, spike S4): the typed twin of the raw parity test above. The TestApp's
+    /// request-typed <c>CreateUser</c> and <c>UpdateUser</c> answer identically through the manual
+    /// <c>MapEndpoint&lt;T&gt;()</c> and the generated mapping — a valid body, a malformed one, the
+    /// wrong content type, an empty body, and a bad route value next to a good body.
+    /// </summary>
+    /// <remarks>
+    /// Binding lives in the endpoint base class, not in either mapper, which is why S4 found parity
+    /// already holds; this pins it. Each side is a fresh host with the TestApp's registrations, so the
+    /// id a successful <c>POST</c> is given is the same on both.
+    /// </remarks>
+    [Theory]
+    [InlineData("POST", "/api/users", "application/json", """{"name":"Carol","email":"carol@example.com"}""")]
+    [InlineData("POST", "/api/users", "application/json", """{"name":""")]
+    [InlineData("POST", "/api/users", "text/plain", "Carol")]
+    [InlineData("POST", "/api/users", null, null)]
+    [InlineData("PUT", "/api/users/7", "application/json", """{"name":"Dan","email":"dan@example.com"}""")]
+    [InlineData("PUT", "/api/users/7", "application/json", "{")]
+    [InlineData("PUT", "/api/users/7", "text/plain", "Dan")]
+    [InlineData("PUT", "/api/users/abc", "application/json", """{"name":"Dan","email":"dan@example.com"}""")]
+    public async Task ManualMapEndpoint_BindsTypedEndpointsIdenticallyToTheGeneratedMapping(string method, string url, string? contentType, string? body)
+    {
+        using var manualHost = await StartHost(
+            endpoints =>
+            {
+                endpoints.MapEndpoint<TestAppEndpoints.CreateUser>();
+                endpoints.MapEndpoint<TestAppEndpoints.UpdateUser>();
+            },
+            services =>
+            {
+                MintPlayer.AspNetCore.Endpoints.TestApp.Models.TestAppValidation.AddTestAppValidation(services);
+                services.AddSingleton<MintPlayer.AspNetCore.Endpoints.TestApp.Models.UserData>();
+                services.AddScoped<MintPlayer.AspNetCore.Endpoints.TestApp.Models.IUserStore, MintPlayer.AspNetCore.Endpoints.TestApp.Models.InMemoryUserStore>();
+            });
+        using var generatedHost = factory.WithWebHostBuilder(_ => { });
+
+        HttpRequestMessage Request()
+        {
+            var request = new HttpRequestMessage(new HttpMethod(method), url);
+            if (body is not null)
+                request.Content = new StringContent(body, System.Text.Encoding.UTF8, contentType!);
+            return request;
+        }
+
+        using var manualRequest = Request();
+        using var generatedRequest = Request();
+        var manual = await manualHost.GetTestClient().SendAsync(manualRequest);
+        var generated = await generatedHost.CreateClient().SendAsync(generatedRequest);
+
+        Assert.Equal(generated.StatusCode, manual.StatusCode);
+        Assert.Equal(await Detail(generated), await Detail(manual));
+    }
+
+    /// <summary>
     /// The comparable part of a response: the problem <c>detail</c> for a failure, the whole body
     /// otherwise. (A problem's <c>traceId</c> differs per request and per host.)
     /// </summary>
