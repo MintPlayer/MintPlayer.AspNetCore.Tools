@@ -450,6 +450,45 @@ handlers: one class implementing both would have one `IsEnabled` answer for both
 `Configure` name cover two builders. The generator reports such a class as MPEP036 (Error) and treats
 it as a group only; move the endpoint into a class of its own and join it with `[MemberOf<TGroup>]`.
 
+### Middleware for a group's prefix
+
+A group has no middleware hook of its own: middleware order is decided once, for the whole
+application, and a group is a unit of routing, not of the request pipeline. To run middleware only for
+a group's routes, branch the pipeline on its `Prefix` — still a compile-time reference to the group, so
+renaming the prefix moves the middleware with the routes:
+
+```csharp
+using MintPlayer.AspNetCore.Endpoints;
+
+public static class AdminAuditing
+{
+    // app.UseAdminAuditing() in Program.cs, before the endpoints are mapped.
+    public static IApplicationBuilder UseAdminAuditing(this IApplicationBuilder app)
+        => app.UseWhen(
+            context => context.Request.Path.StartsWithSegments(AdminApi.Prefix),
+            admin => admin.Use(async (context, next) =>
+            {
+                context.Response.Headers["X-Audited"] = "admin";
+                await next(context);
+            }));
+
+    // A nested group's Prefix is relative to its parent's, so compose the chain yourself.
+    public static IApplicationBuilder UseUsersAuditing(this IApplicationBuilder app)
+        => app.UseWhen(
+            context => context.Request.Path.StartsWithSegments(ApiGroup.Prefix + UsersApi.Prefix),
+            users => users.Use(async (context, next) =>
+            {
+                context.Response.Headers["X-Audited"] = "users";
+                await next(context);
+            }));
+}
+```
+
+The caveat is the nested case. `UsersApi.Prefix` is only `/users`; the route a request spells is
+`/api/users`, because `UsersApi` sits in `ApiGroup`. If the group is later moved with `[MemberOf<T>]`,
+its routes follow automatically but a hand-composed `ApiGroup.Prefix + UsersApi.Prefix` does not. A
+root group, like `AdminApi`, is the safe case: its `Prefix` is the whole prefix.
+
 ## A route from configuration: `GetPath`
 
 `Path` is static and sees nothing. When the route has to come from options or configuration — a

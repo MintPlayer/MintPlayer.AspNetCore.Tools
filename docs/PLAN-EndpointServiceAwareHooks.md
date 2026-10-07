@@ -248,7 +248,7 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
 - S4 verified that parity already holds, so no code change is needed. This milestone is just the three
   AC12 regression tests listed in the S4 result.
 
-## M4: #40, README recipe (R3)
+## M4: #40, README recipe (R3) — [x] done
 
 - Add the "Middleware for a group's prefix" subsection with `StartsWithSegments(Group.Prefix)` and the
   nested-group caveat.
@@ -348,3 +348,12 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
     because a validation problem has no `detail` and its `traceId` differs per host),
     `MapEndpointGenericTests.GenericTypedEndpoint_BindsItsBody_ThroughMapEndpoint`,
     `EndpointInvocationTests.GenericFormBindingOverride_BindsThroughMapEndpoint`.
+  - **M4 done.** README "Middleware for a group's prefix" under Groups: `UseWhen` on
+    `StartsWithSegments(AdminApi.Prefix)` for a root group, the composed `ApiGroup.Prefix + UsersApi.Prefix`
+    for a nested one, and the caveat that `[MemberOf<T>]` moves the routes but not the middleware.
+  - **AC8 check.** No sample-compile script is committed (the one from the ergonomics PRD lived in a
+    scratchpad), so it was rebuilt in the session scratchpad: every server `csharp` block of the README
+    (19 of 20) extracted into one Web SDK project (`MyShop.Api`, both TFMs, local runtime project +
+    generator as analyzer + the OpenAPI package, `NoWarn ASP0029` as in the TestApp). It builds with 0
+    warnings and 0 errors. Block 20, the typed-client usage, needs the client project and was not
+    compiled; it did not change in this branch.
