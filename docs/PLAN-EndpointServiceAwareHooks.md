@@ -253,7 +253,7 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
 - Add the "Middleware for a group's prefix" subsection with `StartsWithSegments(Group.Prefix)` and the
   nested-group caveat.
 
-## M5: Tests (written alongside M2 to M4, run in M6)
+## M5: Tests (written alongside M2 to M4, run in M6) — [x] written (not run)
 
 | AC | Test | File |
 |---|---|---|
@@ -357,3 +357,13 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
     generator as analyzer + the OpenAPI package, `NoWarn ASP0029` as in the TestApp). It builds with 0
     warnings and 0 errors. Block 20, the typed-client usage, needs the client project and was not
     compiled; it did not change in this branch.
+  - **M5 written, not run** (the sweep is M6). Every row of the table above has its test, committed
+    with the milestone it covers; AC5's descriptor flag on the generated list is asserted in
+    `TestLibraryEndToEndTests.GetPathEndpoint_HasNoLinkAndNoContract_AndAFlaggedDescriptor`, next to its
+    link and contract, and its equality in `EndpointDescriptorTests`. Two existing lists were extended
+    for the new `ConfiguredHook_AppUser` endpoint: `TestAppEndToEndTests.GeneratedEndpoints_CarryTheirEffectiveNames`
+    and `TestAppOpenApiDocumentTests.EveryOperation_HasTheEndpointNameAsOperationId`.
+    `GeneratedEndpointHost.MapAndCollectRoutes` gained an overload taking the `WebApplication`, and
+    unwraps a `TargetInvocationException`.
+  - Verification: `-t:Rebuild` of both test projects: 0 warnings, 0 errors (deduplicated: none at all);
+    Release build of the runtime, Abstractions, Generator and CodeFixes (documentation on): 0 warnings.
