@@ -127,6 +127,11 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IConditi
                 yield return DiagnosticDescriptors.TypeNotAccessibleToGeneratedCode.Create(Locate(group.Location, compilation), "Endpoint group", ShortNameOf(group.FullyQualifiedName), whyGroup);
         }
 
+        // MPEP035 — on the hook itself. A base class shared by several endpoints is found through each
+        // of them; Distinct reports it once.
+        foreach (var hook in model.LegacyHooks.Distinct())
+            yield return DiagnosticDescriptors.LegacyConfigureHookIgnored.Create(Locate(hook.Location, compilation), hook.TypeName, hook.ParameterType);
+
         foreach (var groupFqn in plan.UnjoinedGroups)
         {
             var group = plan.Groups.First(candidate => candidate.FullyQualifiedName == groupFqn);

@@ -474,4 +474,33 @@ public class EndpointGroupingTests
             .ToArray();
         Assert.Equal("/root/api/ping", Assert.Single(paths));
     }
+
+    /// <summary>
+    /// AC1 (#36): the generated <c>MapGroup</c> and endpoint <c>Map</c> helpers each call the
+    /// two-argument <c>Configure</c> exactly once, with the root provider, and nothing calls a
+    /// one-argument <c>Configure</c> any more.
+    /// </summary>
+    /// <remarks>
+    /// Text, because the call sites are the helpers' bodies, emitted once each; the runtime effect is
+    /// pinned by <c>GroupMembershipTests.ConfigureHooks_ReceiveTheRootProvider_OnceEach_OnEitherPath</c>.
+    /// The endpoint helper body is emitted into both <c>Map</c> helpers, hence two endpoint calls.
+    /// </remarks>
+    [Fact]
+    public void GeneratedHelpers_CallTheTwoArgumentConfigure_WithTheRootProvider()
+    {
+        var generated = Generated("Fixtures", FixtureSources.Corpus);
+
+        Assert.Equal(1, CountOf(generated, "TGroup.Configure(group, routes.ServiceProvider);"));
+        Assert.Equal(2, CountOf(generated, "TEndpoint.Configure(builder, routes.ServiceProvider);"));
+        Assert.DoesNotContain("TGroup.Configure(group);", generated);
+        Assert.DoesNotContain("TEndpoint.Configure(builder);", generated);
+    }
+
+    private static int CountOf(string text, string value)
+    {
+        var count = 0;
+        for (var index = text.IndexOf(value, StringComparison.Ordinal); index >= 0; index = text.IndexOf(value, index + value.Length, StringComparison.Ordinal))
+            count++;
+        return count;
+    }
 }

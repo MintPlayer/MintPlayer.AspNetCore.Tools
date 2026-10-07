@@ -318,4 +318,13 @@ internal static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "Constraint-keyed binding matches a type parameter by constraint type equality. A constraint such as IUser<TKey> mentions another type parameter, so it equals no closed key such as IUser<Guid>, and inferring TKey from the key is not done: a key would then silently bind parameters it does not name. The explicit form lists every type argument, and every constraint is checked after substitution (MPEP026).");
+
+    public static readonly DiagnosticDescriptor LegacyConfigureHookIgnored = new(
+        id: "MPEP035",
+        title: "A one-argument Configure hook is no longer called",
+        messageFormat: "'{0}' declares Configure({1}) without an IServiceProvider parameter. Since 11.4 it is no longer called. Add 'IServiceProvider services' as the second parameter.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Since 11.4 the group and endpoint Configure hooks receive the application's root service provider: Configure(RouteGroupBuilder group, IServiceProvider services) and Configure(RouteHandlerBuilder builder, IServiceProvider services). An implicit implementation with the old single-parameter signature still compiles, as an unrelated static method that nothing calls, so the conventions it applies would silently disappear. An Error, because a silent loss of authorization or CORS conventions is not something to discover in production.");
 }

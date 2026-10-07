@@ -145,6 +145,29 @@ public class TestLibraryEndToEndTests : IClassFixture<WebApplicationFactory<Prog
         Assert.True(endpoints.IsEndpointMapped(typeof(WhoAmI<>)));
     }
 
+    /// <summary>
+    /// AC2 (#36): a group convention that reads configuration in <c>Configure(group, services)</c> is
+    /// present when the option is on and absent when it is off — and the routes exist both ways, which
+    /// is what <c>IsEnabled</c> could not give.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ConfigurationDrivenGroupTag_FollowsTheOption_AndTheRoutesExistEitherWay(bool audited)
+    {
+        using var configured = factory.WithWebHostBuilder(builder => builder.UseSetting(LibPasskeysGroup.EnabledKey, "true").UseSetting(LibAuthGroup.AuditTagKey, audited ? "true" : "false"));
+        var client = configured.CreateClient();
+
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/lib/auth/whoami")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/lib/auth/passkeys/5")).StatusCode);
+
+        var whoAmI = Assert.Single(Endpoints(configured.Services), endpoint => endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName == "WhoAmI_AppUser");
+        var tags = whoAmI.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Http.Metadata.ITagsMetadata>().SelectMany(metadata => metadata.Tags).ToArray();
+
+        Assert.Contains("Library", tags);
+        Assert.Equal(audited, tags.Contains("LibraryAudit"));
+    }
+
     /// <summary>Issue #38 (AC3, R4): a disabled group's endpoint is not mapped; its sibling still is.</summary>
     [Fact]
     public void DisabledGroup_IsReportedAsNotMapped()

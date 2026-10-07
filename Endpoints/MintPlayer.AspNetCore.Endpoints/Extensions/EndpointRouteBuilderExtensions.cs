@@ -119,8 +119,8 @@ public static class EndpointRouteBuilderExtensions
         // Transfer class-level attributes to endpoint metadata
         builder.WithMetadata(EndpointAttributes.ForMetadata(typeof(TEndpoint)));
 
-        // Call the optional Configure hook
-        TEndpoint.Configure(builder);
+        // Call the optional Configure hook, with the root provider as the generated mapping passes it.
+        TEndpoint.Configure(builder, app.ServiceProvider);
 
         // The request-side metadata the generated mapping declares, through the same helper, after
         // Configure as there. See <remarks> for what this path cannot match.
@@ -289,7 +289,7 @@ public static class EndpointRouteBuilderExtensions
         where TGroup : IEndpointGroup
     {
         var group = routes.MapGroup(TGroup.Prefix);
-        TGroup.Configure(group);
+        TGroup.Configure(group, routes.ServiceProvider);
         return group;
     }
 

@@ -107,7 +107,7 @@ public class UsersApi : IEndpointGroup
 {
     public static string Prefix => "/users";
 
-    static void IEndpointGroup.Configure(RouteGroupBuilder group) => group.WithTags("Users");
+    static void IEndpointGroup.Configure(RouteGroupBuilder group, IServiceProvider services) => group.WithTags("Users");
 }
 
 public record UserResponse(int Id, string Name, string Email);
@@ -367,6 +367,32 @@ The condition is per group; an endpoint that needs its own goes in a group of it
 `Endpoints` descriptor list still lists every declared endpoint, enabled or not. To ask what is actually
 mapped, see [Is an endpoint mapped?](#is-an-endpoint-mapped).
 
+**`IsEnabled` decides whether a group exists, not what it carries.** Returning `false` removes every
+route of the group. To make a *convention* depend on an option — CORS only when an origin is
+configured, say — read the option in `Configure`, which receives the same root provider:
+
+```csharp
+using Microsoft.Extensions.Options;
+using MintPlayer.AspNetCore.Endpoints;
+
+public class TokenOptions
+{
+    public string? CorsPolicy { get; set; }
+}
+
+// POST /connect/token always exists; it only carries CORS when a policy is configured.
+public class ConnectApi : IEndpointGroup
+{
+    public static string Prefix => "/connect";
+
+    static void IEndpointGroup.Configure(RouteGroupBuilder group, IServiceProvider services)
+    {
+        if (services.GetRequiredService<IOptions<TokenOptions>>().Value.CorsPolicy is { } policy)
+            group.RequireCors(policy);
+    }
+}
+```
+
 ## Generic endpoints
 
 **In short.** A library can declare an endpoint that is generic over a type only the application
@@ -547,14 +573,24 @@ public partial class DownloadReport : IGetEndpoint
 
     [RouteParam] public string Name { get; set; } = "";
 
-    static void IEndpointBase.Configure(RouteHandlerBuilder builder) => builder.RequireCors("reports");
+    static void IEndpointBase.Configure(RouteHandlerBuilder builder, IServiceProvider services) => builder.RequireCors("reports");
 
     public Task<IResult> HandleAsync(HttpContext httpContext)
         => Task.FromResult(Results.Text($"report {Name}", "text/csv"));
 }
 ```
 
-A group's `Configure` receives its `RouteGroupBuilder`, as `UsersApi` above shows.
+A group's `Configure` receives its `RouteGroupBuilder`, as `UsersApi` above shows. Both hooks also
+receive the application's **root** `IServiceProvider`, so a convention can depend on options or
+configuration without a cast (see [Groups](#groups) for the CORS example). Each hook is called once,
+when the routes are mapped; no request exists yet, so resolve singletons and options from it, never a
+scoped service.
+
+**Upgrading from 11.3 or earlier:** the one-argument `Configure(RouteGroupBuilder)` and
+`Configure(RouteHandlerBuilder)` hooks are gone. An explicit implementation of the old signature no
+longer compiles (`CS0539`); an implicit `public static void Configure(RouteGroupBuilder group)` still
+compiles, as an ordinary method that nothing calls, so the generator reports it as MPEP035 (Error),
+with a code fix that adds the `IServiceProvider services` parameter.
 
 Besides the class's attributes, every endpoint the library maps carries one `EndpointTypeMetadata`. Its
 `EndpointType` is the closed endpoint class, and it is what the next section reads.
@@ -867,10 +903,12 @@ types and walks base classes, and never reflects over members.
 | MPEP031 | Warning | *(on the attribute)* An endpoint has only some of its type parameters bound, so it is not closed |
 | MPEP032 | Warning | A `new static Path` or `new static Methods` is ignored: the endpoint interface is implemented by a base class (or, for `Methods`, defaulted by the verb interface), whose value the runtime uses (and the links, contract and MPEP007 say); once per hidden member |
 | MPEP033 | Warning | *(on the attribute)* A constraint key cannot bind a type parameter whose constraint uses another type parameter (`where TUser : IUser<TKey>`); close the endpoint with the explicit form |
+| MPEP035 | Error | A group or endpoint (or a base class of it) declares the pre-11.4 one-argument `Configure(RouteGroupBuilder)` / `Configure(RouteHandlerBuilder)`, which is no longer called; add `IServiceProvider services` as the second parameter (code fix) |
 
 The route checks (MPEP007–MPEP010) run only where the route is a compile-time constant; anything else
 is skipped, never guessed. MPEP001, MPEP014 and MPEP019 have a **Make 'X' partial** code fix in Visual
-Studio and Rider (for MPEP019, every enclosing type that is not yet `partial`), with Fix All.
+Studio and Rider (for MPEP019, every enclosing type that is not yet `partial`), with Fix All. MPEP035
+has an **Add 'IServiceProvider services' parameter** code fix, with Fix All.
 
 ## What the generator emits
 

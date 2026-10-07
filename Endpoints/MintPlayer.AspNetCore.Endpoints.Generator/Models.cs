@@ -344,14 +344,42 @@ internal sealed partial class ClosingModel
 [GenerateEquality]
 internal sealed partial class DiscoveredType
 {
-    public DiscoveredType(EndpointInfo? endpoint, GroupInfo? group)
+    public DiscoveredType(EndpointInfo? endpoint, GroupInfo? group, ImmutableArray<LegacyConfigureHook> legacyHooks = default)
     {
         Endpoint = endpoint;
         Group = group;
+        LegacyHooks = legacyHooks.IsDefault ? ImmutableArray<LegacyConfigureHook>.Empty : legacyHooks;
     }
 
     public EndpointInfo? Endpoint { get; }
     public GroupInfo? Group { get; }
+
+    /// <summary>The one-argument <c>Configure</c> hooks on the type or its source base classes (MPEP035).</summary>
+    public ImmutableArray<LegacyConfigureHook> LegacyHooks { get; }
+}
+
+/// <summary>
+/// A <c>static Configure</c> with the pre-11.4 single-parameter signature on a group or endpoint
+/// (MPEP035, PRD R1.3). It is no longer called, so its conventions would silently stop applying.
+/// </summary>
+[GenerateEquality]
+internal sealed partial class LegacyConfigureHook
+{
+    public LegacyConfigureHook(string typeName, string parameterType, LocationKey? location)
+    {
+        TypeName = typeName;
+        ParameterType = parameterType;
+        Location = location;
+    }
+
+    /// <summary>The type that declares the hook: the group or endpoint itself, or a base class of it.</summary>
+    public string TypeName { get; }
+
+    /// <summary><c>RouteGroupBuilder</c> or <c>RouteHandlerBuilder</c>.</summary>
+    public string ParameterType { get; }
+
+    /// <summary>The hook's identifier, where the code fix adds the parameter.</summary>
+    public LocationKey? Location { get; }
 }
 
 [GenerateEquality]
@@ -546,12 +574,14 @@ internal sealed partial class AssemblyInfo
 [GenerateEquality]
 internal sealed partial class EndpointModel
 {
-    public EndpointModel(ImmutableArray<EndpointInfo> endpoints, ImmutableArray<GroupInfo> groups, AssemblyInfo assembly, ClosingModel? closing = null)
+    public EndpointModel(ImmutableArray<EndpointInfo> endpoints, ImmutableArray<GroupInfo> groups, AssemblyInfo assembly, ClosingModel? closing = null,
+        ImmutableArray<LegacyConfigureHook> legacyHooks = default)
     {
         Endpoints = endpoints;
         Groups = groups;
         Assembly = assembly;
         Closing = closing ?? ClosingModel.Empty;
+        LegacyHooks = legacyHooks.IsDefault ? ImmutableArray<LegacyConfigureHook>.Empty : legacyHooks;
     }
 
     public ImmutableArray<EndpointInfo> Endpoints { get; }
@@ -560,6 +590,12 @@ internal sealed partial class EndpointModel
 
     /// <summary>The open endpoints this compilation closes, and what went wrong closing them.</summary>
     public ClosingModel Closing { get; }
+
+    /// <summary>
+    /// The one-argument <c>Configure</c> hooks discovery found (MPEP035). Only the diagnostic reporter
+    /// reads them, so <see cref="WithoutLocations"/> drops them.
+    /// </summary>
+    public ImmutableArray<LegacyConfigureHook> LegacyHooks { get; }
 
     private EndpointMappingPlan? plan;
 
@@ -579,7 +615,8 @@ internal sealed partial class EndpointModel
 
     /// <summary>
     /// What the four producers consume: this model with every <see cref="LocationKey"/> removed, and
-    /// without the closing problems, which only the diagnostic reporter reads (PRD addendum 2, D20).
+    /// without the closing problems and the legacy hooks, which only the diagnostic reporter reads
+    /// (PRD addendum 2, D20).
     /// </summary>
     /// <remarks>
     /// A location is the one thing a line inserted above an endpoint changes. The reporter needs it and

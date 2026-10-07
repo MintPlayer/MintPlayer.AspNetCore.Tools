@@ -26,10 +26,24 @@ internal static class GeneratedEndpointHost
     /// returns the routes it registered, with group prefixes already composed.
     /// </summary>
     public static IReadOnlyList<RouteEndpoint> MapAndCollectRoutes(Assembly generated, string assemblyName)
-    {
-        var app = WebApplication.CreateBuilder().Build();
+        => MapAndCollectRoutes(generated, assemblyName, WebApplication.CreateBuilder().Build());
 
-        MappingMethod(generated, assemblyName).Invoke(null, [app]);
+    /// <summary>
+    /// The same, onto an application the caller built — with configuration of its own, or to compare
+    /// what a hook received with <see cref="WebApplication.Services"/>.
+    /// </summary>
+    public static IReadOnlyList<RouteEndpoint> MapAndCollectRoutes(Assembly generated, string assemblyName, WebApplication app)
+    {
+        // Reflection wraps what the mapping throws; unwrapped, so a startup failure reads as one.
+        try
+        {
+            MappingMethod(generated, assemblyName).Invoke(null, [app]);
+        }
+        catch (TargetInvocationException failure) when (failure.InnerException is not null)
+        {
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure.InnerException).Throw();
+            throw;
+        }
 
         return [.. ((IEndpointRouteBuilder)app).DataSources
             .SelectMany(source => source.Endpoints)

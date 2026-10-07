@@ -156,7 +156,7 @@ public class IsEndpointMappedTests
     {
         public static string Path => "/relabelled";
 
-        static void IEndpointBase.Configure(RouteHandlerBuilder builder)
+        static void IEndpointBase.Configure(RouteHandlerBuilder builder, IServiceProvider services)
             => builder.WithMetadata(new EndpointTypeMetadata(typeof(Mapped)));
 
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());

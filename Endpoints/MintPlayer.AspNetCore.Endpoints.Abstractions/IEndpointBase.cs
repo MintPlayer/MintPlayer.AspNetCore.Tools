@@ -33,5 +33,19 @@ public interface IEndpointBase
     /// Optional hook to configure the route handler (auth, caching, OpenAPI metadata, etc.).
     /// Default implementation is a no-op.
     /// </summary>
-    static virtual void Configure(RouteHandlerBuilder builder) { }
+    /// <remarks>
+    /// Called once, when the routes are mapped, by the generated <c>Map…Endpoints()</c> and by
+    /// <c>MapEndpoint&lt;T&gt;()</c>. <paramref name="services"/> is the application's <b>root</b>
+    /// provider: read options and configuration from it, so a convention can depend on them (a CORS
+    /// policy only when one is configured, say). No request exists yet, so a scoped service cannot be
+    /// resolved from it. Whether the endpoint is mapped at all is decided earlier, by its group's
+    /// <c>IsEnabled</c>; <c>Configure</c> only decides what a mapped endpoint carries.
+    /// <para>
+    /// Since 11.4 this is the only <c>Configure</c> hook: a one-argument
+    /// <c>Configure(RouteHandlerBuilder)</c> is no longer called, and MPEP035 reports it.
+    /// </para>
+    /// </remarks>
+    /// <param name="builder">The endpoint's route handler builder.</param>
+    /// <param name="services">The application's root service provider.</param>
+    static virtual void Configure(RouteHandlerBuilder builder, IServiceProvider services) { }
 }

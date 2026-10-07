@@ -411,7 +411,7 @@ partial class EndpointGenerator
             using (writer.OpenBlock("private static global::Microsoft.AspNetCore.Routing.RouteGroupBuilder MapGroup<TGroup>(global::Microsoft.AspNetCore.Routing.IEndpointRouteBuilder routes) where TGroup : global::MintPlayer.AspNetCore.Endpoints.IEndpointGroup"))
             {
                 writer.WriteLine("var group = global::Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapGroup(routes, TGroup.Prefix);");
-                writer.WriteLine("TGroup.Configure(group);");
+                writer.WriteLine("TGroup.Configure(group, routes.ServiceProvider);");
                 writer.WriteLine("return group;");
             }
             writer.WriteLine();
@@ -481,7 +481,7 @@ partial class EndpointGenerator
             }
             writer.WriteLine(");");
             writer.WriteLine("global::Microsoft.AspNetCore.Builder.RoutingEndpointConventionBuilderExtensions.WithMetadata(builder, global::MintPlayer.AspNetCore.Endpoints.EndpointAttributes.ForMetadata(typeof(TEndpoint)));");
-            writer.WriteLine("TEndpoint.Configure(builder);");
+            writer.WriteLine("TEndpoint.Configure(builder, routes.ServiceProvider);");
             writer.WriteLine("return builder;");
         }
 

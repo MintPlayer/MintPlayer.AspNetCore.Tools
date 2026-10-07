@@ -169,7 +169,7 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
 >     the `[Theory] crossAssembly` tests at `616-693`, and `:484`.
 >   - Runtime resolved path: `TestLibraryEndToEndTests`.
 
-## M2: #36, `Configure(…, IServiceProvider)` replaces the old hook (R1)
+## M2: #36, `Configure(…, IServiceProvider)` replaces the old hook (R1) — [x] done
 
 1. Abstractions: replace the signatures in `IEndpointGroup` and `IEndpointBase`. Update their doc
    comments: root provider, no scoped services, and that `IsEnabled` decides existence.
@@ -309,3 +309,10 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
     and an endpoint.
   - Owner decision D13: endpoints are fixed at startup (no runtime toggling).
   - The owner gave the go-ahead for implementation.
+  - **M2 done.** Both `Configure` hooks take `IServiceProvider services`; the generated helpers,
+    `MapGroupCore` and `MapEndpoint<T>` pass `routes.ServiceProvider`. MPEP035 (Error) walks the type and
+    its source base classes syntactically, reported once per hook via `Distinct`; it also fires next to
+    CS0539 on an explicit old hook, since the fix is the same. `AddServiceProviderParameterCodeFixProvider`
+    with Fix All. In-repo hooks, the README and the test fixtures migrated. Tests: AC1 (text, generated
+    host, `MapEndpoint`), AC2 (`LibAuthGroup` audit tag), AC3 (`ConfigureSignatureDiagnosticTests`,
+    `AddServiceProviderParameterCodeFixTests`). Builds only, no test run.

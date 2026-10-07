@@ -7,12 +7,25 @@ public class LibUser
     public virtual string DisplayName => GetType().Name;
 }
 
-/// <summary>/lib/auth — always mapped.</summary>
+/// <summary>
+/// /lib/auth — always mapped. Its <c>Configure</c> adds the <c>LibraryAudit</c> tag only when
+/// <see cref="AuditTagKey"/> is <c>true</c> (#36): a convention that depends on configuration, on a
+/// group whose routes exist either way.
+/// </summary>
 public class LibAuthGroup : IEndpointGroup
 {
+    /// <summary>The configuration key that adds the <c>LibraryAudit</c> tag.</summary>
+    public const string AuditTagKey = "TestLibrary:AuditTag";
+
     public static string Prefix => "/lib/auth";
 
-    static void IEndpointGroup.Configure(RouteGroupBuilder group) => group.WithTags("Library");
+    static void IEndpointGroup.Configure(RouteGroupBuilder group, IServiceProvider services)
+    {
+        group.WithTags("Library");
+
+        if (services.GetRequiredService<IConfiguration>().GetValue(AuditTagKey, false))
+            group.WithTags("LibraryAudit");
+    }
 }
 
 /// <summary>
