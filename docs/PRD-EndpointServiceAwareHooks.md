@@ -327,6 +327,29 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
   - a class that implements both through base classes or intermediate interfaces.
 
   It is not reported for an ordinary group or an ordinary endpoint.
+
+> **As built (2026-10-08, branch `feat/endpoint-service-aware-hooks`, PR #41).** AC1 to AC13 are met.
+>
+> **Sweep, net10.0 and net11.0:**
+> - Generator.Tests: 425/425 passed (389 before this work).
+> - Tools.Tests: 1136/1136 passed (1097 before).
+>   - The first sweep had 1 failure: a stale assertion that every descriptor except the `GetPath`
+>     fixture is non-configurable.
+>   - The R5 fixture `ManageAccount<TUser>` also overrides `GetPath` (it counts calls), so the
+>     detection was right and the test was corrected.
+>
+> `-t:Rebuild` of both test projects gave 0 warnings and 0 errors.
+>
+> **Deviations, recorded in the PLAN ledger:**
+> - `EndpointDescriptor.IsPathConfigurable` defaults to `false`, and `Describe<>` emits `, true` only for
+>   configurable endpoints.
+> - MPEP032 fires for any static `GetPath` that isn't the one the runtime calls, the same as for
+>   `Methods`.
+> - MPEP035 also fires next to CS0539 on explicit old-signature hooks, so the code fix applies there too.
+> - The AC12 typed-parity theory omits the validation-problem case, because its `traceId` differs per
+>   host.
+>
+> The TestApp OpenAPI snapshot gained `GET /lib/auth/hooks/{id}`.
 - **AC12 (R6)** Through `MapEndpoint<T>()`, a generic request-typed endpoint and a form-urlencoded
   `BindRequestAsync` endpoint:
   - bind a valid body;

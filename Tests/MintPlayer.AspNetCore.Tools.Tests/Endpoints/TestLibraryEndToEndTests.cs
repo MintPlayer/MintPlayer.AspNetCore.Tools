@@ -258,7 +258,11 @@ public class TestLibraryEndToEndTests : IClassFixture<WebApplicationFactory<Prog
         var hook = Assert.Single(descriptors, descriptor => descriptor.Name == "ConfiguredHook_AppUser");
         Assert.True(hook.IsPathConfigurable);
         Assert.Equal("/lib/auth/hooks/{id}", hook.Path);
-        Assert.All(descriptors.Where(descriptor => descriptor != hook), descriptor => Assert.False(descriptor.IsPathConfigurable));
+        // ManageAccount<TUser> also overrides GetPath (it counts its calls for the R5 tests), so it is
+        // configurable too; every endpoint without an override is not.
+        var manage = Assert.Single(descriptors, descriptor => descriptor.Name == "ManageAccount_AppUser");
+        Assert.True(manage.IsPathConfigurable);
+        Assert.All(descriptors.Where(descriptor => descriptor != hook && descriptor != manage), descriptor => Assert.False(descriptor.IsPathConfigurable));
     }
 
     /// <summary>
