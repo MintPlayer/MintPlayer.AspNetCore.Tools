@@ -305,4 +305,7 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
     - D10: startup check on route parameters;
     - D11: typed-binding parity on `MapEndpoint<T>()`. Spike S4 verified it, so only tests are needed.
   - Owner decision D12: a class is never both a group and an endpoint (MPEP036).
-  - Implementation is on hold at the owner's request.
+  - The Spark session confirmed Draft 3 meets all its requirements, and no Spark class is both a group
+    and an endpoint.
+  - Owner decision D13: endpoints are fixed at startup (no runtime toggling).
+  - The owner gave the go-ahead for implementation.

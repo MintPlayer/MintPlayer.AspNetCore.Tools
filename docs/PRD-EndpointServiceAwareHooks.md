@@ -365,6 +365,14 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
 - **D11 (Spark review): `MapEndpoint<T>()` must have typed-binding parity.** S4 verified that it
   already does, so this release adds regression tests only.
 - **D12 (owner): A class is either a group or an endpoint, never both.** MPEP036 (Error) enforces it.
+- **D13 (owner): Endpoints are fixed at startup.** `IsEnabled` (group and endpoint) and `GetPath` are
+  evaluated once, when the routes are mapped. A configuration change at runtime does not map or unmap
+  anything; it takes a restart.
+  - The README says this plainly in the `IsEnabled` and `GetPath` sections.
+  - No runtime-toggle helper and no dynamic `EndpointDataSource` will be added.
+  - Rejected alternatives:
+    - an `EnabledWhen<TOptions>` per-request filter helper;
+    - a generated mapping that re-evaluates on options change.
 
 ## Consumer follow-up (MintPlayer.Spark, after 11.4.0-rc.0 is published)
 
