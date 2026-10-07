@@ -218,7 +218,7 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
      only when `GetPath` returned a non-null value.
    - README: say the startup check enforces the same-parameters rule.
 
-## M3b: Endpoint-level `IsEnabled` and one role per class (R5; D9, D12)
+## M3b: Endpoint-level `IsEnabled` and one role per class (R5; D9, D12) — [x] done
 
 1. Abstractions: add `static virtual bool IsEnabled(IServiceProvider services) => true;` to
    `IEndpointBase`, with a doc comment covering root provider only, map-time evaluation, and that
@@ -331,3 +331,14 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
       interface implementation, with or without the `new` keyword (a derived `GetPath` over a base that
       implements the interface without one needs no `new` and is just as ignored). This matches how
       MPEP032 already treats `Methods` over a verb interface's default.
+  - **M3b done.** `IEndpointBase.IsEnabled`; the generated mapping wraps every endpoint (root, grouped,
+    closed) in `if (IsEndpointEnabled<T>(app.ServiceProvider))` inside its group block, with `GetPath`
+    and `Configure` inside `Map`, so a disabled endpoint runs neither. `MapEndpoint<T>()` returns `app`
+    unmapped after the group chain check, before `GetPath`. MPEP036 (Error) from `Discover` on
+    `AllInterfaces`, reported at the identifier via a `RoleConflicts` step; the class is described as a
+    group only. The grep for classes that are both found none (repo, fixtures, README). README:
+    "Enabling a single endpoint" (`/manage` example), the one-role rule, D13 (fixed at startup), the
+    descriptor caveat, MPEP036. TestLibrary gained `ManageAccount<TUser>` (off unless
+    `TestLibrary:ManageEnabled`), with per-application hook counters keyed on the root provider so
+    parallel hosts do not race; disabled by default, so the OpenAPI snapshot is unchanged. R5.8: the
+    PRD's consumer follow-up already names the endpoint-level `IsEnabled`, so no wording changed.

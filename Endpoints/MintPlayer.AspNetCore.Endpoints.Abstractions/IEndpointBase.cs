@@ -30,7 +30,7 @@ public interface IEndpointBase
     /// <list type="bullet">
     /// <item>
     /// <b>Null always means "use <see cref="Path"/>"</b> — whether this is not overridden or an override
-    /// returns null. It never means "not mapped": that is <c>IsEnabled</c>'s job.
+    /// returns null. It never means "not mapped": that is <see cref="IsEnabled"/>'s job.
     /// </item>
     /// <item>
     /// <b>Only the root provider is available.</b> No request exists yet, so a scoped service cannot
@@ -55,6 +55,27 @@ public interface IEndpointBase
     static virtual string? GetPath(IServiceProvider services) => null;
 
     /// <summary>
+    /// Whether this endpoint is mapped at all. Evaluated once, when the routes are mapped, against the
+    /// application's services — so one endpoint can be switched on or off by configuration without
+    /// switching off its whole group. Default <see langword="true"/>.
+    /// </summary>
+    /// <remarks>
+    /// A group is enabled or disabled as a whole (<c>IEndpointGroup.IsEnabled</c>), so a condition that
+    /// applies to one endpoint belongs here. It is checked after the group chain: an endpoint in a
+    /// disabled group is never asked. When it returns <see langword="false"/>, nothing else happens for
+    /// this endpoint — no route, and neither <see cref="GetPath"/> nor <see cref="Configure"/> is called.
+    /// <para>
+    /// Honoured by the generated <c>Map…Endpoints()</c> and by <c>MapEndpoint&lt;T&gt;()</c>, which then
+    /// returns without mapping anything, as for a disabled group. Only the root provider is available,
+    /// and endpoints are fixed at startup: a configuration change at run time maps or unmaps nothing,
+    /// it takes a restart. The generated <c>Endpoints</c> descriptor list is static and still lists the
+    /// endpoint; <c>IsEndpointMapped&lt;T&gt;</c> answers what is actually mapped.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The application's root service provider.</param>
+    static virtual bool IsEnabled(IServiceProvider services) => true;
+
+    /// <summary>
     /// The HTTP methods this endpoint handles (e.g., ["GET"], ["POST"], ["GET", "HEAD"]).
     /// Convenience interfaces (IGetEndpoint, IPostEndpoint, etc.) provide this automatically.
     /// </summary>
@@ -75,8 +96,8 @@ public interface IEndpointBase
     /// <c>MapEndpoint&lt;T&gt;()</c>. <paramref name="services"/> is the application's <b>root</b>
     /// provider: read options and configuration from it, so a convention can depend on them (a CORS
     /// policy only when one is configured, say). No request exists yet, so a scoped service cannot be
-    /// resolved from it. Whether the endpoint is mapped at all is decided earlier, by its group's
-    /// <c>IsEnabled</c>; <c>Configure</c> only decides what a mapped endpoint carries.
+    /// resolved from it. Whether the endpoint is mapped at all is decided earlier, by its group's and
+    /// its own <see cref="IsEnabled"/>; <c>Configure</c> only decides what a mapped endpoint carries.
     /// <para>
     /// Since 11.4 this is the only <c>Configure</c> hook: a one-argument
     /// <c>Configure(RouteHandlerBuilder)</c> is no longer called, and MPEP035 reports it.

@@ -136,6 +136,10 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IConditi
         foreach (var hook in model.LegacyHooks.Distinct())
             yield return DiagnosticDescriptors.LegacyConfigureHookIgnored.Create(Locate(hook.Location, compilation), hook.TypeName, hook.ParameterType);
 
+        // MPEP036 — on the class identifier; the class was described as a group only.
+        foreach (var conflict in model.RoleConflicts.Distinct())
+            yield return DiagnosticDescriptors.GroupAndEndpoint.Create(Locate(conflict.Location, compilation), conflict.TypeName);
+
         foreach (var groupFqn in plan.UnjoinedGroups)
         {
             var group = plan.Groups.First(candidate => candidate.FullyQualifiedName == groupFqn);

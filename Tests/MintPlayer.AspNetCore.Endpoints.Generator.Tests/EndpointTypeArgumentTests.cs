@@ -791,6 +791,42 @@ public class EndpointTypeArgumentTests
         Assert.Contains("private static bool IsEnabled<TGroup>(global::System.IServiceProvider services) where TGroup : global::MintPlayer.AspNetCore.Endpoints.IEndpointGroup", mapping);
     }
 
+    /// <summary>
+    /// AC11 (PRD R5.3): every endpoint — a root one, a grouped one and a closed open-generic one — is
+    /// wrapped in its own <c>IsEndpointEnabled</c> check, inside its group's block, through a generic
+    /// helper (a static virtual member cannot be called on a class that does not declare it, CS0117).
+    /// </summary>
+    [Fact]
+    public void EveryEndpoint_IsWrappedInItsIsEnabledCheck_InsideItsGroupBlock()
+    {
+        var (_, lib) = Library();
+        var outcome = App(Usings + """
+            [assembly: EndpointTypeArgument<Lib.LibUser, App.AppUser>]
+            namespace App;
+            public class AppUser : Lib.LibUser { }
+            public class ApiGroup : IEndpointGroup { public static string Prefix => "/api"; }
+            [MemberOf<ApiGroup>]
+            public class Health : IGetEndpoint
+            { public static string Path => "/health"; public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok()); }
+            public class Root : IGetEndpoint
+            { public static string Path => "/root"; public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok()); }
+            """, lib);
+
+        AssertNoErrors(outcome);
+        var mapping = outcome.File("EndpointMapping.g.cs");
+        Assert.Contains("private static bool IsEndpointEnabled<TEndpoint>(global::System.IServiceProvider services) where TEndpoint : global::MintPlayer.AspNetCore.Endpoints.IEndpointBase", mapping);
+        Assert.Contains("return TEndpoint.IsEnabled(services);", mapping);
+
+        foreach (var endpoint in new[] { "global::App.Root", "global::App.Health", "global::Lib.WhoAmI<global::App.AppUser>", "global::Lib.Passkeys<global::App.AppUser>" })
+            Assert.Contains($"if (IsEndpointEnabled<{endpoint}>(app.ServiceProvider))", mapping);
+
+        // Inside the group block: the group's check and MapGroup come first, the endpoint's check after.
+        var group = mapping.IndexOf("if (IsEnabled<global::App.ApiGroup>(app.ServiceProvider))", StringComparison.Ordinal);
+        var health = mapping.IndexOf("if (IsEndpointEnabled<global::App.Health>(app.ServiceProvider))", StringComparison.Ordinal);
+        Assert.True(group >= 0 && health > group, "the endpoint check must sit inside its group's IsEnabled block");
+        Assert.Equal(4, mapping.Split("if (IsEndpointEnabled<").Length - 1);
+    }
+
     // ---------- incremental ----------
 
     /// <summary>

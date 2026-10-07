@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace MintPlayer.AspNetCore.Endpoints.TestLibrary;
 
 /// <summary>The library's user type. The application derives its own and closes the endpoints with it.</summary>
@@ -80,6 +82,59 @@ public partial class ConfiguredHook<TUser> : IGetEndpoint<string> where TUser : 
 
     public override Task<IResult> HandleAsync(CancellationToken ct)
         => Task.FromResult(Results.Ok($"hook:{new TUser().DisplayName}:{Id}"));
+}
+
+/// <summary>
+/// Counts the map-time hook calls of <see cref="ManageAccount{TUser}"/> per application (keyed on its
+/// root provider), so a test can assert that a disabled endpoint's <c>GetPath</c> and <c>Configure</c>
+/// never ran — without racing other hosts mapping the same app in parallel.
+/// </summary>
+public static class ManageAccountCalls
+{
+    /// <summary>The configuration key that switches <see cref="ManageAccount{TUser}"/> on; off by default.</summary>
+    public const string EnabledKey = "TestLibrary:ManageEnabled";
+
+    private static readonly ConditionalWeakTable<IServiceProvider, Counts> calls = new();
+
+    /// <summary>How often the hooks ran for the application whose root provider is <paramref name="services"/>.</summary>
+    public static Counts For(IServiceProvider services) => calls.GetValue(services, _ => new Counts());
+
+    /// <summary>One application's hook calls.</summary>
+    public sealed class Counts
+    {
+        /// <summary>Calls to <c>GetPath</c>.</summary>
+        public int GetPath;
+
+        /// <summary>Calls to <c>Configure</c>.</summary>
+        public int Configure;
+    }
+}
+
+/// <summary>
+/// GET /lib/auth/manage — an endpoint-level <c>IsEnabled</c> (PRD R5): its group is always mapped, and
+/// this endpoint only when <see cref="ManageAccountCalls.EnabledKey"/> is <c>true</c>. Its
+/// <c>GetPath</c> and <c>Configure</c> only count their calls, so a disabled endpoint can be shown to
+/// skip them.
+/// </summary>
+[MemberOf<LibAuthGroup>]
+public class ManageAccount<TUser> : IGetEndpoint where TUser : LibUser, new()
+{
+    public static string Path => "/manage";
+
+    static bool IEndpointBase.IsEnabled(IServiceProvider services)
+        => services.GetRequiredService<IConfiguration>().GetValue(ManageAccountCalls.EnabledKey, false);
+
+    public static string? GetPath(IServiceProvider services)
+    {
+        Interlocked.Increment(ref ManageAccountCalls.For(services).GetPath);
+        return null;
+    }
+
+    public static void Configure(RouteHandlerBuilder builder, IServiceProvider services)
+        => Interlocked.Increment(ref ManageAccountCalls.For(services).Configure);
+
+    public Task<IResult> HandleAsync(HttpContext httpContext)
+        => Task.FromResult(Results.Ok(new TUser().DisplayName));
 }
 
 /// <summary>GET /lib/auth/whoami — a raw generic endpoint.</summary>

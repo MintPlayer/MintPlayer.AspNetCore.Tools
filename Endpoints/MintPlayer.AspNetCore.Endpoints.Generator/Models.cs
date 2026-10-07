@@ -364,11 +364,12 @@ internal sealed partial class ClosingModel
 [GenerateEquality]
 internal sealed partial class DiscoveredType
 {
-    public DiscoveredType(EndpointInfo? endpoint, GroupInfo? group, ImmutableArray<LegacyConfigureHook> legacyHooks = default)
+    public DiscoveredType(EndpointInfo? endpoint, GroupInfo? group, ImmutableArray<LegacyConfigureHook> legacyHooks = default, RoleConflict? roleConflict = null)
     {
         Endpoint = endpoint;
         Group = group;
         LegacyHooks = legacyHooks.IsDefault ? ImmutableArray<LegacyConfigureHook>.Empty : legacyHooks;
+        RoleConflict = roleConflict;
     }
 
     public EndpointInfo? Endpoint { get; }
@@ -376,6 +377,26 @@ internal sealed partial class DiscoveredType
 
     /// <summary>The one-argument <c>Configure</c> hooks on the type or its source base classes (MPEP035).</summary>
     public ImmutableArray<LegacyConfigureHook> LegacyHooks { get; }
+
+    /// <summary>Set when the type is both a group and an endpoint (MPEP036); it is then described as a group only.</summary>
+    public RoleConflict? RoleConflict { get; }
+}
+
+/// <summary>A class that implements both <c>IEndpointGroup</c> and an endpoint interface (MPEP036, PRD R5.5).</summary>
+[GenerateEquality]
+internal sealed partial class RoleConflict
+{
+    public RoleConflict(string typeName, LocationKey? location)
+    {
+        TypeName = typeName;
+        Location = location;
+    }
+
+    /// <summary>The class's name, for the message.</summary>
+    public string TypeName { get; }
+
+    /// <summary>The class's identifier.</summary>
+    public LocationKey? Location { get; }
 }
 
 /// <summary>
@@ -595,14 +616,21 @@ internal sealed partial class AssemblyInfo
 internal sealed partial class EndpointModel
 {
     public EndpointModel(ImmutableArray<EndpointInfo> endpoints, ImmutableArray<GroupInfo> groups, AssemblyInfo assembly, ClosingModel? closing = null,
-        ImmutableArray<LegacyConfigureHook> legacyHooks = default)
+        ImmutableArray<LegacyConfigureHook> legacyHooks = default, ImmutableArray<RoleConflict> roleConflicts = default)
     {
         Endpoints = endpoints;
         Groups = groups;
         Assembly = assembly;
         Closing = closing ?? ClosingModel.Empty;
         LegacyHooks = legacyHooks.IsDefault ? ImmutableArray<LegacyConfigureHook>.Empty : legacyHooks;
+        RoleConflicts = roleConflicts.IsDefault ? ImmutableArray<RoleConflict>.Empty : roleConflicts;
     }
+
+    /// <summary>
+    /// The classes that are both a group and an endpoint (MPEP036). Only the diagnostic reporter reads
+    /// them, so <see cref="WithoutLocations"/> drops them.
+    /// </summary>
+    public ImmutableArray<RoleConflict> RoleConflicts { get; }
 
     public ImmutableArray<EndpointInfo> Endpoints { get; }
     public ImmutableArray<GroupInfo> Groups { get; }
@@ -635,7 +663,7 @@ internal sealed partial class EndpointModel
 
     /// <summary>
     /// What the four producers consume: this model with every <see cref="LocationKey"/> removed, and
-    /// without the closing problems and the legacy hooks, which only the diagnostic reporter reads
+    /// without the closing problems, the legacy hooks and the role conflicts, which only the diagnostic reporter reads
     /// (PRD addendum 2, D20).
     /// </summary>
     /// <remarks>

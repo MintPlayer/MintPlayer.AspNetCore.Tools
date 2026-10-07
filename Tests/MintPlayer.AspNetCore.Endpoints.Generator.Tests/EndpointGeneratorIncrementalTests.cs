@@ -590,6 +590,7 @@ public class EndpointGeneratorIncrementalTests
     [InlineData("OpenEndpointNames")]
     [InlineData("ClosedEndpoints")]
     [InlineData("LegacyConfigureHooks")]
+    [InlineData("RoleConflicts")]
     [InlineData(TrackedModelStep)]
     [InlineData("ProducerModel")]
     public void EveryProvider_IsTracked(string stepName)

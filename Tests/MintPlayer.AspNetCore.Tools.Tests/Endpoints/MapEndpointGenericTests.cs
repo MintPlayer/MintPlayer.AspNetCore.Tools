@@ -211,6 +211,43 @@ public class MapEndpointGenericTests
         Assert.Equal("/custom/{ID:int}", RouteOf(app));
     }
 
+    /// <summary>An endpoint that switches itself off, with hooks that count their calls (PRD R5).</summary>
+    public sealed class SwitchedOff : IGetEndpoint
+    {
+        public static int GetPathCalls;
+        public static int ConfigureCalls;
+
+        public static string Path => "/switched-off";
+
+        static bool IEndpointBase.IsEnabled(IServiceProvider services) => false;
+
+        public static string? GetPath(IServiceProvider services)
+        {
+            GetPathCalls++;
+            return null;
+        }
+
+        public static void Configure(RouteHandlerBuilder builder, IServiceProvider services) => ConfigureCalls++;
+
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    /// <summary>
+    /// AC11 (R5.4) on the manual path: a disabled endpoint returns <c>app</c> unmapped, exactly as a
+    /// disabled group does, and its <c>GetPath</c> and <c>Configure</c> are never called.
+    /// </summary>
+    [Fact]
+    public void DisabledEndpoint_IsNotMapped_AndItsHooksNeverRun()
+    {
+        SwitchedOff.GetPathCalls = SwitchedOff.ConfigureCalls = 0;
+        var app = WebApplication.CreateBuilder([]).Build();
+
+        Assert.Same(app, app.MapEndpoint<SwitchedOff>());
+        Assert.Empty(((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints));
+        Assert.Equal(0, SwitchedOff.GetPathCalls);
+        Assert.Equal(0, SwitchedOff.ConfigureCalls);
+    }
+
     /// <summary>PRD D5: <c>IsEnabled</c> is honoured on the manual path too.</summary>
     [Fact]
     public void EndpointInADisabledGroup_IsNotMapped()

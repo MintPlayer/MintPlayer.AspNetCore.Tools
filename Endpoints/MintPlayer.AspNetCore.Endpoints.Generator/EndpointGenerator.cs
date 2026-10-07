@@ -16,6 +16,7 @@ internal static class TrackingNames
     public const string OpenEndpointNames = "OpenEndpointNames";
     public const string ClosedEndpoints = "ClosedEndpoints";
     public const string LegacyConfigureHooks = "LegacyConfigureHooks";
+    public const string RoleConflicts = "RoleConflicts";
     public const string Model = "EndpointModel";
     public const string ProducerModel = "ProducerModel";
 }
@@ -91,12 +92,22 @@ public partial class EndpointGenerator : IncrementalGenerator
             .Collect()
             .WithTrackingName(TrackingNames.LegacyConfigureHooks);
 
+        // MPEP036: the classes that are both a group and an endpoint, collected the same way.
+        var roleConflictsProvider = discoveredProvider
+            .Where(static discovered => discovered.RoleConflict is not null)
+            .Select(static (discovered, _) => discovered.RoleConflict!)
+            .Collect()
+            .WithTrackingName(TrackingNames.RoleConflicts);
+
         var modelProvider = endpointsProvider
             .Join(groupsProvider)
             .Join(assemblyInfoProvider)
             .Combine(closingProvider)
             .Combine(legacyHooksProvider)
-            .Select(static (pair, _) => new EndpointModel(pair.Left.Left.Item1, pair.Left.Left.Item2, pair.Left.Left.Item3, pair.Left.Right, pair.Right))
+            .Combine(roleConflictsProvider)
+            .Select(static (pair, _) => new EndpointModel(
+                pair.Left.Left.Left.Item1, pair.Left.Left.Left.Item2, pair.Left.Left.Left.Item3, pair.Left.Left.Right,
+                legacyHooks: pair.Left.Right, roleConflicts: pair.Right))
             .WithTrackingName(TrackingNames.Model);
 
         // The producers' input: the model without its LocationKeys (PRD addendum 2, D20). A line
@@ -170,17 +181,31 @@ public partial class EndpointGenerator : IncrementalGenerator
         var symbol = context.SemanticModel.GetDeclaredSymbol(classDecl, ct);
         if (symbol is null || symbol.IsAbstract) return null;
 
-        var endpoint = IsEndpoint(symbol)
+        var isGroup = IsGroup(symbol);
+        var isEndpoint = IsEndpoint(symbol);
+
+        // PRD R5.5, D12: a class is a group or an endpoint, never both — one implicit IsEnabled would
+        // silently implement both interfaces' members, and one Configure name would cover two builders.
+        // MPEP036 reports it, and the type is described as a group only, so the output stays
+        // deterministic despite the error.
+        RoleConflict? roleConflict = null;
+        if (isGroup && isEndpoint)
+        {
+            roleConflict = new RoleConflict(symbol.Name, symbol.FromSymbol().AsKey());
+            isEndpoint = false;
+        }
+
+        var endpoint = isEndpoint
             ? DescribeDeclaredEndpoint(symbol, context.SemanticModel.Compilation, ct, context.SemanticModel)
             : null;
-        var group = IsGroup(symbol)
+        var group = isGroup
             ? DescribeDeclaredGroup(symbol, context.SemanticModel, ct)
             : null;
 
         if (endpoint is null && group is null) return null;
 
         var legacyHooks = LegacyConfigureHooks(symbol, endpoint is not null, group is not null, ct);
-        return new DiscoveredType(endpoint, group, legacyHooks);
+        return new DiscoveredType(endpoint, group, legacyHooks, roleConflict);
     }
 
     /// <summary>

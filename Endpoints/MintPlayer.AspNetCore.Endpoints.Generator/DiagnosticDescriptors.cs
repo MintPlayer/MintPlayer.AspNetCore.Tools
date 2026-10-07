@@ -336,4 +336,13 @@ internal static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "Since 11.4 the group and endpoint Configure hooks receive the application's root service provider: Configure(RouteGroupBuilder group, IServiceProvider services) and Configure(RouteHandlerBuilder builder, IServiceProvider services). An implicit implementation with the old single-parameter signature still compiles, as an unrelated static method that nothing calls, so the conventions it applies would silently disappear. An Error, because a silent loss of authorization or CORS conventions is not something to discover in production.");
+
+    public static readonly DiagnosticDescriptor GroupAndEndpoint = new(
+        id: "MPEP036",
+        title: "A class is both a group and an endpoint",
+        messageFormat: "'{0}' implements both IEndpointGroup and an endpoint interface. A class is either a group or an endpoint. Move the endpoint into its own class and join it with [MemberOf<{0}>].",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Groups describe organisation and endpoints describe handlers. One class implementing both would have one implicit IsEnabled implement both interfaces' members, and one Configure name cover two different builders. Detected on every interface the class implements, inherited ones included. The class is treated as a group only, so the generated mapping stays deterministic despite the error.");
 }

@@ -363,9 +363,14 @@ public class ReportsApi : IEndpointGroup
 }
 ```
 
-The condition is per group; an endpoint that needs its own goes in a group of its own. The static
-`Endpoints` descriptor list still lists every declared endpoint, enabled or not. To ask what is actually
-mapped, see [Is an endpoint mapped?](#is-an-endpoint-mapped).
+The condition switches the group as a whole; a condition that applies to one endpoint belongs on that
+endpoint (see below). The static `Endpoints` descriptor list still lists every declared endpoint, enabled
+or not — whether its group or the endpoint itself is switched off. To ask what is actually mapped, see
+[Is an endpoint mapped?](#is-an-endpoint-mapped).
+
+**Endpoints are fixed at startup.** `IsEnabled` (on a group or an endpoint) and `GetPath` are evaluated
+once, when the routes are mapped. A configuration change at run time maps or unmaps nothing; it takes a
+restart.
 
 **`IsEnabled` decides whether a group exists, not what it carries.** Returning `false` removes every
 route of the group. To make a *convention* depend on an option — CORS only when an origin is
@@ -392,6 +397,58 @@ public class ConnectApi : IEndpointGroup
     }
 }
 ```
+
+### Enabling a single endpoint
+
+`IEndpointBase.IsEnabled(IServiceProvider)` is the same switch for one endpoint, so no `if` is needed
+around the mapping call. It is checked after the group chain; when it returns `false` the endpoint is not
+mapped, and neither its `GetPath` nor its `Configure` is called. `MapEndpoint<T>()` then returns without
+mapping anything, as it does for a disabled group. A group that carries a shared convention once — here
+`RequireAuthorization` — can hold endpoints that each decide for themselves whether they exist:
+
+```csharp
+using Microsoft.Extensions.Options;
+using MintPlayer.AspNetCore.Endpoints;
+
+public class AccountOptions
+{
+    public bool LocalPasswords { get; set; }
+}
+
+public class ManageApi : IEndpointGroup
+{
+    public static string Prefix => "/manage";
+
+    static void IEndpointGroup.Configure(RouteGroupBuilder group, IServiceProvider services)
+        => group.RequireAuthorization();
+}
+
+// POST /manage/password — only where accounts have local passwords.
+[MemberOf<ManageApi>]
+public class ChangePassword : IPostEndpoint
+{
+    public static string Path => "/password";
+
+    static bool IEndpointBase.IsEnabled(IServiceProvider services)
+        => services.GetRequiredService<IOptions<AccountOptions>>().Value.LocalPasswords;
+
+    public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.NoContent());
+}
+
+// GET /manage/profile — always.
+[MemberOf<ManageApi>]
+public class ManageProfile : IGetEndpoint
+{
+    public static string Path => "/profile";
+
+    public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+}
+```
+
+**A class is a group or an endpoint, not both.** Groups describe organisation and endpoints describe
+handlers: one class implementing both would have one `IsEnabled` answer for both roles, and one
+`Configure` name cover two builders. The generator reports such a class as MPEP036 (Error) and treats
+it as a group only; move the endpoint into a class of its own and join it with `[MemberOf<TGroup>]`.
 
 ## A route from configuration: `GetPath`
 
@@ -688,7 +745,7 @@ public class GetCapabilities : IGetEndpoint
   includes a closing the application made with `[assembly: EndpointTypeArgument]`, and a non-generic class
   that derives from a closing. Base classes count; interfaces never do. So a query for one of the
   library's own generic bases, such as `PostEndpoint<,>`, matches every endpoint derived from it.
-- **An endpoint that was not mapped** answers `false`, whether its group's `IsEnabled` returned `false`
+- **An endpoint that was not mapped** answers `false`, whether its group's or its own `IsEnabled` returned `false`
   or the mapping call sat inside an `if`. This is what the generated `Endpoints` descriptor list cannot
   tell you, because it lists every endpoint that is *declared*.
 - **Endpoints mapped by anything else**, such as a plain `MapGet` lambda or `MapIdentityApi`, carry no
@@ -968,6 +1025,7 @@ types and walks base classes, and never reflects over members.
 | MPEP033 | Warning | *(on the attribute)* A constraint key cannot bind a type parameter whose constraint uses another type parameter (`where TUser : IUser<TKey>`); close the endpoint with the explicit form |
 | MPEP034 | Info | An endpoint chooses its route at map time ([`GetPath`](#a-route-from-configuration-getpath)): its `Path` is only the default, so it gets no typed link and no client contract, and the route checks apply to the default only. On a closed open-generic endpoint, reported on the attribute |
 | MPEP035 | Error | A group or endpoint (or a base class of it) declares the pre-11.4 one-argument `Configure(RouteGroupBuilder)` / `Configure(RouteHandlerBuilder)`, which is no longer called; add `IServiceProvider services` as the second parameter (code fix) |
+| MPEP036 | Error | A class implements both `IEndpointGroup` and an endpoint interface (directly, through a base class or through an interface of its own); it is treated as a group only. Move the endpoint into its own class and join it with `[MemberOf<T>]` |
 
 The route checks (MPEP007–MPEP010) run only where the route is a compile-time constant; anything else
 is skipped, never guessed. MPEP001, MPEP014 and MPEP019 have a **Make 'X' partial** code fix in Visual

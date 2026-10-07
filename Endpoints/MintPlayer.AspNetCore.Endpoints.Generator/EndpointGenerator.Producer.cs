@@ -373,14 +373,18 @@ partial class EndpointGenerator
                     statements.Add($"{TypedLinkHooks.HookName(index)}(b);");
             }
 
-            if (statements.Count == 0)
+            // PRD R5.3: every endpoint is wrapped in its own IsEnabled, inside its group's block, so a
+            // disabled endpoint maps nothing and its GetPath and Configure (both inside Map) never run.
+            // Emitted for every endpoint: the default returns true and the JIT inlines it. Through a
+            // helper for the reason IsEnabled<TGroup> is one — T.IsEnabled is CS0117 unless T declares it.
+            using (writer.OpenBlock($"if (IsEndpointEnabled<{endpoint.FullyQualifiedName}>(app.ServiceProvider))"))
             {
-                writer.WriteLine($"{map};");
-                return;
-            }
+                if (statements.Count == 0)
+                {
+                    writer.WriteLine($"{map};");
+                    return;
+                }
 
-            using (writer.OpenBlock(""))
-            {
                 writer.WriteLine($"var b = {map};");
                 foreach (var statement in statements)
                     writer.WriteLine(statement);
@@ -438,6 +442,12 @@ partial class EndpointGenerator
             using (writer.OpenBlock("private static bool IsEnabled<TGroup>(global::System.IServiceProvider services) where TGroup : global::MintPlayer.AspNetCore.Endpoints.IEndpointGroup"))
             {
                 writer.WriteLine("return TGroup.IsEnabled(services);");
+            }
+            writer.WriteLine();
+
+            using (writer.OpenBlock("private static bool IsEndpointEnabled<TEndpoint>(global::System.IServiceProvider services) where TEndpoint : global::MintPlayer.AspNetCore.Endpoints.IEndpointBase"))
+            {
+                writer.WriteLine("return TEndpoint.IsEnabled(services);");
             }
             writer.WriteLine();
 

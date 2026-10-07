@@ -261,6 +261,44 @@ public class TestLibraryEndToEndTests : IClassFixture<WebApplicationFactory<Prog
         Assert.All(descriptors.Where(descriptor => descriptor != hook), descriptor => Assert.False(descriptor.IsPathConfigurable));
     }
 
+    /// <summary>
+    /// AC11 (R5), generated mapping: an endpoint whose own <c>IsEnabled</c> returns false is not mapped
+    /// — 404, reported as not mapped — its <c>GetPath</c> and <c>Configure</c> never run, and its group
+    /// siblings are still mapped.
+    /// </summary>
+    [Fact]
+    public async Task DisabledEndpoint_IsNotMapped_AndItsHooksNeverRun()
+    {
+        using var disabled = factory.WithWebHostBuilder(builder => builder.UseSetting(ManageAccountCalls.EnabledKey, "false"));
+        var client = disabled.CreateClient();
+
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/lib/auth/manage")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/lib/auth/whoami")).StatusCode);
+
+        var calls = ManageAccountCalls.For(disabled.Services);
+        Assert.Equal(0, calls.GetPath);
+        Assert.Equal(0, calls.Configure);
+
+        var endpoints = disabled.Services.GetRequiredService<EndpointDataSource>();
+        Assert.False(endpoints.IsEndpointMapped(typeof(ManageAccount<>)));
+        Assert.True(endpoints.IsEndpointMapped(typeof(WhoAmI<>)));
+    }
+
+    /// <summary>AC11: enabled, the same endpoint is mapped, and each of its hooks runs exactly once.</summary>
+    [Fact]
+    public async Task EnabledEndpoint_IsMapped_AndItsHooksRunOnce()
+    {
+        using var enabled = factory.WithWebHostBuilder(builder => builder.UseSetting(ManageAccountCalls.EnabledKey, "true"));
+        var client = enabled.CreateClient();
+
+        Assert.Equal("AppUser", await client.GetFromJsonAsync<string>("/lib/auth/manage"));
+
+        var calls = ManageAccountCalls.For(enabled.Services);
+        Assert.Equal(1, calls.GetPath);
+        Assert.Equal(1, calls.Configure);
+        Assert.True(enabled.Services.GetRequiredService<EndpointDataSource>().IsEndpointMapped(typeof(ManageAccount<>)));
+    }
+
     /// <summary>Issue #38 (AC3, R4): a disabled group's endpoint is not mapped; its sibling still is.</summary>
     [Fact]
     public void DisabledGroup_IsReportedAsNotMapped()

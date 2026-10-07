@@ -28,7 +28,10 @@ public static class EndpointRouteBuilderExtensions
     /// so an application that mixes generated and manual registration gets the same route either
     /// way. Each call creates its own <c>RouteGroupBuilder</c> chain, so the group's
     /// <c>Configure</c> hook runs once per call. When a group on the chain is not enabled
-    /// (<see cref="IEndpointGroup.IsEnabled"/>), nothing is mapped. The route is
+    /// (<see cref="IEndpointGroup.IsEnabled"/>), or the endpoint's own
+    /// <see cref="IEndpointBase.IsEnabled"/> returns <see langword="false"/>, nothing is mapped and
+    /// <paramref name="app"/> is returned as it is — the endpoint's <c>GetPath</c> and <c>Configure</c>
+    /// are not called. The route is
     /// <c>TEndpoint.GetPath(services) ?? TEndpoint.Path</c>, as in the generated mapping.
     /// <para>
     /// <b>OpenAPI: this path documents less than the generated one, deliberately.</b> It declares
@@ -84,6 +87,11 @@ public static class EndpointRouteBuilderExtensions
             if (!IsGroupEnabled(groupType, app.ServiceProvider))
                 return app;
         }
+
+        // Then the endpoint's own IsEnabled (PRD R5.2, R5.4): disabled, it is not mapped and neither
+        // GetPath nor Configure is called — the same unmapped return as for a disabled group.
+        if (!TEndpoint.IsEnabled(app.ServiceProvider))
+            return app;
 
         // The route chosen at map time (IEndpointBase.GetPath), checked before anything is mapped so a
         // parameter mismatch fails startup without leaving half a group chain behind (PRD R2.10).
