@@ -219,8 +219,8 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
   - The wrap is emitted for every endpoint. Override detection isn't needed, because the default returns
     true and the JIT inlines it.
 - **R5.4** `MapEndpoint<T>()` checks `T.IsEnabled(app.ServiceProvider)` after the group-chain check
-  (`EndpointRouteBuilderExtensions.cs:78-83`). For a disabled endpoint it returns the same thing it
-  returns for a disabled group today. S4 confirms exactly what that is, and the doc comment states it.
+  (`EndpointRouteBuilderExtensions.cs:78-83`). A disabled group makes it `return app;` without
+  mapping anything (`:82`). A disabled endpoint does exactly the same, and the doc comment says so.
 - **R5.5 (owner decision, D12)** A class must not be both a group and an endpoint. Today nothing
   enforces this: discovery checks `IsGroup` and the endpoint interfaces independently
   (`EndpointGenerator.cs:438-440`).
@@ -253,12 +253,26 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
   - `BindRequestAsync` overrides, including form-urlencoded ones such as the OIDC token, revocation and
     introspection endpoints;
   - 400 on a malformed body, and 415 on the wrong content type.
-- **R6.2** Spike S4 establishes the current behaviour.
-  - If it already matches, this requirement is satisfied by regression tests only, and the PRD records it
-    as verified.
-  - If it doesn't, the fix is part of this release.
-
-  The S4 result is recorded in the PLAN.
+- **R6.2 Verified by spike S4 (2026-10-07): parity already holds, and no code change is needed.**
+  - Binding is done by the endpoint base class, not by either mapper: `EndpointBase<T>.HandleAsync`
+    calls `BindRequestAsync`, and `BodyEndpoint<T>` returns 400 or 415.
+  - The generator emits the same `partial class X<TUser> : PostEndpoint<TReq>` whichever mapper is used,
+    and the two request delegates are equivalent (`EndpointRouteBuilderExtensions.cs:91-117` compared
+    with `Producer.cs:462-484`).
+  - A scratch TestServer ran 48 request cases (valid, malformed, wrong content type, empty, form,
+    override). They gave identical results through `MapEndpoint<X<User>>()` and through the generated
+    mapping, both with and without `AddControllers()`.
+  - The only differences between the two mappers are in the OpenAPI shape (the `[AsParameters]` shadow
+    parameter and `Produces<TResponse>`), and both are already documented.
+  - No existing test sends a request body through `MapEndpoint<T>`, so R6 is delivered as **regression
+    tests only** (AC12).
+  - Consumer caveat: each typed endpoint must be `partial` (MPEP001 otherwise) or derive from
+    `PostEndpoint<T>` explicitly.
+  > Two behaviours are the same on both paths but worth knowing:
+  > - an empty body with no content type gets 415, not 400;
+  > - a JSON `null` body gets a bare 400, not problem+json.
+  >
+  > Neither changes in this release.
 
 ### R4: Release
 
@@ -348,8 +362,8 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
   `Configure`.
 - **D10 (Spark review): A route-parameter mismatch from `GetPath` fails at startup.** The startup check
   replaces the documentation-only rule from D4. A first-request 400 becomes a startup failure.
-- **D11 (Spark review): `MapEndpoint<T>()` must have typed-binding parity**, verified by S4, and fixed in
-  this release if it falls short.
+- **D11 (Spark review): `MapEndpoint<T>()` must have typed-binding parity.** S4 verified that it
+  already does, so this release adds regression tests only.
 - **D12 (owner): A class is either a group or an endpoint, never both.** MPEP036 (Error) enforces it.
 
 ## Consumer follow-up (MintPlayer.Spark, after 11.4.0-rc.0 is published)

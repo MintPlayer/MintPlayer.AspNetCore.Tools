@@ -46,14 +46,30 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
     `EndpointClosing.cs:109,121`).
   - Confirm the closing assembly omits the typed link and contract, reports MPEP034 and maps on the
     resolved path.
-- [ ] **S4: Typed binding parity on `MapEndpoint<T>()` (R6, from the Spark review).**
+- [x] **S4: Typed binding parity on `MapEndpoint<T>()` (R6, from the Spark review).**
   - Map a generic `IPostEndpoint<TReq>` and a form-urlencoded `BindRequestAsync` endpoint through
     `MapEndpoint<T>()`, with no generator involved.
   - POST each one a valid body, a malformed body, the wrong content type and an empty body.
   - Compare the results with the generated mapping.
   - Outcome: either "verified, regression tests only", or a gap list with a fix that goes into M3c.
 
-### Spike results (2026-10-07; S1 to S3 done, S4 pending; scratch projects are in the session scratchpad)
+### Spike results (2026-10-07; S1 to S4 done; scratch projects are in the session scratchpad)
+
+> **S4: done. Parity already holds, and no fix is needed.** Details are in PRD R6.2.
+> - 48 request cases gave identical results through `MapEndpoint<X<User>>()` and through the generated
+>   mapping, with and without MVC.
+> - Tests to add (AC12):
+>   1. `ParameterBindingPipelineTests.cs`: a typed twin of
+>      `ManualMapEndpoint_BindsRawEndpointsIdenticallyToTheGeneratedMapping`, using TestApp's
+>      CreateUser/UpdateUser. Send valid JSON, malformed JSON, text/plain and an empty body, and require
+>      the same status and body as the generated mapping.
+>   2. `MapEndpointGenericTests.cs`: a generic `PostThing<T>` mapped as `MapEndpoint<PostThing<User>>()`.
+>      Expect 200 with the values bound, 400 for malformed JSON and 415 for text/plain.
+>   3. `EndpointInvocationTests.cs`: a generic form-urlencoded `BindRequestAsync` override mapped through
+>      `MapEndpoint`. Expect 200 with the fields bound, 400 when an `EndpointBindingException` is thrown,
+>      and 415 for JSON.
+> - `MapEndpoint<T>()` returns `app` unmapped for a disabled group (`EndpointRouteBuilderExtensions.cs:82`).
+>   A disabled endpoint (R5.4) must do the same.
 
 > **S1: done.** `static virtual string? GetPath(IServiceProvider) => null` combined with
 > `T.GetPath(sp) ?? T.Path` builds with no warnings on net10.0 and net11.0, and dispatches correctly for
@@ -229,9 +245,8 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
 
 ## M3c: Typed binding parity on `MapEndpoint<T>()` (R6; D11)
 
-- Depends on S4.
-  - If parity already holds: add only the AC12 regression tests.
-  - If it doesn't: apply the fix S4 proposes. It goes here, before the tests.
+- S4 verified that parity already holds, so no code change is needed. This milestone is just the three
+  AC12 regression tests listed in the S4 result.
 
 ## M4: #40, README recipe (R3)
 
@@ -261,7 +276,9 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
 | AC10 | Param-name mismatch throws at startup (generated + `MapEndpoint<T>()`); literal/constraint/case differences pass | `Tools.Tests/Endpoints/` new `EndpointPathValidatorTests.cs` + `MapEndpointGenericTests.cs` + `TestLibraryEndToEndTests.cs` |
 | AC11 | Disabled endpoint: 404, `Configure`/`GetPath` counters stay 0, siblings mapped, `IsEndpointMapped<T>` false (both paths) | `Tools.Tests/Endpoints/MapEndpointGenericTests.cs`, `IsEndpointMappedTests.cs`, `TestLibraryEndToEndTests.cs` |
 | AC11 | Generated code wraps each endpoint in `IsEndpointEnabled<T>` inside its group block | `Generator.Tests/EndpointTypeArgumentTests.cs` (next to `EveryGroup_IsWrappedInItsIsEnabledCheck`) |
-| AC12 | `MapEndpoint<T>()` on a generic `IPostEndpoint<TReq>` and a form `BindRequestAsync` endpoint: valid → bound, malformed → 400, wrong content type → 415; same as generated | `Tools.Tests/Endpoints/MapEndpointGenericTests.cs` (per S4) |
+| AC12 | Typed twin of the raw parity test: CreateUser/UpdateUser via `MapEndpoint<T>()` vs generated, same status + body | `Tools.Tests/Endpoints/ParameterBindingPipelineTests.cs` |
+| AC12 | Generic `PostThing<User>` via `MapEndpoint<T>()`: 200 bound / 400 malformed / 415 text/plain | `Tools.Tests/Endpoints/MapEndpointGenericTests.cs` |
+| AC12 | Generic form `BindRequestAsync` override via `MapEndpoint<T>()`: 200 / 400 / 415 | `Tools.Tests/Endpoints/EndpointInvocationTests.cs` |
 | AC13 | MPEP036: direct, via base class, via intermediate interface; not for plain group/endpoint | `Generator.Tests/` new `GroupEndpointRoleDiagnosticTests.cs` |
 
 ## M6: Sweep, docs, PR
@@ -286,6 +303,6 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
   - The Spark consumer review on #41 led to PRD Draft 3:
     - D9: endpoint-level `IsEnabled`;
     - D10: startup check on route parameters;
-    - D11: typed-binding parity on `MapEndpoint<T>()`, spike S4 pending.
+    - D11: typed-binding parity on `MapEndpoint<T>()`. Spike S4 verified it, so only tests are needed.
   - Owner decision D12: a class is never both a group and an endpoint (MPEP036).
   - Implementation is on hold at the owner's request.
