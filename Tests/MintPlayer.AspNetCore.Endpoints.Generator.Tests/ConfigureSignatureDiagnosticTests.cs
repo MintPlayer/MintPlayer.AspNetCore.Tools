@@ -156,4 +156,89 @@ public class ConfigureSignatureDiagnosticTests
 
         Assert.Empty(diagnostics);
     }
+
+    /// <summary>
+    /// #41 review: a <c>private</c>, <c>internal</c> or modifier-less one-argument <c>Configure</c> is a
+    /// helper the two-argument hook delegates to — it never implemented the old member, so it is not
+    /// reported. A <c>public static</c> one beside it, and an explicit group hook, still are.
+    /// </summary>
+    [Fact]
+    public void NonPublicOneArgumentHelpers_AreSilent_WhilePublicAndExplicitHooksAreNot()
+    {
+        var diagnostics = Reported($$"""
+            public class UsersApi : IEndpointGroup
+            {
+                public static string Prefix => "/users";
+                public static void Configure(RouteGroupBuilder group, IServiceProvider services) => Configure(group);
+                private static void Configure(RouteGroupBuilder group) => group.WithTags("Users");
+            }
+
+            [MemberOf<UsersApi>]
+            public class ListUsers : IGetEndpoint
+            {
+                public static string Path => "/";
+                public static void Configure(RouteHandlerBuilder builder, IServiceProvider services) => Configure(builder);
+                private static void Configure(RouteHandlerBuilder b) => b.WithDisplayName("list");
+                {{Handler}}
+            }
+
+            [MemberOf<UsersApi>]
+            public class GetUser : IGetEndpoint
+            {
+                public static string Path => "/{id}";
+                public static void Configure(RouteHandlerBuilder builder, IServiceProvider services) => Configure(builder);
+                internal static void Configure(RouteHandlerBuilder b) => b.WithDisplayName("get");
+                {{Handler}}
+            }
+
+            [MemberOf<UsersApi>]
+            public class DeleteUser : IDeleteEndpoint
+            {
+                public static string Path => "/{id}";
+                public static void Configure(RouteHandlerBuilder builder, IServiceProvider services) => Configure(builder);
+                static void Configure(RouteHandlerBuilder b) => b.WithDisplayName("delete");
+                {{Handler}}
+            }
+
+            public class Health : IGetEndpoint
+            {
+                public static string Path => "/health";
+                public static void Configure(RouteHandlerBuilder builder) { }
+                {{Handler}}
+            }
+
+            public class AdminApi : IEndpointGroup
+            {
+                public static string Prefix => "/admin";
+                static void IEndpointGroup.Configure(RouteGroupBuilder group) { }
+            }
+            """);
+
+        Assert.Equal(["AdminApi", "Health"], diagnostics.Select(d => d.GetMessage().Split('\'')[1]).OrderBy(n => n, StringComparer.Ordinal).ToArray());
+    }
+
+    /// <summary>
+    /// #41 review: a static helper class whose <c>public static Configure(RouteHandlerBuilder)</c> the
+    /// endpoints delegate to is not a group or an endpoint — a static class is never discovered —
+    /// so it is not reported, even though the shape matches.
+    /// </summary>
+    [Fact]
+    public void StaticHelperClass_WithAOneArgumentConfigure_IsSilent()
+    {
+        var diagnostics = Reported($$"""
+            internal static class ModerationEndpoint
+            {
+                public static void Configure(RouteHandlerBuilder builder) => builder.WithDisplayName("moderated");
+            }
+
+            public class Approve : IPostEndpoint
+            {
+                public static string Path => "/approve";
+                public static void Configure(RouteHandlerBuilder builder, IServiceProvider services) => ModerationEndpoint.Configure(builder);
+                {{Handler}}
+            }
+            """);
+
+        Assert.Empty(diagnostics);
+    }
 }

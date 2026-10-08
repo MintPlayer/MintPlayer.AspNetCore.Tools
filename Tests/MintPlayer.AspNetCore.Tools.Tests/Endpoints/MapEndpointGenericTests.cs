@@ -288,6 +288,17 @@ public class MapEndpointGenericTests
 
         var wrongType = await client.PostAsync(path, new StringContent("Ann", System.Text.Encoding.UTF8, "text/plain"));
         Assert.Equal(HttpStatusCode.UnsupportedMediaType, wrongType.StatusCode);
+
+        // #41 review: an empty body, as S4 measured it on both mappings — no content type is 415, an
+        // empty application/json body is 400 (never a 500).
+        var noContent = await client.PostAsync(path, null);
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, noContent.StatusCode);
+
+        var emptyUntyped = await client.PostAsync(path, new ByteArrayContent([]));
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, emptyUntyped.StatusCode);
+
+        var emptyJson = await client.PostAsync(path, new StringContent("", System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.BadRequest, emptyJson.StatusCode);
     }
 
     /// <summary>PRD D5: <c>IsEnabled</c> is honoured on the manual path too.</summary>

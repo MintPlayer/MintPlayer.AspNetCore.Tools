@@ -367,3 +367,9 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
     unwraps a `TargetInvocationException`.
   - Verification: `-t:Rebuild` of both test projects: 0 warnings, 0 errors (deduplicated: none at all);
     Release build of the runtime, Abstractions, Generator and CodeFixes (documentation on): 0 warnings.
+- 2026-10-08: #41 consumer review.
+  - Finding 1: the syntactic `GetPath` override check now requires the parameter to be `IServiceProvider` (rightmost simple name); a `public static GetPath(HttpContext)` helper no longer gives MPEP034, `IsPathConfigurable` or a lost link (`RouteDiagnosticTests.MPEP034_DoesNotFire_ForAPublicStaticGetPathTakingAnythingButAServiceProvider`, plus a `global::System.IServiceProvider` case in `MPEP034_DetectsEveryShapeOfOverride`). The semantic fallback is unchanged.
+  - Finding 2: MPEP032 candidates for `GetPath` are only a `public static GetPath(System.IServiceProvider)` or an explicit `IEndpointBase.GetPath`; a private or non-`IServiceProvider` helper on a derived endpoint is silent (`MPEP032_DoesNotFire_ForAGetPathHelperOnADerivedEndpoint`).
+  - Finding 3: MPEP035 flags an implicit one-argument `Configure` only when it is `public`; explicit `IEndpointGroup`/`IEndpointBase.Configure` stays flagged (`ConfigureSignatureDiagnosticTests.NonPublicOneArgumentHelpers_AreSilent_WhilePublicAndExplicitHooksAreNot`). README table and descriptor descriptions say "public" / "IServiceProvider parameter".
+  - Finding 4: pinned that a static helper class with `public static Configure(RouteHandlerBuilder)` is not flagged (`StaticHelperClass_WithAOneArgumentConfigure_IsSilent`).
+  - Finding 5: `MapEndpointGenericTests.GenericTypedEndpoint_BindsItsBody_ThroughMapEndpoint` gained the empty-body cases: no content / empty untyped content 415, empty `application/json` 400, matching S4.

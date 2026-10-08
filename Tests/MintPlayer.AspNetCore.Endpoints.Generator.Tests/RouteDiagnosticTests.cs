@@ -563,6 +563,14 @@ public class RouteDiagnosticTests
         public class Target : IGetEndpoint
         {
             public static string Path => "/target";
+            public static string? GetPath(global::System.IServiceProvider services) => null;
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        }
+        """)]
+    [InlineData("""
+        public class Target : IGetEndpoint
+        {
+            public static string Path => "/target";
             static string? IEndpointBase.GetPath(System.IServiceProvider services) => null;
             public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
         }
@@ -624,6 +632,65 @@ public class RouteDiagnosticTests
             Raw("Internal", Q("/internal"), members: "internal static string? GetPath(System.IServiceProvider services) => \"/x\";") + "\n" +
             Raw("Instance", Q("/instance"), members: "public string? GetPath(System.IServiceProvider services) => \"/x\";"));
 
+        Assert.Empty(Reported(source, "MPEP034"));
+    }
+
+    /// <summary>
+    /// #41 review: a <c>public static GetPath</c> whose parameter is not an <c>IServiceProvider</c> is a
+    /// helper, not an implementation of the member. The endpoint maps at <c>Path</c>, so it gets no
+    /// MPEP034, keeps its typed link, and its descriptor is not flagged configurable.
+    /// </summary>
+    [Fact]
+    public void MPEP034_DoesNotFire_ForAPublicStaticGetPathTakingAnythingButAServiceProvider()
+    {
+        var source = Fixture(Raw("Helper", Q("/helper"), members: "public static string GetPath(HttpContext context) => context.Request.Path;"));
+
+        var run = EndpointGeneratorHarness.Run("Fixtures", source);
+        string GeneratedFile(string file) => run.GeneratedTrees.Single(tree => tree.FilePath.EndsWith(file, StringComparison.Ordinal)).ToString();
+
+        Assert.DoesNotContain(run.Diagnostics, d => d.Id is "MPEP034" or "MPEP032");
+        Assert.Contains("\"/helper\"", GeneratedFile("EndpointRoutes.g.cs"));
+        var describe = GeneratedFile("EndpointMapping.g.cs").Split('\n').Single(line => line.Contains("Describe<global::Fixtures.Helper>"));
+        Assert.DoesNotContain("true", describe);
+        AssertNoCascade(source);
+    }
+
+    /// <summary>
+    /// #41 review: on a derived endpoint, a <c>private static GetPath(string)</c> helper — or a public one
+    /// taking something other than an <c>IServiceProvider</c> — hides nothing the runtime could call, so
+    /// it is not MPEP032. (A genuinely hidden <c>public static GetPath(IServiceProvider)</c> still is:
+    /// <see cref="MPEP032_NewStaticGetPath_IsIgnored_AndSaysSo"/>.)
+    /// </summary>
+    [Fact]
+    public void MPEP032_DoesNotFire_ForAGetPathHelperOnADerivedEndpoint()
+    {
+        var source = Fixture("""
+            public abstract class Base : IGetEndpoint
+            {
+                public static string Path => "/base";
+                public abstract Task<IResult> HandleAsync(HttpContext httpContext);
+            }
+
+            public class PrivateHelper : Base
+            {
+                private static string GetPath(string suffix) => "/base/" + suffix;
+                public override Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok(GetPath("x")));
+            }
+
+            public abstract class OtherBase : IGetEndpoint
+            {
+                public static string Path => "/other";
+                public abstract Task<IResult> HandleAsync(HttpContext httpContext);
+            }
+
+            public class PublicHelper : OtherBase
+            {
+                public static string GetPath(HttpContext context) => context.Request.Path;
+                public override Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """);
+
+        Assert.Empty(Reported(source, "MPEP032"));
         Assert.Empty(Reported(source, "MPEP034"));
     }
 

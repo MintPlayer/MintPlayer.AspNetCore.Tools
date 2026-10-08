@@ -11,7 +11,7 @@ namespace MintPlayer.AspNetCore.Endpoints.Generator;
 /// <para>
 /// <b>Syntax when it is exact, the interface map otherwise.</b> A class with no base class of its own
 /// and no user interface between it and <c>IEndpointBase</c> can only implement <c>GetPath</c> with a
-/// member it declares: a <c>public static</c> one, or an explicit <c>IEndpointBase.GetPath</c>. Both are
+/// member it declares: a <c>public static</c> one taking an <c>IServiceProvider</c>, or an explicit <c>IEndpointBase.GetPath</c>. Both are
 /// visible in its declarations without binding anything, and the class's own <c>internal static
 /// GetPath</c> is correctly excluded — measured in S1, it does not implement the member, and the
 /// compiler says nothing. The return type is not filtered on: a non-nullable <c>string</c> implements
@@ -56,7 +56,7 @@ internal static class PathOverride
 
         var implementation = symbol.FindImplementationForInterfaceMember(interfaceMember);
 
-        if (implementation is not null && NearestStaticGetPath(symbol) is { } nearest)
+        if (implementation is not null && NearestStaticGetPath(symbol, interfaceMember) is { } nearest)
             newGetPathIgnored = !SymbolEqualityComparer.Default.Equals(implementation.OriginalDefinition, nearest.OriginalDefinition);
 
         return implementation is null ||
@@ -88,19 +88,22 @@ internal static class PathOverride
         return found;
     }
 
+    /// <summary>
+    /// A <c>public static GetPath(IServiceProvider)</c>. The parameter type is matched by its rightmost
+    /// simple name, as MPEP035 matches its builders, so <c>System.IServiceProvider</c> and
+    /// <c>global::System.IServiceProvider</c> count too; a helper such as <c>GetPath(HttpContext)</c>
+    /// does not implement the member and is not an override.
+    /// </summary>
     private static bool IsPublicStaticImplicit(MethodDeclarationSyntax method) =>
         method.ExplicitInterfaceSpecifier is null &&
         method.Modifiers.Any(SyntaxKind.PublicKeyword) &&
-        method.Modifiers.Any(SyntaxKind.StaticKeyword);
+        method.Modifiers.Any(SyntaxKind.StaticKeyword) &&
+        method.ParameterList.Parameters[0].Type is { } parameterType &&
+        EndpointGenerator.RightmostName(parameterType) == "IServiceProvider";
 
     private static bool IsExplicitEndpointBase(MethodDeclarationSyntax method) =>
-        method.ExplicitInterfaceSpecifier?.Name switch
-        {
-            QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText == "IEndpointBase",
-            AliasQualifiedNameSyntax aliased => aliased.Name.Identifier.ValueText == "IEndpointBase",
-            SimpleNameSyntax simple => simple.Identifier.ValueText == "IEndpointBase",
-            _ => false,
-        };
+        method.ExplicitInterfaceSpecifier is { Name: var name } &&
+        EndpointGenerator.RightmostName(name) == "IEndpointBase";
 
     /// <summary><c>IEndpointBase.GetPath</c>, from the symbol's interfaces.</summary>
     private static IMethodSymbol? FindInterfaceMember(INamedTypeSymbol symbol)
@@ -134,18 +137,41 @@ internal static class PathOverride
         return false;
     }
 
-    /// <summary>The nearest implicit static <c>GetPath(x)</c> on the class or its base classes.</summary>
-    private static IMethodSymbol? NearestStaticGetPath(INamedTypeSymbol symbol)
+    /// <summary>
+    /// The nearest static <c>GetPath</c> on the class or its base classes that could implement the
+    /// member: a <c>public static GetPath(IServiceProvider)</c>, or an explicit <c>IEndpointBase.GetPath</c>.
+    /// A <c>private</c> or <c>internal</c> helper, or one taking anything else, is never a candidate, so
+    /// it cannot be reported as a hidden <c>GetPath</c> (MPEP032).
+    /// </summary>
+    private static IMethodSymbol? NearestStaticGetPath(INamedTypeSymbol symbol, IMethodSymbol interfaceMember)
     {
         for (var current = symbol; current is not null && current.SpecialType != SpecialType.System_Object; current = current.BaseType)
         {
             foreach (var member in current.GetMembers(MemberName))
             {
-                if (member is IMethodSymbol { IsStatic: true, Parameters.Length: 1, ExplicitInterfaceImplementations.IsEmpty: true } method)
+                if (member is IMethodSymbol { IsStatic: true, Parameters.Length: 1 } method && IsCandidate(method, interfaceMember))
                     return method;
             }
         }
 
         return null;
+    }
+
+    private static bool IsCandidate(IMethodSymbol method, IMethodSymbol interfaceMember)
+    {
+        if (!method.ExplicitInterfaceImplementations.IsEmpty)
+        {
+            foreach (var implemented in method.ExplicitInterfaceImplementations)
+            {
+                if (SymbolEqualityComparer.Default.Equals(implemented.OriginalDefinition, interfaceMember.OriginalDefinition))
+                    return true;
+            }
+
+            return false;
+        }
+
+        return method.DeclaredAccessibility == Accessibility.Public &&
+               method.Parameters[0].Type is INamedTypeSymbol { Name: "IServiceProvider" } parameterType &&
+               SymbolNames.IsNamespace(parameterType.ContainingNamespace, "System");
     }
 }

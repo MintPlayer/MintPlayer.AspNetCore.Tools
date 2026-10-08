@@ -326,7 +326,7 @@ internal static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true,
-        description: "An endpoint that overrides IEndpointBase.GetPath answers on whatever route the application configures, which the generator cannot know. MPEP007-MPEP010 still run against the literal Path, the route that ships when nothing is configured; the descriptor list reports that Path with IsPathConfigurable set. A configured path must keep Path's route parameters, which mapping checks at startup. Reported instead of MPEP011.");
+        description: "An endpoint that overrides IEndpointBase.GetPath (a public static GetPath with an IServiceProvider parameter, or an explicit IEndpointBase.GetPath) answers on whatever route the application configures, which the generator cannot know. MPEP007-MPEP010 still run against the literal Path, the route that ships when nothing is configured; the descriptor list reports that Path with IsPathConfigurable set. A configured path must keep Path's route parameters, which mapping checks at startup. Reported instead of MPEP011.");
 
     public static readonly DiagnosticDescriptor LegacyConfigureHookIgnored = new(
         id: "MPEP035",
@@ -335,7 +335,7 @@ internal static class DiagnosticDescriptors
         category: Category,
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Since 11.4 the group and endpoint Configure hooks receive the application's root service provider: Configure(RouteGroupBuilder group, IServiceProvider services) and Configure(RouteHandlerBuilder builder, IServiceProvider services). An implicit implementation with the old single-parameter signature still compiles, as an unrelated static method that nothing calls, so the conventions it applies would silently disappear. An Error, because a silent loss of authorization or CORS conventions is not something to discover in production.");
+        description: "Since 11.4 the group and endpoint Configure hooks receive the application's root service provider: Configure(RouteGroupBuilder group, IServiceProvider services) and Configure(RouteHandlerBuilder builder, IServiceProvider services). A public static implementation with the old single-parameter signature still compiles, as an unrelated static method that nothing calls, so the conventions it applies would silently disappear. An Error, because a silent loss of authorization or CORS conventions is not something to discover in production.");
 
     public static readonly DiagnosticDescriptor GroupAndEndpoint = new(
         id: "MPEP036",

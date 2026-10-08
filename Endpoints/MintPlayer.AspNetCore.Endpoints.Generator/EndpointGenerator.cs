@@ -214,7 +214,7 @@ public partial class EndpointGenerator : IncrementalGenerator
     /// </summary>
     /// <remarks>
     /// Since 11.4 the hooks take an <c>IServiceProvider</c> as well (PRD R1). An <i>implicit</i>
-    /// implementation with the old signature still compiles — as an unrelated static method that
+    /// (<c>public static</c>) implementation with the old signature still compiles — as an unrelated static method that
     /// nothing calls — so its conventions would silently stop applying; an explicit one fails with
     /// CS0539. Both are reported, because the fix is the same.
     /// <para>
@@ -239,6 +239,7 @@ public partial class EndpointGenerator : IncrementalGenerator
                 {
                     if (member is not MethodDeclarationSyntax { Identifier.ValueText: "Configure", ParameterList.Parameters.Count: 1 } method ||
                         !method.Modifiers.Any(SyntaxKind.StaticKeyword) ||
+                        !IsLegacyHookCandidate(method) ||
                         method.ParameterList.Parameters[0].Type is not { } parameterType)
                         continue;
 
@@ -255,8 +256,19 @@ public partial class EndpointGenerator : IncrementalGenerator
         return hooks?.ToImmutable() ?? ImmutableArray<LegacyConfigureHook>.Empty;
     }
 
+    /// <summary>
+    /// Whether a one-argument <c>Configure</c> could be meant as the old hook: an implicit one only when
+    /// it is <c>public</c> — a <c>private</c> or <c>internal</c> helper that the two-argument hook
+    /// delegates to never implemented anything — and an explicit <c>IEndpointGroup.Configure</c> /
+    /// <c>IEndpointBase.Configure</c> always, since the code fix repairs that one too (it is CS0539 already).
+    /// </summary>
+    private static bool IsLegacyHookCandidate(MethodDeclarationSyntax method) =>
+        method.ExplicitInterfaceSpecifier is { Name: var name }
+            ? RightmostName(name) is "IEndpointGroup" or "IEndpointBase"
+            : method.Modifiers.Any(SyntaxKind.PublicKeyword);
+
     /// <summary><c>global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder</c> → <c>RouteHandlerBuilder</c>.</summary>
-    private static string? RightmostName(TypeSyntax type) => type switch
+    internal static string? RightmostName(TypeSyntax type) => type switch
     {
         QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
         AliasQualifiedNameSyntax aliased => aliased.Name.Identifier.ValueText,
