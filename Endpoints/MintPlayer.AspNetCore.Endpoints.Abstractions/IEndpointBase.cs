@@ -1,7 +1,9 @@
 namespace MintPlayer.AspNetCore.Endpoints;
 
 /// <summary>
-/// Base contract for all endpoints. Provides route metadata as static abstract members.
+/// Base contract for all endpoints: static route metadata (<see cref="Path"/>, <see cref="Methods"/>)
+/// and optional map-time hooks (<see cref="GetPath"/>, <see cref="IsEnabled"/>, <see cref="Configure"/>),
+/// each evaluated once when the routes are mapped.
 /// </summary>
 public interface IEndpointBase
 {

@@ -281,7 +281,7 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
 | AC12 | Generic form `BindRequestAsync` override via `MapEndpoint<T>()`: 200 / 400 / 415 | `Tools.Tests/Endpoints/EndpointInvocationTests.cs` |
 | AC13 | MPEP036: direct, via base class, via intermediate interface; not for plain group/endpoint | `Generator.Tests/` new `GroupEndpointRoleDiagnosticTests.cs` |
 
-## M6: Sweep, docs, PR
+## M6: Sweep, docs, PR — [x] done
 
 1. Rebuild with `-t:Rebuild`. Deduplicate the warnings, then confirm no new ones were introduced.
 2. Run the full sweep once on both TFMs, with output redirected to logs. Record the counts against the
@@ -373,3 +373,21 @@ Each spike is a throwaway in the scratchpad or a scratch test. Record the result
   - Finding 3: MPEP035 flags an implicit one-argument `Configure` only when it is `public`; explicit `IEndpointGroup`/`IEndpointBase.Configure` stays flagged (`ConfigureSignatureDiagnosticTests.NonPublicOneArgumentHelpers_AreSilent_WhilePublicAndExplicitHooksAreNot`). README table and descriptor descriptions say "public" / "IServiceProvider parameter".
   - Finding 4: pinned that a static helper class with `public static Configure(RouteHandlerBuilder)` is not flagged (`StaticHelperClass_WithAOneArgumentConfigure_IsSilent`).
   - Finding 5: `MapEndpointGenericTests.GenericTypedEndpoint_BindsItsBody_ThroughMapEndpoint` gained the empty-body cases: no content / empty untyped content 415, empty `application/json` 400, matching S4.
+- 2026-10-08: **M6 done.**
+  - Full sweep, net10.0 and net11.0, run before the review fixes: Generator.Tests 425/425 (389 before
+    this work), Tools.Tests 1136/1136 (1097 before).
+  - The first sweep's one failure was a stale assertion that every descriptor except the `GetPath`
+    fixture is non-configurable; the R5 fixture `ManageAccount<TUser>` also overrides `GetPath`, so the
+    test was corrected, not the detection (36f3de1).
+  - The "As built" note was added to the PRD under the acceptance criteria (36f3de1).
+  - The #41 consumer-review fixes (entry above) landed in 1ef1f73.
+  - Docs pass for 11.4: README `## Upgrading to 11.4 (breaking)` section after Requirements (the
+    upgrade paragraph in the `Configure` section is now a link to it); `MapEndpoint<T>()` wording covers
+    the endpoint's own `IsEnabled` and `GetPath`; the full hook order in the endpoint `IsEnabled`
+    section; endpoint-level `IsEnabled` in "Conditional features stay in the library"; the MPEP032 row,
+    title, message and description read correctly for a `GetPath` declared without `new` (new `{3}`
+    argument: "with 'new static'" for `Path`/`Methods`, "with a public static GetPath(IServiceProvider)
+    of its own" for `GetPath`). XML docs: `EndpointPathValidator` lost its PRD references and is
+    `[EditorBrowsable(Never)]`; `IEndpointGroup.IsEnabled`, the `IEndpointBase` summary and
+    `IsEndpointMapped` describe the map-time hooks. PRD: R1.3 detection scope, the R5.3 helper name,
+    AC12 in order, header and As-built deviations updated.

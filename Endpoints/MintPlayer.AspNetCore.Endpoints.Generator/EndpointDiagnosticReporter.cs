@@ -52,15 +52,19 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IConditi
 
             if (endpoint.HasIgnoredNewPath)
                 yield return DiagnosticDescriptors.NewStaticPathIgnored.Create(location, endpoint.ClassName, "Path",
-                    endpoint.Route is { } route ? $"'{route}'" : "a Path not known at compile time");
+                    endpoint.Route is { } route ? $"'{route}'" : "a Path not known at compile time", "with 'new static'");
 
+            // A GetPath needs no 'new' to be ignored: a public static GetPath(IServiceProvider) declared
+            // below the class that implements the endpoint interface is an ordinary method.
             if (endpoint.HasIgnoredNewGetPath)
                 yield return DiagnosticDescriptors.NewStaticPathIgnored.Create(location, endpoint.ClassName, "GetPath",
-                    endpoint.HasPathOverride ? "the GetPath a base class or interface implements" : "the default GetPath, which maps at Path");
+                    endpoint.HasPathOverride ? "the GetPath a base class or interface implements" : "the default GetPath, which maps at Path",
+                    "with a public static GetPath(IServiceProvider) of its own");
 
             if (endpoint.HasIgnoredNewMethods)
                 yield return DiagnosticDescriptors.NewStaticPathIgnored.Create(location, endpoint.ClassName, "Methods",
-                    endpoint.KnownMethods is { } known ? string.Join(", ", MethodsLiteral.Decode(known)) : "verbs not known at compile time");
+                    endpoint.KnownMethods is { } known ? string.Join(", ", MethodsLiteral.Decode(known)) : "verbs not known at compile time",
+                    "with 'new static'");
 
             foreach (var property in endpoint.BoundProperties)
             {

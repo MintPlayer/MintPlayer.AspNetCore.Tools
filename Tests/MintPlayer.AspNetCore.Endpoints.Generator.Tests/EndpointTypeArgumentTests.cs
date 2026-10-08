@@ -502,6 +502,7 @@ public class EndpointTypeArgumentTests
         var warning = Assert.Single(outcome.Ids("MPEP032"));
         Assert.Equal(DiagnosticSeverity.Warning, warning.Severity);
         Assert.Contains("Hidden", warning.GetMessage());
+        Assert.Contains("hides the inherited Path with 'new static'", warning.GetMessage());
     }
 
     /// <summary>

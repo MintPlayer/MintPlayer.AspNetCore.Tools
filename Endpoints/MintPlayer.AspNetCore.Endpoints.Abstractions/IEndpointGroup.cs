@@ -51,6 +51,10 @@ public interface IEndpointGroup
     /// <remarks>
     /// Honoured by the generated <c>Map…Endpoints()</c> and by <c>MapEndpoint&lt;T&gt;()</c>. The
     /// generated <c>Endpoints</c> descriptor list is static and still lists what is declared.
+    /// <para>
+    /// Endpoints are fixed at startup: a configuration change at run time maps or unmaps nothing. To
+    /// switch one endpoint, use <c>IEndpointBase.IsEnabled</c>.
+    /// </para>
     /// </remarks>
     /// <param name="services">The application's root service provider.</param>
     static virtual bool IsEnabled(IServiceProvider services) => true;

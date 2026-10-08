@@ -36,6 +36,39 @@ Program.cs(18,39): error CS0115: 'GetThing.HandleAsync(CancellationToken)': no s
 
 If you see these, update the SDK (or pin a newer one in `global.json`); nothing in your code is wrong.
 
+## Upgrading to 11.4 (breaking)
+
+- **`Configure` takes the service provider.** `Configure(RouteGroupBuilder)` and
+  `Configure(RouteHandlerBuilder)` now take a second parameter, `IServiceProvider services`.
+  - An implicit `public static void Configure(RouteGroupBuilder group)` of the old shape still compiles,
+    as an ordinary method, but it is never called. MPEP035 (Error) reports it, and its code fix adds the
+    parameter, with Fix All.
+  - An explicit implementation of the old hook (`static void IEndpointGroup.Configure(RouteGroupBuilder group)`)
+    fails with `CS0539`. MPEP035 offers the same fix.
+  - A non-public helper named `Configure` is not a hook and is not flagged.
+- **A class is a group or an endpoint, not both.** A class implementing `IEndpointGroup` and an endpoint
+  interface now fails with MPEP036 (Error). Split it in two and join the endpoint to the group with
+  `[MemberOf<T>]` (see [Enabling a single endpoint](#enabling-a-single-endpoint)).
+- **Existing methods can become hooks.** An endpoint class that already declares
+  `public static bool IsEnabled(IServiceProvider)` or `public static string? GetPath(IServiceProvider)`
+  now implicitly implements the new `IEndpointBase` hook of that name, and the mapping calls it. Rename it
+  if that wasn't intended.
+- **`EndpointDescriptor` has a fifth positional member,** `IsPathConfigurable` (defaulting to `false`).
+  Code that constructs a descriptor still compiles, but positional deconstruction
+  (`var (name, path, methods, type) = descriptor`) and positional patterns must add it.
+
+**What's new**
+
+- An endpoint can switch itself off with
+  [`IEndpointBase.IsEnabled(IServiceProvider)`](#enabling-a-single-endpoint), as a group already could.
+- An endpoint can take its route from configuration with
+  [`IEndpointBase.GetPath(IServiceProvider)`](#a-route-from-configuration-getpath).
+- Both [`Configure` hooks](#attributes-configure-and-endpoint-metadata) receive the application's root
+  `IServiceProvider`.
+- Every hook is evaluated once, when the routes are mapped: endpoints are
+  [fixed at startup](#a-route-from-configuration-getpath), and a configuration change at run time takes a
+  restart.
+
 ## Quick start
 
 An endpoint is a class with a static `Path` and a handler:
@@ -402,8 +435,9 @@ public class ConnectApi : IEndpointGroup
 
 `IEndpointBase.IsEnabled(IServiceProvider)` is the same switch for one endpoint, so no `if` is needed
 around the mapping call. It is checked after the group chain; when it returns `false` the endpoint is not
-mapped, and neither its `GetPath` nor its `Configure` is called. `MapEndpoint<T>()` then returns without
-mapping anything, as it does for a disabled group. A group that carries a shared convention once — here
+mapped, and neither its `GetPath` nor its `Configure` is called. The full order, once per endpoint at
+startup, is: group chain → endpoint `IsEnabled` → `GetPath` → parameter check → map → `Configure`.
+A disabled endpoint makes `MapEndpoint<T>()` return without mapping anything, as a disabled group does. A group that carries a shared convention once — here
 `RequireAuthorization` — can hold endpoints that each decide for themselves whether they exist:
 
 ```csharp
@@ -636,7 +670,9 @@ occurrence is one closing, so one endpoint can be closed more than once with dif
   `EndpointTypeArgument`, so an application that doesn't use this pays nothing.
 - **Conditional features stay in the library.** The generated mapping honours each group's
   `IsEnabled` (see [Groups](#groups)), so a library can put an optional cluster of generic endpoints in a
-  group that turns itself off.
+  group that turns itself off. An endpoint's own `IsEnabled` is honoured too (see
+  [Enabling a single endpoint](#enabling-a-single-endpoint)), so a single optional endpoint needs no
+  group of its own.
 
 **What the library's own build does.** Its generator leaves the generic endpoint out of the library's
 `Map…Endpoints()`, links and contract, and says so (MPEP025, Info). It still emits the endpoint's
@@ -744,11 +780,7 @@ configuration without a cast (see [Groups](#groups) for the CORS example). Each 
 when the routes are mapped; no request exists yet, so resolve singletons and options from it, never a
 scoped service.
 
-**Upgrading from 11.3 or earlier:** the one-argument `Configure(RouteGroupBuilder)` and
-`Configure(RouteHandlerBuilder)` hooks are gone. An explicit implementation of the old signature no
-longer compiles (`CS0539`); an implicit `public static void Configure(RouteGroupBuilder group)` still
-compiles, as an ordinary method that nothing calls, so the generator reports it as MPEP035 (Error),
-with a code fix that adds the `IServiceProvider services` parameter.
+Upgrading a one-argument `Configure` from 11.3 or earlier: see [Upgrading to 11.4](#upgrading-to-114-breaking).
 
 Besides the class's attributes, every endpoint the library maps carries one `EndpointTypeMetadata`. Its
 `EndpointType` is the closed endpoint class, and it is what the next section reads.
@@ -1008,7 +1040,8 @@ sees no references — is no client and no diagnostic; code using the client the
 same name the generated mapping uses — for a closed generic endpoint, with its type arguments
 (`Echo_String`), and with the same `EndpointTypeMetadata`, so
 [`IsEndpointMapped`](#is-an-endpoint-mapped) finds it either way. It maps nothing when a group on the
-chain is not enabled (`IEndpointGroup.IsEnabled`).
+chain, or the endpoint itself, is not enabled (`IEndpointGroup.IsEnabled`, `IEndpointBase.IsEnabled`).
+Otherwise it maps at `GetPath(services) ?? Path`, with the same startup parameter check.
 It sees one endpoint at a time, so a duplicate name surfaces on the
 first request, not as MPEP012; it cannot document route or query parameters (see
 [OpenAPI](#openapi)); and it is annotated `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]`. A
@@ -1060,7 +1093,7 @@ types and walks base classes, and never reflects over members.
 | MPEP029 | Warning | *(on the attribute)* An endpoint cannot be closed because it, a group on its chain or a type argument cannot be named by the application (a library's must be `public`) |
 | MPEP030 | Warning | *(on the attribute)* An `EndpointTypeArgument` closes no endpoint |
 | MPEP031 | Warning | *(on the attribute)* An endpoint has only some of its type parameters bound, so it is not closed |
-| MPEP032 | Warning | A `new static Path`, `Methods` or `GetPath` is ignored: the endpoint interface is implemented by a base class (or, for `Methods`, defaulted by the verb interface; for `GetPath`, by the default that maps at `Path`), whose value the runtime uses (and the links, contract and MPEP007 say); once per hidden member |
+| MPEP032 | Warning | A `new static Path` or `Methods`, or a public static `GetPath(IServiceProvider)` on the class chain that is not the interface implementation, is ignored: the endpoint interface is implemented by a base class (or, for `Methods`, defaulted by the verb interface; for `GetPath`, by the default that maps at `Path`), whose value the runtime uses (and the links, contract and MPEP007 say); once per hidden member |
 | MPEP033 | Warning | *(on the attribute)* A constraint key cannot bind a type parameter whose constraint uses another type parameter (`where TUser : IUser<TKey>`); close the endpoint with the explicit form |
 | MPEP034 | Info | An endpoint chooses its route at map time (a public static [`GetPath`](#a-route-from-configuration-getpath) with an `IServiceProvider` parameter, or an explicit `IEndpointBase.GetPath`): its `Path` is only the default, so it gets no typed link and no client contract, and the route checks apply to the default only. On a closed open-generic endpoint, reported on the attribute |
 | MPEP035 | Error | A group or endpoint (or a base class of it) declares the pre-11.4 one-argument hook as a public static (or explicit-interface) `Configure(RouteGroupBuilder)` / `Configure(RouteHandlerBuilder)`, which is no longer called; add `IServiceProvider services` as the second parameter (code fix) |

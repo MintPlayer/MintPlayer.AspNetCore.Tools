@@ -4,15 +4,15 @@ namespace MintPlayer.AspNetCore.Endpoints;
 
 /// <summary>
 /// The startup check on a route chosen by <c>IEndpointBase.GetPath</c>: it must have the same route
-/// parameters as the endpoint's <c>Path</c> (PRD R2.10). Called by the generated mapping and by
-/// <c>MapEndpoint&lt;T&gt;()</c>, only when <c>GetPath</c> returned a value.
+/// parameters as the endpoint's <c>Path</c>, checked only when <c>GetPath</c> returned a value. Called
+/// by the generated mapping and by <c>MapEndpoint&lt;T&gt;()</c>; not intended to be called directly.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Bound <c>[RouteParam]</c> properties, and every build-time route check, are tied to the default
 /// <c>Path</c>. A configured path that drops or renames a parameter would map, start, and then answer
 /// every request with a 400 for a value that cannot be bound; failing at startup instead makes the
-/// mistake visible where it was made (PRD D10).
+/// mistake visible where it was made.
 /// </para>
 /// <para>
 /// Only parameter <b>names</b> are compared, case-insensitively, as routing matches them. Literal
@@ -20,6 +20,7 @@ namespace MintPlayer.AspNetCore.Endpoints;
 /// optional and catch-all markers are not compared, because they do not change which properties bind.
 /// </para>
 /// </remarks>
+[System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
 public static class EndpointPathValidator
 {
     /// <summary>

@@ -303,12 +303,12 @@ internal static class DiagnosticDescriptors
 
     public static readonly DiagnosticDescriptor NewStaticPathIgnored = new(
         id: "MPEP032",
-        title: "A 'new static' Path, Methods or GetPath is not what the endpoint answers on",
-        messageFormat: "Endpoint class '{0}' hides the inherited {1} with 'new static', but the runtime uses {2}, from the implementation of the endpoint interface; list the endpoint interface on '{0}' again to use the new {1}, or remove it",
+        title: "A 'new static' Path or Methods, or a GetPath that is not the interface implementation, is not what the endpoint answers on",
+        messageFormat: "Endpoint class '{0}' hides the inherited {1} {3}, but the runtime uses {2}, from the implementation of the endpoint interface; list the endpoint interface on '{0}' again to use its own {1}, or remove it",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "TEndpoint.Path, TEndpoint.Methods and TEndpoint.GetPath dispatch through the interface map, and a static member hidden with 'new' does not re-implement the interface: the base class's member, the verb interface's default verb, or the default GetPath (which maps at Path), stays in force. The generated links, the contract and the duplicate-route check (MPEP007) use what the endpoint really answers on. Reported once per hidden member.");
+        description: "TEndpoint.Path, TEndpoint.Methods and TEndpoint.GetPath dispatch through the interface map, and neither a static member hidden with 'new' nor a public static GetPath(IServiceProvider) declared below the class that implements the interface re-implements it: the base class's member, the verb interface's default verb, or the default GetPath (which maps at Path), stays in force. The generated links, the contract and the duplicate-route check (MPEP007) use what the endpoint really answers on. Reported once per hidden member.");
 
     public static readonly DiagnosticDescriptor ConstraintDependsOnTypeParameter = new(
         id: "MPEP033",

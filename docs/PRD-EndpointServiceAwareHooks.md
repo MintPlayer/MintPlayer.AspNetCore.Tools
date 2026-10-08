@@ -5,7 +5,8 @@ Issues:
 - [#37: `Path` is static with no `IServiceProvider`, so a configuration-driven route cannot be an endpoint class](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/issues/37). Fixed here.
 - [#40: prefix-scoped middleware declared on a group](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/issues/40). Closed as not planned ([comment](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/issues/40#issuecomment-6046439281)). This PR only adds the README recipe that the closing comment proposes, and it references #40 without closing it.
 
-*(Draft 3, 2026-10-07.*
+*(Implemented in [PR #41](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/41); see the
+"As built" note under the acceptance criteria. Last draft: Draft 3, 2026-10-07.*
 - *Draft 1 came from a four-agent investigation: I1 = #36, I2 = #37, I3 = #40, and I4 = conventions.*
 - *Draft 2 recorded the outcome of a grilling session (Q1 to Q7) with the owner.*
 - *Draft 3 adds the Spark consumer review of PR #41
@@ -111,7 +112,9 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
   parameter."
   - It fires on a group or endpoint type that declares a static `Configure` with a single
     `RouteGroupBuilder` or `RouteHandlerBuilder` parameter.
-  - Detection is syntactic, on the type's own declarations.
+  - Detection is syntactic, on the type's own declarations and on its base classes declared in source.
+    It flags only `public` implicit hooks and explicit-interface ones (a non-public helper named
+    `Configure` is not a hook), and reports each hook once.
   - This is needed because an *implicit* implementation with the old signature still compiles as an
     unrelated method and would silently stop applying its conventions. That is #36's failure mode,
     caused this time by the upgrade. An explicit implementation already fails with CS0539.
@@ -213,7 +216,7 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
      `MapMethods`, no `GetPath`, no `Configure`, no R2.10 check.
   3. Otherwise mapping proceeds: `GetPath`, the R2.10 check, `MapMethods`, then `Configure`.
 - **R5.3** In the generated mapping, each endpoint's `Map…` call is wrapped in
-  `if (IsEnabled<TEndpoint>(app.ServiceProvider)) { … }`.
+  `if (IsEndpointEnabled<TEndpoint>(app.ServiceProvider)) { … }`.
   - This uses a generic helper, `IsEndpointEnabled<TEndpoint>` (because of CS0117, the same reason
     `IsEnabled<TGroup>` is a generic helper, `Producer.cs:163-166`).
   - The wrap is emitted for every endpoint. Override detection isn't needed, because the default returns
@@ -322,6 +325,12 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
   - Its `Configure` and `GetPath` are never invoked. Assert this with counters.
   - Its group siblings are still mapped.
   - `IsEndpointMapped<T>` returns false for it.
+- **AC12 (R6)** Through `MapEndpoint<T>()`, a generic request-typed endpoint and a form-urlencoded
+  `BindRequestAsync` endpoint:
+  - bind a valid body;
+  - answer 400 to a malformed body;
+  - answer 415 to the wrong content type;
+  - behave the same as the generated mapping.
 - **AC13 (R5.5)** MPEP036 is reported in each of these cases:
   - a class that implements both `IEndpointGroup` and an endpoint interface directly;
   - a class that implements both through base classes or intermediate interfaces.
@@ -348,14 +357,12 @@ needs it is Spark's dev-tunnel WebSocket (`options.DevWebSocketPath`, gated on `
 > - MPEP035 also fires next to CS0539 on explicit old-signature hooks, so the code fix applies there too.
 > - The AC12 typed-parity theory omits the validation-problem case, because its `traceId` differs per
 >   host.
+> - MPEP035 also walks source base classes, reported once per hook.
+> - Consumer review on #41
+>   ([comment 6053768940](https://github.com/MintPlayer/MintPlayer.AspNetCore.Tools/pull/41#issuecomment-6053768940)):
+>   `GetPath`/MPEP032/MPEP035 now require `public` + `IServiceProvider`, two test gaps closed (1ef1f73).
 >
 > The TestApp OpenAPI snapshot gained `GET /lib/auth/hooks/{id}`.
-- **AC12 (R6)** Through `MapEndpoint<T>()`, a generic request-typed endpoint and a form-urlencoded
-  `BindRequestAsync` endpoint:
-  - bind a valid body;
-  - answer 400 to a malformed body;
-  - answer 415 to the wrong content type;
-  - behave the same as the generated mapping.
 
 ## Decisions (all settled, 2026-10-07 grilling)
 

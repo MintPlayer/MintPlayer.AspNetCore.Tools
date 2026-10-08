@@ -719,7 +719,8 @@ public class RouteDiagnosticTests
         var diagnostic = Assert.Single(Reported(source, "MPEP032"));
 
         Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
-        Assert.Contains("hides the inherited GetPath", diagnostic.GetMessage());
+        Assert.Contains("hides the inherited GetPath with a public static GetPath(IServiceProvider) of its own", diagnostic.GetMessage());
+        Assert.DoesNotContain("'new static'", diagnostic.GetMessage());
         Assert.Contains("the default GetPath, which maps at Path", diagnostic.GetMessage());
         Assert.Empty(Reported(source, "MPEP034"));
     }

@@ -34,6 +34,10 @@ public static class EndpointDataSourceExtensions
     /// <remarks>
     /// Each endpoint's type is read with <c>GetMetadata&lt;EndpointTypeMetadata&gt;()</c>, so when an
     /// endpoint's own <c>Configure</c> adds another instance, the last one wins.
+    /// <para>
+    /// An endpoint whose group's or its own <c>IsEnabled</c> returned <see langword="false"/> is not
+    /// mapped and answers <see langword="false"/>.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">
