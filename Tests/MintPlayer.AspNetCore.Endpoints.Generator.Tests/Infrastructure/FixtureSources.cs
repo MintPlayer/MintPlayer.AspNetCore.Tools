@@ -47,7 +47,7 @@ internal static class FixtureSources
         public class UsersApi : IEndpointGroup
         {
             public static string Prefix => "/users";
-            static void IEndpointGroup.Configure(RouteGroupBuilder group) => group.WithTags("Users");
+            static void IEndpointGroup.Configure(RouteGroupBuilder group, System.IServiceProvider services) => group.WithTags("Users");
         }
 
         [MemberOf<ApiGroup>]

@@ -25,7 +25,23 @@ public interface IEndpointGroup
     /// Optional hook to configure the route group (auth, rate limiting, CORS, tags, etc.).
     /// Default implementation is a no-op.
     /// </summary>
-    static virtual void Configure(RouteGroupBuilder group) { }
+    /// <remarks>
+    /// Called once, when the routes are mapped. <paramref name="services"/> is the application's
+    /// <b>root</b> provider: read options and configuration from it, so a convention can depend on
+    /// them. No request exists yet, so a scoped service cannot be resolved from it.
+    /// <para>
+    /// <see cref="IsEnabled"/> decides whether the group <b>exists</b>; this hook decides what it
+    /// carries. To drop a convention when an option is off, test the option here — returning
+    /// <see langword="false"/> from <see cref="IsEnabled"/> removes every route of the group.
+    /// </para>
+    /// <para>
+    /// Since 11.4 this is the only <c>Configure</c> hook: a one-argument
+    /// <c>Configure(RouteGroupBuilder)</c> is no longer called, and MPEP035 reports it.
+    /// </para>
+    /// </remarks>
+    /// <param name="group">The group's route group builder.</param>
+    /// <param name="services">The application's root service provider.</param>
+    static virtual void Configure(RouteGroupBuilder group, IServiceProvider services) { }
 
     /// <summary>
     /// Whether this group, its endpoints and every group nested in it are mapped at all. Evaluated
@@ -35,6 +51,10 @@ public interface IEndpointGroup
     /// <remarks>
     /// Honoured by the generated <c>Map…Endpoints()</c> and by <c>MapEndpoint&lt;T&gt;()</c>. The
     /// generated <c>Endpoints</c> descriptor list is static and still lists what is declared.
+    /// <para>
+    /// Endpoints are fixed at startup: a configuration change at run time maps or unmaps nothing. To
+    /// switch one endpoint, use <c>IEndpointBase.IsEnabled</c>.
+    /// </para>
     /// </remarks>
     /// <param name="services">The application's root service provider.</param>
     static virtual bool IsEnabled(IServiceProvider services) => true;

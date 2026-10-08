@@ -107,6 +107,7 @@ public class TestAppOpenApiDocumentTests : IClassFixture<WebApplicationFactory<P
                 "GET /api/users/store-scope = UserStoreScope",
                 "GET /api/users/{id} = GetUser",
                 "GET /health = HealthCheck",
+                "GET /lib/auth/hooks/{id} = ConfiguredHook_AppUser",
                 "GET /lib/auth/passkeys/{id} = Passkeys_AppUser",
                 "GET /lib/auth/whoami = WhoAmI_AppUser",
                 "GET /lib/echo = Echo_String",

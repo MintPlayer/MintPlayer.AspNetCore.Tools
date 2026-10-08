@@ -52,7 +52,7 @@ public class MapEndpointTests
     private sealed class ConfiguredEndpoint : IGetEndpoint
     {
         public static string Path => "/configured";
-        public static void Configure(RouteHandlerBuilder builder) => builder.WithDisplayName("configured-by-hook");
+        public static void Configure(RouteHandlerBuilder builder, IServiceProvider services) => builder.WithDisplayName("configured-by-hook");
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 
@@ -73,7 +73,7 @@ public class MapEndpointTests
     private sealed class UsersGroup : IEndpointGroup
     {
         public static string Prefix => "/users";
-        public static void Configure(RouteGroupBuilder group) => group.WithTags("Users");
+        public static void Configure(RouteGroupBuilder group, IServiceProvider services) => group.WithTags("Users");
     }
 
     private sealed class AdminGroup : IEndpointGroup
@@ -258,6 +258,53 @@ public class MapEndpointTests
         Assert.Equal("configured-by-hook", endpoint.DisplayName);
     }
 
+    private sealed class ProviderGroup : IEndpointGroup
+    {
+        public static int Calls;
+        public static IServiceProvider? Received;
+        public static string Prefix => "/provider";
+
+        public static void Configure(RouteGroupBuilder group, IServiceProvider services)
+        {
+            Calls++;
+            Received = services;
+        }
+    }
+
+    [MemberOf<ProviderGroup>]
+    private sealed class ProviderEndpoint : IGetEndpoint
+    {
+        public static int Calls;
+        public static IServiceProvider? Received;
+        public static string Path => "/endpoint";
+
+        public static void Configure(RouteHandlerBuilder builder, IServiceProvider services)
+        {
+            Calls++;
+            Received = services;
+        }
+
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    /// <summary>
+    /// AC1 (#36) on the manual path: the group's and the endpoint's two-argument <c>Configure</c> are
+    /// each called exactly once, with the application's root provider.
+    /// </summary>
+    [Fact]
+    public void MapEndpoint_PassesTheRootProvider_ToBothConfigureHooks_OnceEach()
+    {
+        ProviderGroup.Calls = ProviderEndpoint.Calls = 0;
+        var app = WebApplication.CreateBuilder([]).Build();
+
+        app.MapEndpoint<ProviderEndpoint>();
+
+        Assert.Equal(1, ProviderGroup.Calls);
+        Assert.Equal(1, ProviderEndpoint.Calls);
+        Assert.Same(app.Services, ProviderGroup.Received);
+        Assert.Same(app.Services, ProviderEndpoint.Received);
+    }
+
     /// <summary>
     /// The manual path names the endpoint by the generator's rule — the
     /// <see cref="EndpointDescriptorNameAttribute"/>, else the class name — as both endpoint name and
@@ -296,7 +343,7 @@ public class MapEndpointTests
     private sealed class RenamingEndpoint : IGetEndpoint
     {
         public static string Path => "/renaming";
-        public static void Configure(RouteHandlerBuilder builder) => builder.WithName("renamed-by-hook");
+        public static void Configure(RouteHandlerBuilder builder, IServiceProvider services) => builder.WithName("renamed-by-hook");
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
     }
 

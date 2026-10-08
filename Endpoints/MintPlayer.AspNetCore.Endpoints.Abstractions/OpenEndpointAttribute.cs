@@ -29,6 +29,12 @@ public sealed class OpenEndpointAttribute(Type endpoint) : Attribute
     /// <summary>True when the generator emitted a parameter binder into the endpoint's partial declaration.</summary>
     public bool HasBinder { get; set; }
 
+    /// <summary>
+    /// True when the endpoint overrides <c>IEndpointBase.GetPath</c>, so <see cref="Path"/> is only its
+    /// default (11.4). An older reader ignores it, which is why <see cref="Version"/> did not change.
+    /// </summary>
+    public bool PathConfigurable { get; set; }
+
     /// <summary>The record format; 1 for the generator that introduced it.</summary>
     public int Version { get; set; }
 }

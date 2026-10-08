@@ -502,6 +502,7 @@ public class EndpointTypeArgumentTests
         var warning = Assert.Single(outcome.Ids("MPEP032"));
         Assert.Equal(DiagnosticSeverity.Warning, warning.Severity);
         Assert.Contains("Hidden", warning.GetMessage());
+        Assert.Contains("hides the inherited Path with 'new static'", warning.GetMessage());
     }
 
     /// <summary>
@@ -703,6 +704,75 @@ public class EndpointTypeArgumentTests
         Assert.True(outcome.Compile.All(d => d.Severity != DiagnosticSeverity.Error), outcome.Describe(outcome.Compile.Where(d => d.Severity == DiagnosticSeverity.Error)));
     }
 
+    // ---------- #37: GetPath on an open endpoint ----------
+
+    private const string ConfiguredPathLibrary = Usings + """
+        namespace Lib;
+
+        public class LibUser { }
+
+        public class AuthGroup : IEndpointGroup { public static string Prefix => "/lib/auth"; }
+
+        [MemberOf<AuthGroup>]
+        public partial class Hooks<TUser> : IGetEndpoint<string> where TUser : LibUser, new()
+        {
+            public static string Path => "/hooks/{id}";
+            public static string? GetPath(IServiceProvider services) => null;
+            [RouteParam] public int Id { get; set; }
+            public override Task<IResult> HandleAsync(CancellationToken ct) => Task.FromResult(Results.Ok(typeof(TUser).Name + Id));
+        }
+
+        [MemberOf<AuthGroup>]
+        public class WhoAmI<TUser> : IGetEndpoint where TUser : LibUser, new()
+        {
+            public static string Path => "/whoami";
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        }
+        """;
+
+    /// <summary>
+    /// AC6 (#37), closing side: an open endpoint that overrides <c>GetPath</c>, closed by the
+    /// application — from the same compilation, or through the library's record — is mapped through the
+    /// same <c>GetPath ?? Path</c> helper, reports MPEP034 at the closing attribute, and gets no typed
+    /// link, no contract and no shadowed default token. Its sibling closing is unaffected.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ClosedEndpointWithGetPath_IsMappedWithoutLinkOrContract_AndReportsMPEP034AtTheClosing(bool crossAssembly)
+    {
+        var app = Usings + """
+            [assembly: EndpointTypeArgument<Lib.LibUser, App.AppUser>]
+            namespace App;
+            public class AppUser : Lib.LibUser { }
+            """;
+        Outcome outcome;
+        if (crossAssembly)
+        {
+            var (_, lib) = Library(ConfiguredPathLibrary);
+            outcome = App(app, lib);
+        }
+        else
+        {
+            outcome = Run(EndpointGeneratorHarness.CreateCompilation("App", [ConfiguredPathLibrary, app]));
+        }
+
+        AssertNoErrors(outcome);
+        var mapping = outcome.File("EndpointMapping.g.cs");
+        Assert.Contains("Map<global::Lib.Hooks<global::App.AppUser>", mapping);
+        Assert.Contains("var configuredPath = TEndpoint.GetPath(routes.ServiceProvider);", mapping);
+        Assert.Contains("Describe<global::Lib.Hooks<global::App.AppUser>>(\"Hooks_AppUser\", Prefix<global::Lib.AuthGroup>(), true)", mapping);
+        Assert.Contains("Describe<global::Lib.WhoAmI<global::App.AppUser>>(\"WhoAmI_AppUser\", Prefix<global::Lib.AuthGroup>())", mapping);
+
+        Assert.DoesNotContain("Hooks_AppUser", outcome.File("EndpointRoutes.g.cs"));
+        Assert.Contains("WhoAmI_AppUser", outcome.File("EndpointRoutes.g.cs"));
+        Assert.DoesNotContain("Hooks_AppUser", outcome.File("EndpointContracts.g.cs"));
+
+        var closing = Assert.Single(outcome.Ids("MPEP034"), d => d.GetMessage().StartsWith("'Hooks_AppUser'", StringComparison.Ordinal));
+        Assert.Equal(DiagnosticSeverity.Info, closing.Severity);
+        Assert.StartsWith("EndpointTypeArgument", SpanText(closing));
+    }
+
     // ---------- D5: IsEnabled ----------
 
     [Fact]
@@ -720,6 +790,42 @@ public class EndpointTypeArgumentTests
         var mapping = outcome.File("EndpointMapping.g.cs");
         Assert.Contains("if (IsEnabled<global::Fixtures.ApiGroup>(app.ServiceProvider))", mapping);
         Assert.Contains("private static bool IsEnabled<TGroup>(global::System.IServiceProvider services) where TGroup : global::MintPlayer.AspNetCore.Endpoints.IEndpointGroup", mapping);
+    }
+
+    /// <summary>
+    /// AC11 (PRD R5.3): every endpoint — a root one, a grouped one and a closed open-generic one — is
+    /// wrapped in its own <c>IsEndpointEnabled</c> check, inside its group's block, through a generic
+    /// helper (a static virtual member cannot be called on a class that does not declare it, CS0117).
+    /// </summary>
+    [Fact]
+    public void EveryEndpoint_IsWrappedInItsIsEnabledCheck_InsideItsGroupBlock()
+    {
+        var (_, lib) = Library();
+        var outcome = App(Usings + """
+            [assembly: EndpointTypeArgument<Lib.LibUser, App.AppUser>]
+            namespace App;
+            public class AppUser : Lib.LibUser { }
+            public class ApiGroup : IEndpointGroup { public static string Prefix => "/api"; }
+            [MemberOf<ApiGroup>]
+            public class Health : IGetEndpoint
+            { public static string Path => "/health"; public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok()); }
+            public class Root : IGetEndpoint
+            { public static string Path => "/root"; public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok()); }
+            """, lib);
+
+        AssertNoErrors(outcome);
+        var mapping = outcome.File("EndpointMapping.g.cs");
+        Assert.Contains("private static bool IsEndpointEnabled<TEndpoint>(global::System.IServiceProvider services) where TEndpoint : global::MintPlayer.AspNetCore.Endpoints.IEndpointBase", mapping);
+        Assert.Contains("return TEndpoint.IsEnabled(services);", mapping);
+
+        foreach (var endpoint in new[] { "global::App.Root", "global::App.Health", "global::Lib.WhoAmI<global::App.AppUser>", "global::Lib.Passkeys<global::App.AppUser>" })
+            Assert.Contains($"if (IsEndpointEnabled<{endpoint}>(app.ServiceProvider))", mapping);
+
+        // Inside the group block: the group's check and MapGroup come first, the endpoint's check after.
+        var group = mapping.IndexOf("if (IsEnabled<global::App.ApiGroup>(app.ServiceProvider))", StringComparison.Ordinal);
+        var health = mapping.IndexOf("if (IsEndpointEnabled<global::App.Health>(app.ServiceProvider))", StringComparison.Ordinal);
+        Assert.True(group >= 0 && health > group, "the endpoint check must sit inside its group's IsEnabled block");
+        Assert.Equal(4, mapping.Split("if (IsEndpointEnabled<").Length - 1);
     }
 
     // ---------- incremental ----------

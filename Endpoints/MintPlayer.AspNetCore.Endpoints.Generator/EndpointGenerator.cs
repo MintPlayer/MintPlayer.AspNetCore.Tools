@@ -15,6 +15,8 @@ internal static class TrackingNames
     public const string AssemblyInfo = "AssemblyInfo";
     public const string OpenEndpointNames = "OpenEndpointNames";
     public const string ClosedEndpoints = "ClosedEndpoints";
+    public const string LegacyConfigureHooks = "LegacyConfigureHooks";
+    public const string RoleConflicts = "RoleConflicts";
     public const string Model = "EndpointModel";
     public const string ProducerModel = "ProducerModel";
 }
@@ -83,11 +85,29 @@ public partial class EndpointGenerator : IncrementalGenerator
             .Select(static (pair, cancellationToken) => EndpointClosing.Build(pair.Left, pair.Right.AsImmutableArray(), cancellationToken))
             .WithTrackingName(TrackingNames.ClosedEndpoints);
 
+        // MPEP035: the one-argument Configure hooks, collected apart from the endpoints and groups so
+        // that a class without any (nearly all of them) contributes an empty, equal array.
+        var legacyHooksProvider = discoveredProvider
+            .SelectMany(static (discovered, _) => discovered.LegacyHooks)
+            .Collect()
+            .WithTrackingName(TrackingNames.LegacyConfigureHooks);
+
+        // MPEP036: the classes that are both a group and an endpoint, collected the same way.
+        var roleConflictsProvider = discoveredProvider
+            .Where(static discovered => discovered.RoleConflict is not null)
+            .Select(static (discovered, _) => discovered.RoleConflict!)
+            .Collect()
+            .WithTrackingName(TrackingNames.RoleConflicts);
+
         var modelProvider = endpointsProvider
             .Join(groupsProvider)
             .Join(assemblyInfoProvider)
             .Combine(closingProvider)
-            .Select(static (pair, _) => new EndpointModel(pair.Left.Item1, pair.Left.Item2, pair.Left.Item3, pair.Right))
+            .Combine(legacyHooksProvider)
+            .Combine(roleConflictsProvider)
+            .Select(static (pair, _) => new EndpointModel(
+                pair.Left.Left.Left.Item1, pair.Left.Left.Left.Item2, pair.Left.Left.Left.Item3, pair.Left.Left.Right,
+                legacyHooks: pair.Left.Right, roleConflicts: pair.Right))
             .WithTrackingName(TrackingNames.Model);
 
         // The producers' input: the model without its LocationKeys (PRD addendum 2, D20). A line
@@ -161,15 +181,100 @@ public partial class EndpointGenerator : IncrementalGenerator
         var symbol = context.SemanticModel.GetDeclaredSymbol(classDecl, ct);
         if (symbol is null || symbol.IsAbstract) return null;
 
-        var endpoint = IsEndpoint(symbol)
+        var isGroup = IsGroup(symbol);
+        var isEndpoint = IsEndpoint(symbol);
+
+        // PRD R5.5, D12: a class is a group or an endpoint, never both — one implicit IsEnabled would
+        // silently implement both interfaces' members, and one Configure name would cover two builders.
+        // MPEP036 reports it, and the type is described as a group only, so the output stays
+        // deterministic despite the error.
+        RoleConflict? roleConflict = null;
+        if (isGroup && isEndpoint)
+        {
+            roleConflict = new RoleConflict(symbol.Name, symbol.FromSymbol().AsKey());
+            isEndpoint = false;
+        }
+
+        var endpoint = isEndpoint
             ? DescribeDeclaredEndpoint(symbol, context.SemanticModel.Compilation, ct, context.SemanticModel)
             : null;
-        var group = IsGroup(symbol)
+        var group = isGroup
             ? DescribeDeclaredGroup(symbol, context.SemanticModel, ct)
             : null;
 
-        return endpoint is null && group is null ? null : new DiscoveredType(endpoint, group);
+        if (endpoint is null && group is null) return null;
+
+        var legacyHooks = LegacyConfigureHooks(symbol, endpoint is not null, group is not null, ct);
+        return new DiscoveredType(endpoint, group, legacyHooks, roleConflict);
     }
+
+    /// <summary>
+    /// MPEP035: the one-argument <c>Configure(RouteGroupBuilder)</c> / <c>Configure(RouteHandlerBuilder)</c>
+    /// hooks declared on <paramref name="symbol"/> or on a base class of it in this compilation.
+    /// </summary>
+    /// <remarks>
+    /// Since 11.4 the hooks take an <c>IServiceProvider</c> as well (PRD R1). An <i>implicit</i>
+    /// (<c>public static</c>) implementation with the old signature still compiles — as an unrelated static method that
+    /// nothing calls — so its conventions would silently stop applying; an explicit one fails with
+    /// CS0539. Both are reported, because the fix is the same.
+    /// <para>
+    /// Syntactic, on the declarations of the type and of every base class with source: an abstract
+    /// base is never discovered on its own, so a hook it declares is only found through the types
+    /// that derive from it. A base from metadata is the referenced assembly's own business. The
+    /// parameter type is matched by its rightmost simple name, so an aliased or fully qualified
+    /// spelling counts as well, and nothing has to be bound.
+    /// </para>
+    /// </remarks>
+    private static ImmutableArray<LegacyConfigureHook> LegacyConfigureHooks(INamedTypeSymbol symbol, bool isEndpoint, bool isGroup, CancellationToken ct)
+    {
+        ImmutableArray<LegacyConfigureHook>.Builder? hooks = null;
+
+        for (var current = symbol; current is { DeclaringSyntaxReferences.Length: > 0 }; current = current.BaseType)
+        {
+            foreach (var reference in current.DeclaringSyntaxReferences)
+            {
+                if (reference.GetSyntax(ct) is not ClassDeclarationSyntax declaration) continue;
+
+                foreach (var member in declaration.Members)
+                {
+                    if (member is not MethodDeclarationSyntax { Identifier.ValueText: "Configure", ParameterList.Parameters.Count: 1 } method ||
+                        !method.Modifiers.Any(SyntaxKind.StaticKeyword) ||
+                        !IsLegacyHookCandidate(method) ||
+                        method.ParameterList.Parameters[0].Type is not { } parameterType)
+                        continue;
+
+                    var parameterName = RightmostName(parameterType);
+                    if ((isGroup && parameterName == "RouteGroupBuilder") || (isEndpoint && parameterName == "RouteHandlerBuilder"))
+                    {
+                        (hooks ??= ImmutableArray.CreateBuilder<LegacyConfigureHook>()).Add(new LegacyConfigureHook(
+                            current.Name, parameterName, method.Identifier.GetLocation().AsKey()));
+                    }
+                }
+            }
+        }
+
+        return hooks?.ToImmutable() ?? ImmutableArray<LegacyConfigureHook>.Empty;
+    }
+
+    /// <summary>
+    /// Whether a one-argument <c>Configure</c> could be meant as the old hook: an implicit one only when
+    /// it is <c>public</c> — a <c>private</c> or <c>internal</c> helper that the two-argument hook
+    /// delegates to never implemented anything — and an explicit <c>IEndpointGroup.Configure</c> /
+    /// <c>IEndpointBase.Configure</c> always, since the code fix repairs that one too (it is CS0539 already).
+    /// </summary>
+    private static bool IsLegacyHookCandidate(MethodDeclarationSyntax method) =>
+        method.ExplicitInterfaceSpecifier is { Name: var name }
+            ? RightmostName(name) is "IEndpointGroup" or "IEndpointBase"
+            : method.Modifiers.Any(SyntaxKind.PublicKeyword);
+
+    /// <summary><c>global::Microsoft.AspNetCore.Builder.RouteHandlerBuilder</c> → <c>RouteHandlerBuilder</c>.</summary>
+    internal static string? RightmostName(TypeSyntax type) => type switch
+    {
+        QualifiedNameSyntax qualified => qualified.Right.Identifier.ValueText,
+        AliasQualifiedNameSyntax aliased => aliased.Name.Identifier.ValueText,
+        SimpleNameSyntax simple => simple.Identifier.ValueText,
+        _ => null,
+    };
 
     /// <summary>True when <paramref name="symbol"/> implements <c>IEndpointBase</c>.</summary>
     internal static bool IsEndpoint(INamedTypeSymbol symbol) =>
@@ -309,6 +414,10 @@ public partial class EndpointGenerator : IncrementalGenerator
         // interface is ignored by the runtime, so MPEP007 and the contract ignore it too (MPEP032).
         var knownMethods = MethodsLiteral.Read(symbol, httpMethod, compilation, out var ignoredNewMethods, ct, model);
 
+        // PRD R2.4: a GetPath override makes Path only the default (MPEP034); a static GetPath the
+        // runtime does not call is MPEP032, like a 'new static Path'.
+        var hasPathOverride = PathOverride.Detect(symbol, out var ignoredNewGetPath, ct);
+
         OpenGenericInfo? open = null;
         if (GenericTypes.IsOpen(symbol))
         {
@@ -346,7 +455,9 @@ public partial class EndpointGenerator : IncrementalGenerator
             closed: null,
             referencedGroups: open is null ? ConstructedGroupChain(groupSymbol, compilation, ct) : default,
             hasIgnoredNewPath: ignoredNewPath,
-            hasIgnoredNewMethods: ignoredNewMethods);
+            hasIgnoredNewMethods: ignoredNewMethods,
+            hasPathOverride: hasPathOverride,
+            hasIgnoredNewGetPath: ignoredNewGetPath);
     }
 
     /// <summary>

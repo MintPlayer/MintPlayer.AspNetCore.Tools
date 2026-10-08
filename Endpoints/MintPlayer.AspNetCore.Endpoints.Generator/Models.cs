@@ -44,13 +44,17 @@ internal sealed partial class EndpointInfo
         ClosedGenericInfo? closed = null,
         ImmutableArray<GroupInfo> referencedGroups = default,
         bool hasIgnoredNewPath = false,
-        bool hasIgnoredNewMethods = false)
+        bool hasIgnoredNewMethods = false,
+        bool hasPathOverride = false,
+        bool hasIgnoredNewGetPath = false)
     {
         Open = open;
         Closed = closed;
         ReferencedGroups = referencedGroups.IsDefault ? ImmutableArray<GroupInfo>.Empty : referencedGroups;
         HasIgnoredNewPath = hasIgnoredNewPath;
         HasIgnoredNewMethods = hasIgnoredNewMethods;
+        HasPathOverride = hasPathOverride;
+        HasIgnoredNewGetPath = hasIgnoredNewGetPath;
         InaccessibleReason = inaccessibleReason;
         IsInFileLocalType = isInFileLocalType;
         ValidationGap = validationGap;
@@ -202,6 +206,20 @@ internal sealed partial class EndpointInfo
     /// </summary>
     public bool HasIgnoredNewMethods { get; }
 
+    /// <summary>
+    /// True when the endpoint overrides <c>IEndpointBase.GetPath</c> — itself, explicitly, through a
+    /// base class or through an intermediate interface (PRD R2.4, <see cref="PathOverride"/>). Its
+    /// <see cref="Route"/> is then only the default: route checks still run on it, but typed links,
+    /// client contracts and OpenAPI token shadowing leave it out, and its descriptor is flagged.
+    /// </summary>
+    public bool HasPathOverride { get; }
+
+    /// <summary>
+    /// The same as <see cref="HasIgnoredNewPath"/>, for a static <c>GetPath</c> on the class (or a
+    /// base below the interface implementation) that the runtime does not call (MPEP032).
+    /// </summary>
+    public bool HasIgnoredNewGetPath { get; }
+
     /// <summary>The name this endpoint is recorded under in the descriptor list.</summary>
     [EqualityIgnore]
     public string EffectiveDescriptorName => DescriptorName ?? ClassName;
@@ -235,7 +253,9 @@ internal sealed partial class EndpointInfo
             Closed,
             ReferencedGroups.Select(group => group.WithoutLocation()).ToImmutableArray(),
             HasIgnoredNewPath,
-            HasIgnoredNewMethods);
+            HasIgnoredNewMethods,
+            HasPathOverride,
+            HasIgnoredNewGetPath);
     }
 
     public string? GetBaseClassName()
@@ -344,14 +364,63 @@ internal sealed partial class ClosingModel
 [GenerateEquality]
 internal sealed partial class DiscoveredType
 {
-    public DiscoveredType(EndpointInfo? endpoint, GroupInfo? group)
+    public DiscoveredType(EndpointInfo? endpoint, GroupInfo? group, ImmutableArray<LegacyConfigureHook> legacyHooks = default, RoleConflict? roleConflict = null)
     {
         Endpoint = endpoint;
         Group = group;
+        LegacyHooks = legacyHooks.IsDefault ? ImmutableArray<LegacyConfigureHook>.Empty : legacyHooks;
+        RoleConflict = roleConflict;
     }
 
     public EndpointInfo? Endpoint { get; }
     public GroupInfo? Group { get; }
+
+    /// <summary>The one-argument <c>Configure</c> hooks on the type or its source base classes (MPEP035).</summary>
+    public ImmutableArray<LegacyConfigureHook> LegacyHooks { get; }
+
+    /// <summary>Set when the type is both a group and an endpoint (MPEP036); it is then described as a group only.</summary>
+    public RoleConflict? RoleConflict { get; }
+}
+
+/// <summary>A class that implements both <c>IEndpointGroup</c> and an endpoint interface (MPEP036, PRD R5.5).</summary>
+[GenerateEquality]
+internal sealed partial class RoleConflict
+{
+    public RoleConflict(string typeName, LocationKey? location)
+    {
+        TypeName = typeName;
+        Location = location;
+    }
+
+    /// <summary>The class's name, for the message.</summary>
+    public string TypeName { get; }
+
+    /// <summary>The class's identifier.</summary>
+    public LocationKey? Location { get; }
+}
+
+/// <summary>
+/// A <c>static Configure</c> with the pre-11.4 single-parameter signature on a group or endpoint
+/// (MPEP035, PRD R1.3). It is no longer called, so its conventions would silently stop applying.
+/// </summary>
+[GenerateEquality]
+internal sealed partial class LegacyConfigureHook
+{
+    public LegacyConfigureHook(string typeName, string parameterType, LocationKey? location)
+    {
+        TypeName = typeName;
+        ParameterType = parameterType;
+        Location = location;
+    }
+
+    /// <summary>The type that declares the hook: the group or endpoint itself, or a base class of it.</summary>
+    public string TypeName { get; }
+
+    /// <summary><c>RouteGroupBuilder</c> or <c>RouteHandlerBuilder</c>.</summary>
+    public string ParameterType { get; }
+
+    /// <summary>The hook's identifier, where the code fix adds the parameter.</summary>
+    public LocationKey? Location { get; }
 }
 
 [GenerateEquality]
@@ -546,13 +615,22 @@ internal sealed partial class AssemblyInfo
 [GenerateEquality]
 internal sealed partial class EndpointModel
 {
-    public EndpointModel(ImmutableArray<EndpointInfo> endpoints, ImmutableArray<GroupInfo> groups, AssemblyInfo assembly, ClosingModel? closing = null)
+    public EndpointModel(ImmutableArray<EndpointInfo> endpoints, ImmutableArray<GroupInfo> groups, AssemblyInfo assembly, ClosingModel? closing = null,
+        ImmutableArray<LegacyConfigureHook> legacyHooks = default, ImmutableArray<RoleConflict> roleConflicts = default)
     {
         Endpoints = endpoints;
         Groups = groups;
         Assembly = assembly;
         Closing = closing ?? ClosingModel.Empty;
+        LegacyHooks = legacyHooks.IsDefault ? ImmutableArray<LegacyConfigureHook>.Empty : legacyHooks;
+        RoleConflicts = roleConflicts.IsDefault ? ImmutableArray<RoleConflict>.Empty : roleConflicts;
     }
+
+    /// <summary>
+    /// The classes that are both a group and an endpoint (MPEP036). Only the diagnostic reporter reads
+    /// them, so <see cref="WithoutLocations"/> drops them.
+    /// </summary>
+    public ImmutableArray<RoleConflict> RoleConflicts { get; }
 
     public ImmutableArray<EndpointInfo> Endpoints { get; }
     public ImmutableArray<GroupInfo> Groups { get; }
@@ -560,6 +638,12 @@ internal sealed partial class EndpointModel
 
     /// <summary>The open endpoints this compilation closes, and what went wrong closing them.</summary>
     public ClosingModel Closing { get; }
+
+    /// <summary>
+    /// The one-argument <c>Configure</c> hooks discovery found (MPEP035). Only the diagnostic reporter
+    /// reads them, so <see cref="WithoutLocations"/> drops them.
+    /// </summary>
+    public ImmutableArray<LegacyConfigureHook> LegacyHooks { get; }
 
     private EndpointMappingPlan? plan;
 
@@ -579,7 +663,8 @@ internal sealed partial class EndpointModel
 
     /// <summary>
     /// What the four producers consume: this model with every <see cref="LocationKey"/> removed, and
-    /// without the closing problems, which only the diagnostic reporter reads (PRD addendum 2, D20).
+    /// without the closing problems, the legacy hooks and the role conflicts, which only the diagnostic reporter reads
+    /// (PRD addendum 2, D20).
     /// </summary>
     /// <remarks>
     /// A location is the one thing a line inserted above an endpoint changes. The reporter needs it and

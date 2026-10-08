@@ -170,6 +170,59 @@ public class EndpointGeneratorIncrementalTests
     }
 
     /// <summary>
+    /// AC5 (#37): adding a <c>GetPath</c> override rebuilds the model and changes the output — the
+    /// typed link disappears and the descriptor is flagged — so <c>HasPathOverride</c> takes part in
+    /// the model's equality; editing the override's body afterwards is cached again.
+    /// </summary>
+    /// <remarks>
+    /// A flag left out of equality would serve the old link from the cache until an unrelated edit, a
+    /// link to a route the endpoint no longer answers on.
+    /// </remarks>
+    [Fact]
+    public void AddingAGetPathOverride_RebuildsTheModel_AndEditingItsBodyDoesNot()
+    {
+        const string before = """
+            using System;
+            using System.Threading.Tasks;
+            using Microsoft.AspNetCore.Http;
+            using MintPlayer.AspNetCore.Endpoints;
+
+            namespace Fixtures;
+
+            public class HealthCheck : IGetEndpoint
+            {
+                public static string Path => "/health";
+                // GetPath
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok("up"));
+            }
+            """;
+        var withOverride = before.Replace("// GetPath", "public static string? GetPath(IServiceProvider services) => \"/a\";");
+
+        static SyntaxTree TreeOf(string source) => EndpointGeneratorHarness.CreateCompilation("Fixtures", [source]).SyntaxTrees.Last();
+
+        var compilation = EndpointGeneratorHarness.CreateCompilation("Fixtures", [before]);
+        var driver = EndpointGeneratorHarness.CreateTrackingDriver().RunGenerators(compilation);
+        Assert.Contains("Describe<global::Fixtures.HealthCheck>(\"HealthCheck\", \"\")", Text(driver.GetRunResult()));
+
+        var overriding = compilation.ReplaceSyntaxTree(compilation.SyntaxTrees.Last(), TreeOf(withOverride));
+        driver = driver.RunGenerators(overriding);
+        var added = driver.GetRunResult();
+
+        Assert.Contains(IncrementalStepRunReason.Modified, ReasonsFor(added, TrackedModelStep));
+        Assert.Contains("Describe<global::Fixtures.HealthCheck>(\"HealthCheck\", \"\", true)", Text(added));
+        Assert.DoesNotContain("HealthCheck()", Text(added));
+
+        var bodyEdited = overriding.ReplaceSyntaxTree(overriding.SyntaxTrees.Last(), TreeOf(withOverride.Replace("\"/a\"", "\"/b\"")));
+        var reasons = ReasonsFor(driver.RunGenerators(bodyEdited).GetRunResult(), TrackedModelStep);
+
+        Assert.NotEmpty(reasons);
+        Assert.All(reasons, reason =>
+            Assert.True(
+                reason is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged,
+                $"expected the model step to be cached, was {reason}"));
+    }
+
+    /// <summary>
     /// In a project with nothing to report, a handler-body edit runs no output step at all: every
     /// file is served from cache, and no diagnostics step is combined with the new compilation.
     /// </summary>
@@ -536,6 +589,8 @@ public class EndpointGeneratorIncrementalTests
     [InlineData("AssemblyInfo")]
     [InlineData("OpenEndpointNames")]
     [InlineData("ClosedEndpoints")]
+    [InlineData("LegacyConfigureHooks")]
+    [InlineData("RoleConflicts")]
     [InlineData(TrackedModelStep)]
     [InlineData("ProducerModel")]
     public void EveryProvider_IsTracked(string stepName)

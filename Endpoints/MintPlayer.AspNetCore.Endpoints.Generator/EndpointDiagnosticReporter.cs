@@ -52,11 +52,19 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IConditi
 
             if (endpoint.HasIgnoredNewPath)
                 yield return DiagnosticDescriptors.NewStaticPathIgnored.Create(location, endpoint.ClassName, "Path",
-                    endpoint.Route is { } route ? $"'{route}'" : "a Path not known at compile time");
+                    endpoint.Route is { } route ? $"'{route}'" : "a Path not known at compile time", "with 'new static'");
+
+            // A GetPath needs no 'new' to be ignored: a public static GetPath(IServiceProvider) declared
+            // below the class that implements the endpoint interface is an ordinary method.
+            if (endpoint.HasIgnoredNewGetPath)
+                yield return DiagnosticDescriptors.NewStaticPathIgnored.Create(location, endpoint.ClassName, "GetPath",
+                    endpoint.HasPathOverride ? "the GetPath a base class or interface implements" : "the default GetPath, which maps at Path",
+                    "with a public static GetPath(IServiceProvider) of its own");
 
             if (endpoint.HasIgnoredNewMethods)
                 yield return DiagnosticDescriptors.NewStaticPathIgnored.Create(location, endpoint.ClassName, "Methods",
-                    endpoint.KnownMethods is { } known ? string.Join(", ", MethodsLiteral.Decode(known)) : "verbs not known at compile time");
+                    endpoint.KnownMethods is { } known ? string.Join(", ", MethodsLiteral.Decode(known)) : "verbs not known at compile time",
+                    "with 'new static'");
 
             foreach (var property in endpoint.BoundProperties)
             {
@@ -127,6 +135,15 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IConditi
                 yield return DiagnosticDescriptors.TypeNotAccessibleToGeneratedCode.Create(Locate(group.Location, compilation), "Endpoint group", ShortNameOf(group.FullyQualifiedName), whyGroup);
         }
 
+        // MPEP035 — on the hook itself. A base class shared by several endpoints is found through each
+        // of them; Distinct reports it once.
+        foreach (var hook in model.LegacyHooks.Distinct())
+            yield return DiagnosticDescriptors.LegacyConfigureHookIgnored.Create(Locate(hook.Location, compilation), hook.TypeName, hook.ParameterType);
+
+        // MPEP036 — on the class identifier; the class was described as a group only.
+        foreach (var conflict in model.RoleConflicts.Distinct())
+            yield return DiagnosticDescriptors.GroupAndEndpoint.Create(Locate(conflict.Location, compilation), conflict.TypeName);
+
         foreach (var groupFqn in plan.UnjoinedGroups)
         {
             var group = plan.Groups.First(candidate => candidate.FullyQualifiedName == groupFqn);
@@ -165,7 +182,7 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IConditi
     }
 
     /// <summary>
-    /// MPEP007-MPEP011 and MPEP018: everything that needs the route, the verbs or the type arguments.
+    /// MPEP007-MPEP011, MPEP018 and MPEP034: everything that needs the route, the verbs or the type arguments.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -191,11 +208,14 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IConditi
         {
             var location = Locate(endpoint.Location, compilation);
 
-            if (endpoint.Route is null)
-            {
+            // MPEP034 replaces MPEP011 for an endpoint that chooses its route at map time (PRD R2.6):
+            // its Path is the default either way, and the checks below still run on it when it is known.
+            if (endpoint.HasPathOverride)
+                yield return DiagnosticDescriptors.PathChosenAtMapTime.Create(location, endpoint.ClassName);
+            else if (endpoint.Route is null)
                 yield return DiagnosticDescriptors.PathNotConstant.Create(location, endpoint.ClassName);
-            }
-            else if (endpoint.Level != EndpointLevel.Raw)
+
+            if (endpoint.Route is not null && endpoint.Level != EndpointLevel.Raw)
             {
                 // The endpoint's OWN path, not the composed route: a token a group prefix contributes
                 // is the group's business, and blaming the endpoint for it would be a false positive.
@@ -230,6 +250,14 @@ internal sealed class EndpointDiagnosticReporter(EndpointModel model) : IConditi
                     yield return DiagnosticDescriptors.ResponseTypeLooksLikeRequest.Create(location, endpoint.ClassName, simpleName, verbInterface);
                 }
             }
+        }
+
+        // MPEP034 for a closed open-generic endpoint (PRD R2.7): it is not a declaration of this
+        // compilation, so the loop above never sees it. On the closing attribute, which is what put it here.
+        foreach (var endpoint in plan.MappableEndpoints)
+        {
+            if (endpoint.Closed is not null && endpoint.HasPathOverride)
+                yield return DiagnosticDescriptors.PathChosenAtMapTime.Create(Locate(endpoint.Location, compilation), NameOf(endpoint));
         }
 
         var prefixOf = plan.Groups.ToDictionary(group => group.FullyQualifiedName, group => group.Prefix, StringComparer.Ordinal);

@@ -23,12 +23,17 @@ namespace MintPlayer.AspNetCore.Endpoints;
 /// container per request, so it is also the handle to reach the endpoint's attributes or to
 /// re-register it by hand through <c>MapEndpoint&lt;T&gt;</c>.
 /// </param>
+/// <param name="IsPathConfigurable">
+/// True when the endpoint chooses its route at map time (<c>IEndpointBase.GetPath</c>). Its
+/// <paramref name="Path"/> is then only the default, built from the literal <c>Path</c>: the route it
+/// actually answers on depends on the application's configuration.
+/// </param>
 /// <remarks>
 /// Equality is structural over <paramref name="Methods"/>. The compiler-generated record equality
 /// would compare the list by reference, and every endpoint's <c>Methods</c> is a distinct instance,
 /// so two descriptions of the same endpoint would never compare equal.
 /// </remarks>
-public sealed record EndpointDescriptor(string Name, string Path, IReadOnlyList<string> Methods, Type HandlerType)
+public sealed record EndpointDescriptor(string Name, string Path, IReadOnlyList<string> Methods, Type HandlerType, bool IsPathConfigurable = false)
 {
     /// <summary>
     /// Compares two descriptors member by member, with <see cref="Methods"/> compared element by
@@ -40,6 +45,7 @@ public sealed record EndpointDescriptor(string Name, string Path, IReadOnlyList<
         Name == other.Name &&
         Path == other.Path &&
         HandlerType == other.HandlerType &&
+        IsPathConfigurable == other.IsPathConfigurable &&
         Methods.SequenceEqual(other.Methods);
 
     /// <summary>
@@ -52,6 +58,7 @@ public sealed record EndpointDescriptor(string Name, string Path, IReadOnlyList<
         hash.Add(Name);
         hash.Add(Path);
         hash.Add(HandlerType);
+        hash.Add(IsPathConfigurable);
         foreach (var method in Methods)
             hash.Add(method);
         return hash.ToHashCode();

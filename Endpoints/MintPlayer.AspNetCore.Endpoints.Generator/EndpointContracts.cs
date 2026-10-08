@@ -91,7 +91,9 @@ internal static class EndpointContracts
         foreach (var endpoint in plan.MappableEndpoints)
         {
             var template = plan.ComposedRoutes[endpoint.FullyQualifiedName];
-            if (template is null || !plan.IsNamed(endpoint) || endpoint.KnownMethods is null) continue;
+            // Nor one whose route is chosen at map time (GetPath, PRD R2.5): a client calling the default
+            // Path would call the wrong URL wherever the application configures another.
+            if (template is null || !plan.IsNamed(endpoint) || endpoint.KnownMethods is null || endpoint.HasPathOverride) continue;
 
             var methods = MethodsLiteral.Decode(endpoint.KnownMethods);
             if (methods.Length == 0) continue;

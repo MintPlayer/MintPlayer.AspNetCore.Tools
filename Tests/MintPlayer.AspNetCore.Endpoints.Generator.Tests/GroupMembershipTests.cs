@@ -257,6 +257,99 @@ public class GroupMembershipTests
         }
     }
 
+    private const string HooksAssemblyName = "Fixtures.ServiceAwareHooks";
+
+    /// <summary>
+    /// A group and an endpoint whose two-argument <c>Configure</c> hooks (#36) count their calls and
+    /// keep the provider they received.
+    /// </summary>
+    private static readonly string HooksSource = $$"""
+        using System;
+        using Microsoft.AspNetCore.Builder;
+        using Microsoft.AspNetCore.Routing;
+        {{Preamble}}
+
+        public static class HookLog
+        {
+            public static int GroupCalls;
+            public static int EndpointCalls;
+            public static IServiceProvider? GroupServices;
+            public static IServiceProvider? EndpointServices;
+
+            public static void Reset()
+            {
+                GroupCalls = EndpointCalls = 0;
+                GroupServices = EndpointServices = null;
+            }
+        }
+
+        public class HookedGroup : IEndpointGroup
+        {
+            public static string Prefix => "/hooked";
+
+            static void IEndpointGroup.Configure(RouteGroupBuilder group, IServiceProvider services)
+            {
+                HookLog.GroupCalls++;
+                HookLog.GroupServices = services;
+                group.WithTags("Hooked");
+            }
+        }
+
+        [MemberOf<HookedGroup>]
+        public class HookedEndpoint : IGetEndpoint
+        {
+            public static string Path => "/endpoint";
+
+            public static void Configure(RouteHandlerBuilder builder, IServiceProvider services)
+            {
+                HookLog.EndpointCalls++;
+                HookLog.EndpointServices = services;
+                builder.WithDisplayName("configured-with-services");
+            }
+
+            public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+        }
+        """;
+
+    private static readonly Lazy<Assembly> hooksAssembly =
+        new(() => EndpointGeneratorHarness.RunAndLoad(HooksAssemblyName, HooksSource));
+
+    /// <summary>
+    /// AC1 (#36): a group's <c>Configure(group, services)</c> and an endpoint's
+    /// <c>Configure(builder, services)</c> are each applied exactly once, with the application's root
+    /// provider, in the generated mapping and in <c>MapEndpoint&lt;T&gt;()</c> alike.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ConfigureHooks_ReceiveTheRootProvider_OnceEach_OnEitherPath(bool generatedMapping)
+    {
+        var log = hooksAssembly.Value.GetType("Fixtures.HookLog", throwOnError: true)!;
+        int Count(string field) => (int)log.GetField(field)!.GetValue(null)!;
+        object? Services(string field) => log.GetField(field)!.GetValue(null);
+        log.GetMethod("Reset")!.Invoke(null, null);
+
+        var app = WebApplication.CreateBuilder().Build();
+        RouteEndpoint endpoint;
+        if (generatedMapping)
+        {
+            endpoint = Assert.Single(GeneratedEndpointHost.MapAndCollectRoutes(hooksAssembly.Value, HooksAssemblyName, app));
+        }
+        else
+        {
+            mapEndpoint.MakeGenericMethod(hooksAssembly.Value.GetType("Fixtures.HookedEndpoint", throwOnError: true)!).Invoke(null, [app]);
+            endpoint = Assert.Single(((IEndpointRouteBuilder)app).DataSources.SelectMany(source => source.Endpoints).OfType<RouteEndpoint>());
+        }
+
+        Assert.Equal("/hooked/endpoint", endpoint.RoutePattern.RawText);
+        Assert.Equal(1, Count("GroupCalls"));
+        Assert.Equal(1, Count("EndpointCalls"));
+        Assert.Same(app.Services, Services("GroupServices"));
+        Assert.Same(app.Services, Services("EndpointServices"));
+        Assert.Contains("Hooked", endpoint.Metadata.GetOrderedMetadata<Microsoft.AspNetCore.Http.Metadata.ITagsMetadata>().SelectMany(tags => tags.Tags));
+        Assert.Equal("configured-with-services", endpoint.DisplayName);
+    }
+
     /// <summary>
     /// The metadata name the generator matches is the real attribute's, and a fixture using the
     /// attribute produces grouped endpoints.

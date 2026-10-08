@@ -488,9 +488,9 @@ public class TestAppEndToEndTests : IClassFixture<WebApplicationFactory<Program>
             .ToArray();
 
         Assert.Equal(
-            // Echo_String, Passkeys_AppUser and WhoAmI_AppUser are the TestLibrary's generic endpoints,
+            // ConfiguredHook_AppUser, Echo_String, Passkeys_AppUser and WhoAmI_AppUser are the TestLibrary's generic endpoints,
             // closed by this app (issue #34).
-            ["CreateUser", "DeleteUser", "Echo_String", "FindUserByName", "GetUser", "HealthCheck", "ListProducts", "ListUsers", "NestedGetUser", "Passkeys_AppUser", "PreflightEndpoint", "UpdateUser", "UserStoreScope", "WhoAmI_AppUser"],
+            ["ConfiguredHook_AppUser", "CreateUser", "DeleteUser", "Echo_String", "FindUserByName", "GetUser", "HealthCheck", "ListProducts", "ListUsers", "NestedGetUser", "Passkeys_AppUser", "PreflightEndpoint", "UpdateUser", "UserStoreScope", "WhoAmI_AppUser"],
             names);
         Assert.All(generated, endpoint => Assert.Equal(
             endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName,

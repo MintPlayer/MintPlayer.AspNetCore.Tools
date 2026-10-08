@@ -8,7 +8,7 @@ public class ProductsApi : IEndpointGroup
 {
     public static string Prefix => "/products";
 
-    static void IEndpointGroup.Configure(RouteGroupBuilder group)
+    static void IEndpointGroup.Configure(RouteGroupBuilder group, IServiceProvider services)
     {
         group.WithTags("Products");
     }

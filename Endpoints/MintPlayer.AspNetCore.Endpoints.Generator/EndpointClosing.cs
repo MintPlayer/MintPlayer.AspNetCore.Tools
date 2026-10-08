@@ -54,13 +54,14 @@ internal static class EndpointClosing
     }
 
     /// <summary>An open endpoint and the compile-time facts about it that metadata may not carry.</summary>
-    private sealed class OpenCandidate(INamedTypeSymbol definition, bool fromReference, string? route, string? methods, bool hasBinder)
+    private sealed class OpenCandidate(INamedTypeSymbol definition, bool fromReference, string? route, string? methods, bool hasBinder, bool pathConfigurable)
     {
         public INamedTypeSymbol Definition { get; } = definition;
         public bool FromReference { get; } = fromReference;
         public string? Route { get; } = route;
         public string? Methods { get; } = methods;
         public bool HasBinder { get; } = hasBinder;
+        public bool PathConfigurable { get; } = pathConfigurable;
         public string Display => Definition.ToDisplayString();
     }
 
@@ -106,7 +107,7 @@ internal static class EndpointClosing
             if (compilation.Assembly.GetTypeByMetadataName(metadataName) is not { IsAbstract: false } definition) continue;
 
             var declared = EndpointGenerator.DescribeDeclaredEndpoint(definition, compilation, ct);
-            candidates.Add(new OpenCandidate(definition, false, declared.Route, declared.KnownMethods, ShadowParameters.EmitsBinder(declared)));
+            candidates.Add(new OpenCandidate(definition, false, declared.Route, declared.KnownMethods, ShadowParameters.EmitsBinder(declared), declared.HasPathOverride));
         }
 
         var groupPrefixes = new Dictionary<string, string?>(StringComparer.Ordinal);
@@ -118,7 +119,7 @@ internal static class EndpointClosing
             foreach (var record in library.Endpoints)
             {
                 if (assembly.GetTypeByMetadataName(record.MetadataName) is not { } definition) continue;
-                candidates.Add(new OpenCandidate(definition, true, record.Path, record.Methods, record.HasBinder));
+                candidates.Add(new OpenCandidate(definition, true, record.Path, record.Methods, record.HasBinder, record.PathConfigurable));
             }
         }
 
@@ -425,7 +426,8 @@ internal static class EndpointClosing
             route: candidate.Route,
             boundProperties: BoundProperties.Collect(constructed, EndpointsNamespace, ct),
             knownMethods: candidate.Methods,
-            closed: new ClosedGenericInfo(definition.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), candidate.FromReference));
+            closed: new ClosedGenericInfo(definition.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat), candidate.FromReference),
+            hasPathOverride: candidate.PathConfigurable);
     }
 
     /// <summary>The first constraint of <paramref name="parameter"/> that <paramref name="argument"/> violates, or null.</summary>

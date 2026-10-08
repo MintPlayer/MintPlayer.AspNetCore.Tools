@@ -8,7 +8,7 @@ public class UsersApi : IEndpointGroup
 {
     public static string Prefix => "/users";
 
-    static void IEndpointGroup.Configure(RouteGroupBuilder group)
+    static void IEndpointGroup.Configure(RouteGroupBuilder group, IServiceProvider services)
     {
         group.WithTags("Users");
     }

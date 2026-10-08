@@ -124,6 +124,60 @@ public class EndpointInvocationTests
                 }))
             .StartAsync();
 
+    private sealed record TokenRequest(string GrantType, string ClientId);
+
+    /// <summary>
+    /// The OIDC token endpoint's shape (PRD R6.1): generic over the application's user type, its body a
+    /// form that its own <c>BindRequestAsync</c> reads, failing with <see cref="EndpointBindingException"/>.
+    /// </summary>
+    private sealed class FormToken<TUser> : PostEndpoint<TokenRequest>, IPostEndpoint<TokenRequest> where TUser : class
+    {
+        public static string Path => "/connect/token";
+
+        protected override async ValueTask<TokenRequest?> BindRequestAsync(HttpContext context)
+        {
+            if (!context.Request.HasFormContentType)
+                throw new EndpointBindingException(StatusCodes.Status415UnsupportedMediaType, "The token endpoint reads application/x-www-form-urlencoded.");
+
+            var form = await context.Request.ReadFormAsync(context.RequestAborted);
+            var grantType = form["grant_type"].ToString();
+            if (grantType.Length == 0)
+                throw new EndpointBindingException(StatusCodes.Status400BadRequest, "grant_type is required.");
+
+            return new TokenRequest(grantType, form["client_id"].ToString());
+        }
+
+        public override Task<IResult> HandleAsync(TokenRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(Results.Ok($"{typeof(TUser).Name}:{request.GrantType}:{request.ClientId}"));
+    }
+
+    /// <summary>
+    /// AC12 (PRD R6, spike S4): a generic endpoint with a form-urlencoded <c>BindRequestAsync</c>
+    /// override, mapped through <c>MapEndpoint&lt;FormToken&lt;string&gt;&gt;()</c>, binds the form's
+    /// fields (200), answers its <see cref="EndpointBindingException"/> with that status (400), and
+    /// refuses JSON (415).
+    /// </summary>
+    [Fact]
+    public async Task GenericFormBindingOverride_BindsThroughMapEndpoint()
+    {
+        using var host = await StartHost<FormToken<string>>(new Journal());
+        var client = host.GetTestClient();
+
+        var bound = await client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["grant_type"] = "client_credentials",
+            ["client_id"] = "spark",
+        }));
+        Assert.Equal(System.Net.HttpStatusCode.OK, bound.StatusCode);
+        Assert.Equal("\"String:client_credentials:spark\"", await bound.Content.ReadAsStringAsync());
+
+        var missing = await client.PostAsync("/connect/token", new FormUrlEncodedContent(new Dictionary<string, string> { ["client_id"] = "spark" }));
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, missing.StatusCode);
+
+        var json = await client.PostAsync("/connect/token", new StringContent("""{"grant_type":"client_credentials"}""", System.Text.Encoding.UTF8, "application/json"));
+        Assert.Equal(System.Net.HttpStatusCode.UnsupportedMediaType, json.StatusCode);
+    }
+
     [Fact]
     public async Task Invoke_ResolvesANewEndpointPerRequest()
     {

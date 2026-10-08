@@ -108,6 +108,35 @@ public class IsEndpointMappedTests
         Assert.Single(endpoints.Endpoints);
     }
 
+    /// <summary>An endpoint that switches itself off (PRD R5), in a group that is enabled.</summary>
+    public sealed class SwitchedOff : IGetEndpoint
+    {
+        public static string Path => "/switched-off";
+
+        static bool IEndpointBase.IsEnabled(IServiceProvider services) => false;
+
+        public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+    }
+
+    /// <summary>
+    /// AC11 (R5.6): an endpoint whose own <c>IsEnabled</c> returns false answers "not mapped" from type
+    /// metadata, like one in a disabled group. The generated path is pinned end to end by
+    /// <c>TestLibraryEndToEndTests.DisabledEndpoint_IsNotMapped_AndItsHooksNeverRun</c>.
+    /// </summary>
+    [Fact]
+    public void DisabledEndpoint_IsNotMapped()
+    {
+        var endpoints = Map(app =>
+        {
+            app.MapEndpoint<SwitchedOff>();
+            app.MapEndpoint<Mapped>();
+        });
+
+        Assert.False(endpoints.IsEndpointMapped<SwitchedOff>());
+        Assert.True(endpoints.IsEndpointMapped<Mapped>());
+        Assert.Single(endpoints.Endpoints);
+    }
+
     /// <summary>
     /// The prototype's impostor probe: a class with the same simple name in another namespace, and a
     /// plain lambda on the real endpoint's route. Neither is the endpoint class, so neither answers.
@@ -156,7 +185,7 @@ public class IsEndpointMappedTests
     {
         public static string Path => "/relabelled";
 
-        static void IEndpointBase.Configure(RouteHandlerBuilder builder)
+        static void IEndpointBase.Configure(RouteHandlerBuilder builder, IServiceProvider services)
             => builder.WithMetadata(new EndpointTypeMetadata(typeof(Mapped)));
 
         public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());

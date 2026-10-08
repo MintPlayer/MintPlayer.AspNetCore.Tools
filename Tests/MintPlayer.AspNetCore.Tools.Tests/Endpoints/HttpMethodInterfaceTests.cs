@@ -304,11 +304,11 @@ public class HttpMethodInterfaceTests
         var app = WebApplication.CreateBuilder([]).Build();
         var builder = app.MapGet("/probe", () => Results.Ok());
 
-        ConfigureVia<GetRaw>(builder);
+        ConfigureVia<GetRaw>(builder, app.Services);
     }
 
-    private static void ConfigureVia<T>(RouteHandlerBuilder builder)
-        where T : IEndpointBase => T.Configure(builder);
+    private static void ConfigureVia<T>(RouteHandlerBuilder builder, IServiceProvider services)
+        where T : IEndpointBase => T.Configure(builder, services);
 
     /// <summary>
     /// The assembly-level attribute that overrides the generated mapping method's name.

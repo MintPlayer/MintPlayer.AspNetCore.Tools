@@ -28,7 +28,11 @@ public static class EndpointRouteBuilderExtensions
     /// so an application that mixes generated and manual registration gets the same route either
     /// way. Each call creates its own <c>RouteGroupBuilder</c> chain, so the group's
     /// <c>Configure</c> hook runs once per call. When a group on the chain is not enabled
-    /// (<see cref="IEndpointGroup.IsEnabled"/>), nothing is mapped.
+    /// (<see cref="IEndpointGroup.IsEnabled"/>), or the endpoint's own
+    /// <see cref="IEndpointBase.IsEnabled"/> returns <see langword="false"/>, nothing is mapped and
+    /// <paramref name="app"/> is returned as it is — the endpoint's <c>GetPath</c> and <c>Configure</c>
+    /// are not called. The route is
+    /// <c>TEndpoint.GetPath(services) ?? TEndpoint.Path</c>, as in the generated mapping.
     /// <para>
     /// <b>OpenAPI: this path documents less than the generated one, deliberately.</b> It declares
     /// the same request body, 400 and 415 (through the same <see cref="EndpointDocumentation"/>
@@ -60,7 +64,9 @@ public static class EndpointRouteBuilderExtensions
     /// <exception cref="InvalidOperationException">
     /// The group nesting is cyclic. A cycle has no outermost group and so no prefix, and guessing
     /// one would silently register the endpoint at the wrong route. (Two memberships on one type is
-    /// no longer possible to express: it is <c>CS0579</c>.)
+    /// no longer possible to express: it is <c>CS0579</c>.) Or the route the endpoint's
+    /// <see cref="IEndpointBase.GetPath"/> returned does not have the route parameters of its
+    /// <c>Path</c> (<see cref="EndpointPathValidator"/>).
     /// </exception>
     [RequiresUnreferencedCode(ManualMappingIsReflective)]
     [RequiresDynamicCode(ManualMappingIsReflective)]
@@ -82,6 +88,17 @@ public static class EndpointRouteBuilderExtensions
                 return app;
         }
 
+        // Then the endpoint's own IsEnabled (PRD R5.2, R5.4): disabled, it is not mapped and neither
+        // GetPath nor Configure is called — the same unmapped return as for a disabled group.
+        if (!TEndpoint.IsEnabled(app.ServiceProvider))
+            return app;
+
+        // The route chosen at map time (IEndpointBase.GetPath), checked before anything is mapped so a
+        // parameter mismatch fails startup without leaving half a group chain behind (PRD R2.10).
+        var configuredPath = TEndpoint.GetPath(app.ServiceProvider);
+        if (configuredPath is not null)
+            EndpointPathValidator.EnsureSameParameters(typeof(TEndpoint), configuredPath, TEndpoint.Path);
+
         var factory = ActivatorUtilities.CreateFactory<TEndpoint>(Type.EmptyTypes);
 
         var routes = app;
@@ -89,7 +106,7 @@ public static class EndpointRouteBuilderExtensions
             routes = MapGroupOf(routes, groupType);
 
         var builder = routes.MapMethods(
-            TEndpoint.Path,
+            configuredPath ?? TEndpoint.Path,
             TEndpoint.Methods,
             async (HttpContext ctx) =>
             {
@@ -119,8 +136,8 @@ public static class EndpointRouteBuilderExtensions
         // Transfer class-level attributes to endpoint metadata
         builder.WithMetadata(EndpointAttributes.ForMetadata(typeof(TEndpoint)));
 
-        // Call the optional Configure hook
-        TEndpoint.Configure(builder);
+        // Call the optional Configure hook, with the root provider as the generated mapping passes it.
+        TEndpoint.Configure(builder, app.ServiceProvider);
 
         // The request-side metadata the generated mapping declares, through the same helper, after
         // Configure as there. See <remarks> for what this path cannot match.
@@ -289,7 +306,7 @@ public static class EndpointRouteBuilderExtensions
         where TGroup : IEndpointGroup
     {
         var group = routes.MapGroup(TGroup.Prefix);
-        TGroup.Configure(group);
+        TGroup.Configure(group, routes.ServiceProvider);
         return group;
     }
 

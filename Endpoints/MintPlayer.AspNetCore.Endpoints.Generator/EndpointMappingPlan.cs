@@ -288,7 +288,9 @@ internal sealed class EndpointMappingPlan
         {
             if (!shadowParameters.TryGetValue(endpoint.FullyQualifiedName, out var members))
             {
-                members = ShadowParameters.For(endpoint, ComposedRoutes[endpoint.FullyQualifiedName]);
+                // A GetPath endpoint's route is unknown here (PRD R2.5): its bound [RouteParam] properties still
+                // become [FromRoute], as for a computed Path, but no token of the default is shadowed.
+                members = ShadowParameters.For(endpoint, endpoint.HasPathOverride ? null : ComposedRoutes[endpoint.FullyQualifiedName]);
                 shadowParameters[endpoint.FullyQualifiedName] = members;
             }
 

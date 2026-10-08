@@ -303,12 +303,12 @@ internal static class DiagnosticDescriptors
 
     public static readonly DiagnosticDescriptor NewStaticPathIgnored = new(
         id: "MPEP032",
-        title: "A 'new static' Path or Methods is not what the endpoint answers on",
-        messageFormat: "Endpoint class '{0}' hides the inherited {1} with 'new static', but the runtime uses {2}, from the implementation of the endpoint interface; list the endpoint interface on '{0}' again to use the new {1}, or remove it",
+        title: "A 'new static' Path or Methods, or a GetPath that is not the interface implementation, is not what the endpoint answers on",
+        messageFormat: "Endpoint class '{0}' hides the inherited {1} {3}, but the runtime uses {2}, from the implementation of the endpoint interface; list the endpoint interface on '{0}' again to use its own {1}, or remove it",
         category: Category,
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "TEndpoint.Path and TEndpoint.Methods dispatch through the interface map, and a static member hidden with 'new' does not re-implement the interface: the base class's member, or the verb interface's default verb, stays in force. The generated links, the contract and the duplicate-route check (MPEP007) use what the endpoint really answers on. Reported once per hidden member.");
+        description: "TEndpoint.Path, TEndpoint.Methods and TEndpoint.GetPath dispatch through the interface map, and neither a static member hidden with 'new' nor a public static GetPath(IServiceProvider) declared below the class that implements the interface re-implements it: the base class's member, the verb interface's default verb, or the default GetPath (which maps at Path), stays in force. The generated links, the contract and the duplicate-route check (MPEP007) use what the endpoint really answers on. Reported once per hidden member.");
 
     public static readonly DiagnosticDescriptor ConstraintDependsOnTypeParameter = new(
         id: "MPEP033",
@@ -318,4 +318,31 @@ internal static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
         description: "Constraint-keyed binding matches a type parameter by constraint type equality. A constraint such as IUser<TKey> mentions another type parameter, so it equals no closed key such as IUser<Guid>, and inferring TKey from the key is not done: a key would then silently bind parameters it does not name. The explicit form lists every type argument, and every constraint is checked after substitution (MPEP026).");
+
+    public static readonly DiagnosticDescriptor PathChosenAtMapTime = new(
+        id: "MPEP034",
+        title: "The endpoint chooses its route at map time",
+        messageFormat: "'{0}' chooses its route at map time (GetPath). Its Path is only the default: typed links and client contracts are not generated for it, and route checks apply to the default only.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Info,
+        isEnabledByDefault: true,
+        description: "An endpoint that overrides IEndpointBase.GetPath (a public static GetPath with an IServiceProvider parameter, or an explicit IEndpointBase.GetPath) answers on whatever route the application configures, which the generator cannot know. MPEP007-MPEP010 still run against the literal Path, the route that ships when nothing is configured; the descriptor list reports that Path with IsPathConfigurable set. A configured path must keep Path's route parameters, which mapping checks at startup. Reported instead of MPEP011.");
+
+    public static readonly DiagnosticDescriptor LegacyConfigureHookIgnored = new(
+        id: "MPEP035",
+        title: "A one-argument Configure hook is no longer called",
+        messageFormat: "'{0}' declares Configure({1}) without an IServiceProvider parameter. Since 11.4 it is no longer called. Add 'IServiceProvider services' as the second parameter.",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Since 11.4 the group and endpoint Configure hooks receive the application's root service provider: Configure(RouteGroupBuilder group, IServiceProvider services) and Configure(RouteHandlerBuilder builder, IServiceProvider services). A public static implementation with the old single-parameter signature still compiles, as an unrelated static method that nothing calls, so the conventions it applies would silently disappear. An Error, because a silent loss of authorization or CORS conventions is not something to discover in production.");
+
+    public static readonly DiagnosticDescriptor GroupAndEndpoint = new(
+        id: "MPEP036",
+        title: "A class is both a group and an endpoint",
+        messageFormat: "'{0}' implements both IEndpointGroup and an endpoint interface. A class is either a group or an endpoint. Move the endpoint into its own class and join it with [MemberOf<{0}>].",
+        category: Category,
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Groups describe organisation and endpoints describe handlers. One class implementing both would have one implicit IsEnabled implement both interfaces' members, and one Configure name cover two different builders. Detected on every interface the class implements, inherited ones included. The class is treated as a group only, so the generated mapping stays deterministic despite the error.");
 }

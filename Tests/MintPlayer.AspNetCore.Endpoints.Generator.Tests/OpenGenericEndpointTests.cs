@@ -87,6 +87,38 @@ public class OpenGenericEndpointTests
     }
 
     /// <summary>
+    /// AC6 (#37), declaring side: an open endpoint that overrides <c>GetPath</c> is recorded with
+    /// <c>PathConfigurable = true</c>, and without a <c>Version</c> bump; one that does not override is
+    /// recorded exactly as before.
+    /// </summary>
+    [Fact]
+    public void OpenGenericEndpointWithGetPath_IsRecordedAsPathConfigurable()
+    {
+        var source = FixturePreamble + """
+            [MemberOf<ApiGroup>]
+            public class Echo<TPayload> : IPostEndpoint where TPayload : class
+            {
+                public static string Path => "/echo";
+                public static string? GetPath(System.IServiceProvider services) => null;
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok(typeof(TPayload).Name));
+            }
+
+            [MemberOf<ApiGroup>]
+            public class Plain<TPayload> : IPostEndpoint where TPayload : class
+            {
+                public static string Path => "/plain";
+                public Task<IResult> HandleAsync(HttpContext httpContext) => Task.FromResult(Results.Ok());
+            }
+            """;
+
+        AssertCompilesWithoutErrors(source);
+
+        var mapping = GeneratedFile(source, "EndpointMapping.g.cs");
+        Assert.Contains("OpenEndpointAttribute(typeof(global::Fixtures.Echo<>), Path = \"/echo\", Methods = \"POST\", PathConfigurable = true, Version = 1)]", mapping);
+        Assert.Contains("OpenEndpointAttribute(typeof(global::Fixtures.Plain<>), Path = \"/plain\", Methods = \"POST\", Version = 1)]", mapping);
+    }
+
+    /// <summary>
     /// The issue's P1: one open-generic endpoint must not take the valid endpoints next to it down.
     /// They are still mapped, linked and contracted.
     /// </summary>
