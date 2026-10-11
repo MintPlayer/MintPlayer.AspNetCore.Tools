@@ -10,7 +10,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.Endpoints.Generator</PackageId>
-		<Version>11.4.0-rc.0</Version>
+		<Version>11.4.1-rc.0</Version>
 		<IncludeSymbols>false</IncludeSymbols>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<DevelopmentDependency>true</DevelopmentDependency>
@@ -33,9 +33,9 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="12.1.0" PrivateAssets="all" GeneratePathProperty="true" />
-		<PackageReference Include="MintPlayer.ValueComparerGenerator" Version="12.1.0" PrivateAssets="all" />
-		<PackageReference Include="MintPlayer.ValueComparerGenerator.Attributes" Version="12.1.0" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="MintPlayer.SourceGenerators.Tools" Version="12.2.0" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="MintPlayer.ValueComparerGenerator" Version="12.2.0" PrivateAssets="all" />
+		<PackageReference Include="MintPlayer.ValueComparerGenerator.Attributes" Version="12.2.0" PrivateAssets="all" GeneratePathProperty="true" />
 	</ItemGroup>
 
 	<!--
