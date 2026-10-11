@@ -36,6 +36,14 @@ Program.cs(18,39): error CS0115: 'GetThing.HandleAsync(CancellationToken)': no s
 
 If you see these, update the SDK (or pin a newer one in `global.json`); nothing in your code is wrong.
 
+**MintPlayer.SourceGenerators 12.2.0 or newer.** The generator bundles `MintPlayer.SourceGenerators.Tools`,
+and the compiler loads only one copy of that assembly per compilation: the highest version present. Since
+11.4.1 the bundled copy is 12.2.0, so a project that also references `MintPlayer.SourceGenerators*` must
+use 12.2.0 or newer for all of them. Mixing versions fails with `MPSG001 ... MissingMethodException`
+(11.4.0 and earlier break the same way next to `MintPlayer.SourceGenerators` 12.2.0). When you upgrade
+`MintPlayer.SourceGenerators` to 12.2.0, check hand-written `: base(...)` calls to `[Inject]` constructors:
+12.2.0 orders their parameters by declaration, with optional parameters last.
+
 ## Upgrading to 11.4 (breaking)
 
 - **`Configure` takes the service provider.** `Configure(RouteGroupBuilder)` and
