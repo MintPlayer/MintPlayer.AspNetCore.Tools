@@ -8,7 +8,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.AspNetCore.SitemapXml</PackageId>
-		<Version>11.0.1-rc.0</Version>
+		<Version>0.0.0-PLACEHOLDER</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>Helper library to host a sitemap from your ASP.NET Core application</Description>

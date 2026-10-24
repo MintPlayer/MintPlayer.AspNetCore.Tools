@@ -8,7 +8,7 @@
 
 		<IsPackable>true</IsPackable>
 		<PackageId>MintPlayer.Timestamps</PackageId>
-		<Version>11.0.1-rc.0</Version>
+		<Version>0.0.0-PLACEHOLDER</Version>
 		<IncludeSymbols>true</IncludeSymbols>
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<Description>Interfaces for timestamps on DTO's</Description>
