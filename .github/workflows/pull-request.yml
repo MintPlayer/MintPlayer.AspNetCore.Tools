@@ -16,12 +16,6 @@ jobs:
 
     permissions:
       contents: read
-      # packages: read is required, not optional. setup-dotnet below configures the GPR feed as a
-      # NuGet source and `dotnet restore` authenticates to it with github.token. Before this
-      # workflow had an explicit permissions block it inherited the default token scopes, which
-      # include this one; tightening to `contents: read` alone made restore log
-      # "Your request could not be authenticated by the GitHub Packages service" twice per run.
-      packages: read
 
     steps:
     - name: Checkout
@@ -40,15 +34,9 @@ jobs:
         dotnet-version: |
           10.0.x
           11.0.100-rc.1.26425.128
-        # Authenticates packages to push to GPR
-        source-url: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
-      env:
-        NUGET_AUTH_TOKEN: '%NUGET_AUTH_TOKEN%'
 
     - name: Install dependencies
       run: dotnet restore
-      env:
-        NUGET_AUTH_TOKEN: ${{ github.token }}
 
     - name: Build
       run: dotnet build --configuration Release --no-restore
