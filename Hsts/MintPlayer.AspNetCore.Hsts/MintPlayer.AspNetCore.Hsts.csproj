@@ -6,7 +6,7 @@
 		<Nullable>enable</Nullable>
 
 		<IsPackable>true</IsPackable>
-		<Version>11.0.1-rc.0</Version>
+		<Version>0.0.0-PLACEHOLDER</Version>
 		<Authors>Pieterjan De Clippel</Authors>
 		<Company>MintPlayer</Company>
 		<Product>MintPlayer.AspNetCore.Hsts</Product>
