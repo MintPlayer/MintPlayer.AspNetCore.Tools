@@ -20,6 +20,10 @@
 	  MSB3245 + CS1061 cascade rather than a clear message.
 	- A server whose TargetFrameworks does not include the client's sets it per item, as on a
 	  ProjectReference: <EndpointsServerReference Include="..." SetTargetFramework="TargetFramework=net10.0" />.
+	- A single-targeted server (<TargetFramework>) is built with TargetFramework removed, as the SDK does
+	  for a ProjectReference. Passing it would create a second instance of the server project next to the
+	  one the solution builds, and the two write the same obj\ concurrently (MSB3101, CS2012, a locked
+	  rpswa.dswa.cache.json).
 	- Design-time builds (the IDE) and builds with BuildProjectReferences=false (dotnet build
 	  no-dependencies) only locate the server assembly; they never build it.
 	-->
@@ -27,9 +31,25 @@
 	        BeforeTargets="ResolveAssemblyReferences"
 	        Condition="'@(EndpointsServerReference)' != ''">
 
+		<!-- Which servers without an explicit SetTargetFramework are single-targeted. -->
+		<MSBuild Projects="@(EndpointsServerReference)"
+		         Condition="'%(EndpointsServerReference.SetTargetFramework)' == ''"
+		         Targets="GetTargetFrameworks"
+		         RemoveProperties="TargetFramework;RuntimeIdentifier;SelfContained">
+			<Output TaskParameter="TargetOutputs" ItemName="_EndpointsServerTargetFrameworks" />
+		</MSBuild>
+
 		<ItemGroup>
-			<_EndpointsServerProject Include="@(EndpointsServerReference)">
+			<_EndpointsSingleTfmServer Include="@(_EndpointsServerTargetFrameworks->'%(OriginalItemSpec)')"
+			                           Condition="'%(_EndpointsServerTargetFrameworks.HasSingleTargetFramework)' == 'true'" />
+
+			<_EndpointsServerProject Include="@(EndpointsServerReference)" Exclude="@(_EndpointsSingleTfmServer)">
 				<SetTargetFramework Condition="'%(EndpointsServerReference.SetTargetFramework)' == ''">TargetFramework=$(TargetFramework)</SetTargetFramework>
+				<_RemoveProperties>RuntimeIdentifier;SelfContained</_RemoveProperties>
+			</_EndpointsServerProject>
+			<_EndpointsServerProject Include="@(_EndpointsSingleTfmServer)">
+				<SetTargetFramework></SetTargetFramework>
+				<_RemoveProperties>TargetFramework;RuntimeIdentifier;SelfContained</_RemoveProperties>
 			</_EndpointsServerProject>
 		</ItemGroup>
 
@@ -37,12 +57,12 @@
 		         Projects="@(_EndpointsServerProject)"
 		         Targets="Build"
 		         Properties="%(_EndpointsServerProject.SetTargetFramework)"
-		         RemoveProperties="RuntimeIdentifier;SelfContained" />
+		         RemoveProperties="%(_EndpointsServerProject._RemoveProperties)" />
 
 		<MSBuild Projects="@(_EndpointsServerProject)"
 		         Targets="GetTargetPath"
 		         Properties="%(_EndpointsServerProject.SetTargetFramework)"
-		         RemoveProperties="RuntimeIdentifier;SelfContained">
+		         RemoveProperties="%(_EndpointsServerProject._RemoveProperties)">
 			<Output TaskParameter="TargetOutputs" ItemName="_EndpointsServerAssembly" />
 		</MSBuild>
 

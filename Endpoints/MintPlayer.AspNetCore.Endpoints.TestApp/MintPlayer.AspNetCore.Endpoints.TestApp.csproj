@@ -1,15 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
-		<TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+		<TargetFramework>net10.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<IsPackable>false</IsPackable>
 	</PropertyGroup>
 
-	<!-- [ValidatableType] is [Experimental("ASP0029")] on net10.0, reported as an error; it graduated
-	     in net11.0, so the suppression is scoped to net10.0 only (PRD R5.6). -->
-	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+	<!-- [ValidatableType] is [Experimental("ASP0029")] on net10.0, reported as an error (PRD R5.6). -->
+	<PropertyGroup>
 		<NoWarn>$(NoWarn);ASP0029</NoWarn>
 	</PropertyGroup>
 
@@ -27,11 +26,8 @@
 		     also what makes the generator emit EndpointOpenApi.g.cs for this app; the runtime library
 		     deliberately takes no such reference (PRD R4.7).
 
-		     Conditioned per TFM for the same reason as Microsoft.AspNetCore.Mvc.Testing in the test
-		     project: its version tracks the framework, and an unconditioned 10.0.x reference would run
-		     the net11.0 build against the .NET 10 OpenAPI stack (Microsoft.OpenApi 2.x instead of 3.x). -->
-		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" Condition="'$(TargetFramework)' == 'net10.0'" />
-		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="11.0.0-rc.1.26425.128" Condition="'$(TargetFramework)' == 'net11.0'" />
+		     Its version tracks the framework: keep it on 10.0.x on this line. -->
+		<PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.15" />
 	</ItemGroup>
 
 	<!--
@@ -40,13 +36,7 @@
 	which is committed. CI fails when a build leaves that file changed (an endpoint was changed without
 	committing the new contract) and runs `oasdiff breaking` against the base branch's copy.
 
-	The package generates for the FIRST target framework only (its buildMultiTargeting targets pick
-	$(TargetFrameworks)[0], here net10.0), so there is one snapshot, not one per TFM. Measured: with
-	OpenApiVersion pinned in Program.cs, the net11.0 document differs from the net10.0 one only in the
-	order of the keys under "responses" (net11.0 sorts them by status code), which neither a JSON
-	reader nor oasdiff sees. Before the pin the "openapi" field differed too: 3.1.1 against 3.2.0.
-
-	The package version tracks Microsoft.AspNetCore.OpenApi above, per TFM, for the same reason.
+	The package version tracks Microsoft.AspNetCore.OpenApi above, for the same reason.
 	-->
 	<PropertyGroup>
 		<OpenApiGenerateDocumentsOnBuild>true</OpenApiGenerateDocumentsOnBuild>
@@ -55,11 +45,7 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.12" Condition="'$(TargetFramework)' == 'net10.0'">
-			<PrivateAssets>all</PrivateAssets>
-			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-		</PackageReference>
-		<PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="11.0.0-rc.1.26425.128" Condition="'$(TargetFramework)' == 'net11.0'">
+		<PackageReference Include="Microsoft.Extensions.ApiDescription.Server" Version="10.0.15">
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
