@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
 	<PropertyGroup>
-		<TargetFrameworks>net10.0;net11.0</TargetFrameworks>
+		<TargetFramework>net11.0</TargetFramework>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 		<OutputType>Library</OutputType>
@@ -27,17 +27,6 @@
 		<Company>MintPlayer</Company>
 		<Product>MintPlayer.AspNetCore.Endpoints</Product>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
-	</PropertyGroup>
-
-	<!--
-	On net10.0 Microsoft.Extensions.Validation is [Experimental("ASP0029")], and the compiler reports
-	that as an ERROR on the whole API RequestValidation.cs calls (ValidationOptions.Resolvers,
-	TryGetValidatableTypeInfo, IValidatableInfo, ValidateContext) — there is no Web-SDK exemption
-	(PRD R5.6). On net11.0 the API has graduated, so the suppression is scoped to net10.0 only: an
-	unconditioned NoWarn would also hide a genuinely new experimental API on the newer framework.
-	-->
-	<PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
-		<NoWarn>$(NoWarn);ASP0029</NoWarn>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -76,25 +65,20 @@
 	<PropertyGroup>
 		<!--
 		The analyzer is not TFM-specific, but the only mechanism that reliably packs it is a
-		TFM-specific one, and that runs once per inner build. Emitting from every inner build adds the
-		same file to the same package path N times: NuGet de-duplicates and the package is still
-		correct, but it warns (NU5118) once per extra TFM, which breaks the warning-clean build.
-
-		So: emit from the first inner build only. The first TFM is derived from TargetFrameworks
-		rather than written out, because a hardcoded 'net10.0' here becomes a silent defect the day
-		that TFM is dropped or reordered — the condition would simply never match and the package
-		would ship with no analyzer and no error, which is the same class of failure the comment
-		below describes.
+		TFM-specific one. This project has a single TargetFramework, so it runs exactly once. If it is
+		ever multi-targeted again, restrict PackEndpointsGenerator to one inner build: emitting from
+		every inner build packs the same file N times and warns NU5118 once per extra TFM. Derive that
+		TFM from TargetFrameworks rather than hardcoding it, or the condition silently stops matching
+		and the package ships with no analyzer and no error.
 
 		Do not be tempted to hoist this onto BeforeTargets="GenerateNuspec" with <None Pack="true">
 		so it runs once for the outer build. That was measured: it packs with zero warnings and
 		produces a nupkg containing no analyzer at all.
 		-->
-		<_AnalyzerPackTfm>$(TargetFrameworks.Split(';')[0])</_AnalyzerPackTfm>
 		<TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackEndpointsGenerator</TargetsForTfmSpecificContentInPackage>
 	</PropertyGroup>
 
-	<Target Name="PackEndpointsGenerator" Condition="'$(TargetFramework)' == '$(_AnalyzerPackTfm)'">
+	<Target Name="PackEndpointsGenerator">
 		<MSBuild Projects="..\MintPlayer.AspNetCore.Endpoints.Generator\MintPlayer.AspNetCore.Endpoints.Generator.csproj"
 		         Targets="GetTargetPath"
 		         Properties="Configuration=$(Configuration)"

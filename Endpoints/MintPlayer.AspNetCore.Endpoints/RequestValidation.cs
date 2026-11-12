@@ -29,9 +29,9 @@ namespace MintPlayer.AspNetCore.Endpoints;
 /// options registration, or no service provider, whatsoever.
 /// </para>
 /// <para>
-/// <b>Two TFMs, two APIs.</b> Between .NET 10 and .NET 11 the type-info interface was renamed, the
-/// context's <c>ValidationContext</c> was replaced by <c>ServiceProvider</c>, and the error map
-/// changed shape (PRD R5.7). Both seams are contained here, and the result is normalised to one
+/// <b>The .NET 11 API.</b> .NET 10 named the type-info interface differently, took a
+/// <c>ValidationContext</c> instead of a <c>ServiceProvider</c>, and shaped the error map differently
+/// (PRD R5.7); that version lives on the release/dotnet-10.x line. The result is normalised to one
 /// shape so <see cref="EndpointBase{TRequest}.OnValidationFailedAsync"/> has a single signature.
 /// </para>
 /// </remarks>
@@ -53,7 +53,6 @@ internal static class RequestValidation
         if (options is null)
             return null;
 
-#if NET11_0_OR_GREATER
         if (!options.TryGetValidatableTypeInfo(typeof(TRequest), out IValidatableTypeInfo? typeInfo) || typeInfo is null)
             return null;
 
@@ -72,24 +71,5 @@ internal static class RequestValidation
             entry => entry.Key,
             entry => entry.Value.Select(error => error.ErrorMessage).ToArray(),
             StringComparer.Ordinal);
-#else
-        if (!options.TryGetValidatableTypeInfo(typeof(TRequest), out IValidatableInfo? typeInfo) || typeInfo is null)
-            return null;
-
-        var validateContext = new ValidateContext
-        {
-            ValidationOptions = options,
-            // The display-name overload: the one without it discovers the name by reflection and is
-            // [RequiresUnreferencedCode] (IL2026 under IsAotCompatible, PRD R6.4). With no member
-            // name set, that reflection falls back to the object's type name, so passing it is the
-            // same value, and the validation resolver overwrites it per member as it walks the type.
-            ValidationContext = new System.ComponentModel.DataAnnotations.ValidationContext(
-                request, request.GetType().Name, context.RequestServices, items: null),
-        };
-
-        await typeInfo.ValidateAsync(request, validateContext, context.RequestAborted);
-
-        return validateContext.ValidationErrors is { Count: > 0 } errors ? errors : null;
-#endif
     }
 }
