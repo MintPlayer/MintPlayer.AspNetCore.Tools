@@ -17,8 +17,9 @@ dotnet add package MintPlayer.AspNetCore.Endpoints
 
 ### Requirements
 
-The generator needs a compiler with **Roslyn 5.9 or newer**: the **.NET SDK 10.0.400+ or 11.x**, or
-**Visual Studio 2026**. Older compilers are not supported. The generator ships in the package's
+The package targets `net11.0`, so it needs the **.NET 11 SDK** (11.0.100 or newer) or **Visual Studio
+2026** with .NET 11. Its generator needs a compiler with **Roslyn 5.9 or newer**, which both include. For
+.NET 10, use the 10.x packages (the .NET SDK 10.0.400 or newer). The generator ships in the package's
 `analyzers/dotnet/roslyn5.9/cs` folder, so an older compiler (the .NET SDK 10.0.1xx ships Roslyn 5.0)
 skips it without a word, and the build fails on the code it should have generated. The first error is
 the missing mapping method:

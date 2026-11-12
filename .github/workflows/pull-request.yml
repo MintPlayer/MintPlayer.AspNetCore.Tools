@@ -98,7 +98,7 @@ jobs:
 
     - name: Assert tests actually ran
       # `dotnet test` exits 0 and prints NOTHING when it finds no test project — verified on
-      # SDK 10.0.400. So a test project accidentally left out of the .sln, or a broken
+      # SDK 10.0.400 and 11.0.100. So a test project accidentally left out of the .sln, or a broken
       # collector, is indistinguishable from a passing run. This step is the difference
       # between "green" and "green because it ran the tests".
       run: |

@@ -1,5 +1,10 @@
 # Implementation plan: .NET 11 support
 
+> **Superseded 2026-11-12 (multi-targeting).** See the note at the top of
+> [PRD-Net11Migration.md](PRD-Net11Migration.md). Master targets `net11.0` only, on the .NET 11 GA SDK
+> (11.0.100) and packages (11.0.0), and .NET 10 is served by the `release/dotnet-10.x` line. This plan
+> is kept as the record of the multi-targeted release.
+
 Companion to [PRD-Net11Migration.md](PRD-Net11Migration.md). Requirement IDs (`R1.1`, …) and problem
 IDs (`P1`, …) refer to that document.
 
