@@ -19,11 +19,16 @@
 # The merge queue (added by the onboarding pull request): dependency pull requests within your thresholds merge through
 # it, and your own pull requests can use it too (label `merge-queue`, or comment `/queue`).
 mergeQueue:
+  branches: [master, supported-lines]
   enabled: true
 
 # MintPlayer package versioning (added by the onboarding pull request). The publish workflow tags every release
 # `<package id>/v<version>`; the commented lines are the defaults.
 versioning:
+  lines:                             # release lines, release/{ecosystem}-{major}.x: packages release only from them
+    current: promote                 # a maintainer's `/release` moves each current line to the newest commit publish-release.yml passed
+    trigger: manual
+    workflow: publish-release.yml
   mode: server                       # server | local: local runs the engine on the runner, without the app
 #   releaseBranches: ["release/*.x"]
 #   ignore: ["**/*.md"]              # changed files that never release a package
