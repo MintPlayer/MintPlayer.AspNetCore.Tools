@@ -59,7 +59,7 @@ jobs:
 
     - name: Assert tests actually ran
       # `dotnet test` exits 0 and prints NOTHING when it finds no test project — verified on
-      # SDK 10.0.400. Without this step a test project accidentally left out of the .sln is
+      # SDK 10.0.400 and 11.0.100. Without this step a test project accidentally left out of the .sln is
       # indistinguishable from a passing run, and this workflow would publish to NuGet on
       # the strength of a green check that tested nothing.
       run: |
