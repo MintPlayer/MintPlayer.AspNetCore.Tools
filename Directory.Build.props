@@ -1,5 +1,9 @@
 <Project>
   <ItemGroup>
-    <PackageReference Include="MintPlayer.Versioning.MSBuild" Version="1.0.1" PrivateAssets="all" />
+    <PackageReference Include="MintPlayer.Versioning.MSBuild" Version="1.3.0" PrivateAssets="all" />
   </ItemGroup>
+
+  <PropertyGroup>
+    <MSBuildWarningsAsErrors>$(MSBuildWarningsAsErrors);MPV006</MSBuildWarningsAsErrors>
+  </PropertyGroup>
 </Project>
