@@ -29,10 +29,10 @@ namespace MintPlayer.AspNetCore.Endpoints;
 /// options registration, or no service provider, whatsoever.
 /// </para>
 /// <para>
-/// <b>Two TFMs, two APIs.</b> Between .NET 10 and .NET 11 the type-info interface was renamed, the
-/// context's <c>ValidationContext</c> was replaced by <c>ServiceProvider</c>, and the error map
-/// changed shape (PRD R5.7). Both seams are contained here, and the result is normalised to one
-/// shape so <see cref="EndpointBase{TRequest}.OnValidationFailedAsync"/> has a single signature.
+/// <b>The .NET 10 API.</b> .NET 11 renamed the type-info interface, replaced the context's
+/// <c>ValidationContext</c> by <c>ServiceProvider</c>, and changed the error map's shape (PRD R5.7);
+/// that version lives on master. The result has the shape
+/// <see cref="EndpointBase{TRequest}.OnValidationFailedAsync"/> takes on both lines.
 /// </para>
 /// </remarks>
 internal static class RequestValidation
@@ -53,26 +53,6 @@ internal static class RequestValidation
         if (options is null)
             return null;
 
-#if NET11_0_OR_GREATER
-        if (!options.TryGetValidatableTypeInfo(typeof(TRequest), out IValidatableTypeInfo? typeInfo) || typeInfo is null)
-            return null;
-
-        var validateContext = new ValidateContext
-        {
-            ValidationOptions = options,
-            ServiceProvider = context.RequestServices,
-        };
-
-        await typeInfo.ValidateAsync(request, validateContext, context.RequestAborted);
-
-        if (validateContext.ValidationErrors is not { Count: > 0 } errors)
-            return null;
-
-        return errors.ToDictionary(
-            entry => entry.Key,
-            entry => entry.Value.Select(error => error.ErrorMessage).ToArray(),
-            StringComparer.Ordinal);
-#else
         if (!options.TryGetValidatableTypeInfo(typeof(TRequest), out IValidatableInfo? typeInfo) || typeInfo is null)
             return null;
 
@@ -90,6 +70,5 @@ internal static class RequestValidation
         await typeInfo.ValidateAsync(request, validateContext, context.RequestAborted);
 
         return validateContext.ValidationErrors is { Count: > 0 } errors ? errors : null;
-#endif
     }
 }

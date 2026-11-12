@@ -3,7 +3,7 @@
 One class per endpoint for ASP.NET Core Minimal APIs. A source generator discovers the classes and
 writes the mapping, typed links, OpenAPI metadata and a cross-assembly contract a typed client can be
 generated from. Endpoints get constructor injection, content negotiation and explicit route/query
-binding. Targets .NET 10 and .NET 11.
+binding. Targets .NET 10; .NET 11 is served by the 11.x packages.
 
 | Package | What it is |
 |---|---|
