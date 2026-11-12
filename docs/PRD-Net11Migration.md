@@ -1,5 +1,11 @@
 # PRD: .NET 11 support for MintPlayer.AspNetCore.Tools
 
+> **Superseded 2026-11-12 (multi-targeting).** The owner chose release lines over multi-targeting:
+> master targets `net11.0` only and .NET 10 is supported from the `release/dotnet-10.x` line, which
+> targets `net10.0` only. The P4 concern (dropping `net10.0` consumers) is met by that line's 10.x
+> packages instead of by a second TFM. The rest of this document is kept as the record of the
+> multi-targeted release.
+
 ## Overview
 
 Add `net11.0` to every shippable package in this repository, keep `net10.0`, and make CI build and

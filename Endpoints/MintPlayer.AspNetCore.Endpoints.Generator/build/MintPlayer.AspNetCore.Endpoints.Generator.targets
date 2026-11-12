@@ -15,11 +15,11 @@
 	  call is not a ProjectReference, so nothing flows back.
 	- It builds the server first, in the client's Configuration and TargetFramework, then references the
 	  server's output assembly with Private=false: one extra compile-time reference, nothing copied, no
-	  ASP.NET Core in the client. A hand-written <Reference HintPath="..\bin\Release\net10.0\..."> has to
+	  ASP.NET Core in the client. A hand-written <Reference HintPath="..\bin\Release\net11.0\..."> has to
 	  get the configuration, the framework and the build order right by hand, and a mistake is an
 	  MSB3245 + CS1061 cascade rather than a clear message.
 	- A server whose TargetFrameworks does not include the client's sets it per item, as on a
-	  ProjectReference: <EndpointsServerReference Include="..." SetTargetFramework="TargetFramework=net10.0" />.
+	  ProjectReference: <EndpointsServerReference Include="..." SetTargetFramework="TargetFramework=net11.0" />.
 	- Design-time builds (the IDE) and builds with BuildProjectReferences=false (dotnet build
 	  no-dependencies) only locate the server assembly; they never build it.
 	-->

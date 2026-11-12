@@ -3,7 +3,7 @@
 One class per endpoint for ASP.NET Core Minimal APIs. A source generator discovers the classes and
 writes the mapping, typed links, OpenAPI metadata and a cross-assembly contract a typed client can be
 generated from. Endpoints get constructor injection, content negotiation and explicit route/query
-binding. Targets .NET 10 and .NET 11.
+binding. Targets .NET 11; .NET 10 is served by the 10.x packages.
 
 | Package | What it is |
 |---|---|
@@ -848,12 +848,7 @@ Validation runs on the **body** only, after binding and before the handler, with
 - The request type carries `[ValidatableType]` in **hand-written** code. The library cannot mark it for
   you: one source generator never sees another's output. A request type with DataAnnotations but no
   `[ValidatableType]` is MPEP015.
-- The assembly declaring that type calls `AddValidation()` — **exactly once**. On .NET 10 a second
-  call site in the same assembly fails the validation generator with `CS8785` (a warning) and
-  registers no resolver, so every type in that assembly silently stops validating. Keep the one call in
-  a wrapper and call the wrapper from `Program.cs` — never both.
-- On .NET 10, the project has `<NoWarn>$(NoWarn);ASP0029</NoWarn>`: the validation API is
-  `[Experimental]` there and reports as an error. .NET 11 needs nothing.
+- The assembly declaring that type calls `AddValidation()`.
 
 ```csharp
 using System.ComponentModel.DataAnnotations;
@@ -1030,7 +1025,7 @@ fallback is a raw reference plus the property made visible to the compiler:
 <ItemGroup>
   <!-- Build the server first, in the same Configuration and target framework. -->
   <Reference Include="MyShop.Api">
-    <HintPath>..\MyShop.Api\bin\$(Configuration)\net10.0\MyShop.Api.dll</HintPath>
+    <HintPath>..\MyShop.Api\bin\$(Configuration)\net11.0\MyShop.Api.dll</HintPath>
     <Private>false</Private>
   </Reference>
   <CompilerVisibleProperty Include="GenerateEndpointsClient" />

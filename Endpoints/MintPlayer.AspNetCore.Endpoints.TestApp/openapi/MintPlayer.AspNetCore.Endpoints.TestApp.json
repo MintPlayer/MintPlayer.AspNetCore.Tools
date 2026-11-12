@@ -1,5 +1,5 @@
 {
-  "openapi": "3.1.1",
+  "openapi": "3.1.2",
   "info": {
     "title": "MintPlayer.AspNetCore.Endpoints.TestApp | v1",
     "version": "1.0.0"
@@ -157,6 +157,9 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "OK"
+          },
           "400": {
             "description": "Bad Request",
             "content": {
@@ -166,9 +169,6 @@
                 }
               }
             }
-          },
-          "200": {
-            "description": "OK"
           }
         }
       }
@@ -195,6 +195,9 @@
           }
         ],
         "responses": {
+          "204": {
+            "description": "No Content"
+          },
           "400": {
             "description": "Bad Request",
             "content": {
@@ -204,9 +207,6 @@
                 }
               }
             }
-          },
-          "204": {
-            "description": "No Content"
           }
         }
       },
@@ -284,6 +284,9 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "description": "OK"
+          },
           "400": {
             "description": "Bad Request",
             "content": {
@@ -303,9 +306,6 @@
                 }
               }
             }
-          },
-          "200": {
-            "description": "OK"
           }
         }
       }
@@ -634,6 +634,9 @@
   },
   "tags": [
     {
+      "name": "Library"
+    },
+    {
       "name": "MintPlayer.AspNetCore.Endpoints.TestApp"
     },
     {
@@ -641,9 +644,6 @@
     },
     {
       "name": "Users"
-    },
-    {
-      "name": "Library"
     }
   ]
 }
