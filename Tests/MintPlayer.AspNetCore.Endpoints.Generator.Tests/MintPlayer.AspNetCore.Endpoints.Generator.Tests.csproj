@@ -45,7 +45,7 @@
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp.CodeFix.Testing" Version="1.1.4" />
 		<!-- The code-fix project references Workspaces with ExcludeAssets="runtime" so that nothing of it
 		     ships; the test host has to supply the real assembly, at the generator's Roslyn (5.9.0). -->
-		<PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.12.0" />
 
 		<!-- Only so the OpenAPI emission tests can compile EndpointOpenApi.g.cs: the harness keeps
 		     these assemblies OUT of the fixture compilation unless a test asks for them, because
